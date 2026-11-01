@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# 知识库/向量库中间产物（可再生成）
+store/
+*.npz
+*.npy
+*.sqlite
+*.db
+
+# 模型缓存（首次运行自动下载，数据不出本机）
+.models/
+
+# 评测/运行临时产物
+results/
+*.xcresult
+screenshots/
+videos/
+
+# 跨 Agent 接力工作态（纯本地）
+.agent-handoff/
+
+# 编辑器
+.obsidian/
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
