@@ -1,0 +1,59 @@
+# offline-demo：无网/无 Xcode 完整演示（docs/07 §9）
+# 页面/输出须标注"证据来自录制夹具"。路径相对 subsystems/ 解析。
+profile: offline-demo
+
+project:
+  name: AlarmKitSpike-demo
+  repo_path: ../app-calendar-alarm/AlarmKitSpike  # 可被 TESTPILOT_REPO_PATH 覆盖；离线模式不实际访问
+  default_branch: alarmkit-spike
+  tech_stack: ios
+  ios:
+    workspace: AlarmKitSpike.xcworkspace
+    scheme: AlarmKitSpike
+    simulator_udid: recorded
+
+paths:
+  data_dir: store/offline-demo
+  fixtures_dir: tests/fixtures
+
+external_write_enabled: false  # 默认 dry-run：R2/R3 只进 outbox 不写外部（docs/08 FR-WR-003）
+
+limits:
+  max_agent_steps: 12
+  max_tokens_per_run: 200000
+  daily_rerun_quota: 20
+  request_timeout_s: 60
+
+adapters:
+  scm:        {type: stub}          # S1: git
+  docs:
+    type: fs-docs
+    settings:
+      roots: [tests/fixtures/docs]
+  cases:      {type: stub}          # S2: markdown
+  tickets:
+    type: json
+    settings: {}
+  ci_events:
+    type: json-replay
+    settings: {}
+  runner:
+    type: recorded
+    settings: {}
+  environment: {type: stub}        # S3: ios-simulator
+  artifact:
+    type: localfs
+    settings: {}
+  logs:       {type: stub}          # S3: oslog
+  search:
+    type: sqlite-fts
+    settings: {}
+  model:
+    type: recorded
+    settings: {}
+  queue:
+    type: sqlite
+    settings: {}
+  tracer:
+    type: noop
+    settings: {}

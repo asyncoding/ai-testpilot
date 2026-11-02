@@ -1,0 +1,24 @@
+{
+  "default": {
+    "text": "录制响应：请替换为真实模型适配器输出。",
+    "tokens_in": 12,
+    "tokens_out": 8,
+    "degraded": false
+  },
+  "qa_kill_backup": {
+    "text": "裸按侧边键只触发第一层停钟；铃声由 kill-backup 30s 接力兜底，因此仍会继续（证据见引用）。",
+    "tokens_in": 850,
+    "tokens_out": 60,
+    "degraded": false,
+    "structured": {
+      "answer": "四层兜底：系统停钟/接管页/kill-backup/状态对账",
+      "citations": ["urn:testpilot:fs-docs:document:tests/fixtures/docs/kill-backup.md"]
+    }
+  },
+  "qa_unanswerable": {
+    "text": "未知：当前知识库与实时代码中没有足够证据回答该问题。",
+    "tokens_in": 120,
+    "tokens_out": 24,
+    "degraded": true
+  }
+}

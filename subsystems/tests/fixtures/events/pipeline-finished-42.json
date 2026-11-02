@@ -1,0 +1,17 @@
+{
+  "event_id": "evt-pipeline-42",
+  "event_type": "PipelineFinished",
+  "source_system": "json-ci",
+  "occurred_at": "2026-10-31T02:01:10Z",
+  "project": "AlarmKitSpike-demo",
+  "subject_ref": "urn:testpilot:json-ci:pipeline:42",
+  "version": "1",
+  "actor": "ci",
+  "payload_uri": "file://fixtures/runs/xcode_hostless.json",
+  "payload": {
+    "build_id": "ci-42",
+    "commit_sha": "a1b2c3d4e5f6",
+    "result": "failed"
+  },
+  "idempotency_key": "pipeline-42"
+}

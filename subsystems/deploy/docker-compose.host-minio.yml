@@ -1,0 +1,25 @@
+# 受限网络覆盖：minio/mc 镜像拉不到时，MinIO 用 brew 直接跑在宿主机（见 README「无 MinIO 镜像」）。
+#   docker compose -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.host-minio.yml --profile observability up -d
+# 容器内 minio/minio-init 用本机已有的 redis 镜像占位（langfuse 只等 minio-init 成功退出），
+# 真正的 S3 服务是宿主机 MinIO（http://host.docker.internal:9000，桶 langfuse 需预先建好）。
+services:
+  redis:
+    # 宿主机常已跑 redis（占用 6379）；容器间走 compose 网络即可，无需对宿主机发布
+    ports: !reset []
+  minio:
+    image: redis:7-alpine
+    entrypoint: ["sh", "-c", "sleep infinity"]
+    healthcheck:
+      test: ["CMD", "true"]
+  minio-init:
+    image: redis:7-alpine
+    entrypoint: ["true"]
+  langfuse: &langfuse_host_s3
+    environment:
+      S3_ENDPOINT: http://host.docker.internal:9000
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://host.docker.internal:9000
+  langfuse-worker:
+    # 复用同样的 S3 覆盖（worker 读事件桶必须指向宿主 MinIO）
+    environment:
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://host.docker.internal:9000

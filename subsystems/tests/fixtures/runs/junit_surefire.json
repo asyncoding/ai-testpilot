@@ -1,0 +1,42 @@
+{
+  "run_id": "recorded-run-junit",
+  "idempotency_key": "recorded-junit-v1",
+  "project": "java-reference-project",
+  "commit_sha": "9f8e7d6c",
+  "build_id": "jenkins-1007",
+  "status": "passed",
+  "environment": {
+    "provider": "junit-local",
+    "env_id": "openjdk-21",
+    "capabilities": ["jvm", "junit5"],
+    "version": "JUnit 5.11 / Surefire 3.5"
+  },
+  "started_at": "2026-10-31T03:00:00Z",
+  "finished_at": "2026-10-31T03:00:20Z",
+  "duration_ms": 20000,
+  "case_results": [
+    {
+      "external_case_id": "com.example.CalcTest#add",
+      "node_id": "TEST-com.example.CalcTest.xml",
+      "status": "passed",
+      "duration_ms": 31
+    },
+    {
+      "external_case_id": "com.example.CalcTest#divideByZero",
+      "node_id": "TEST-com.example.CalcTest.xml",
+      "status": "skipped",
+      "duration_ms": 2
+    }
+  ],
+  "artifacts": [
+    {
+      "type": "junit_xml",
+      "uri": "file://fixtures/runs/TEST-com.example.CalcTest.xml",
+      "content_hash": "junit0001",
+      "retention_days": 14
+    }
+  ],
+  "raw_report_ref": "file://fixtures/runs/TEST-com.example.CalcTest.xml",
+  "runner_capability_version": "surefire-3.5-recorded",
+  "uncovered_layers": []
+}

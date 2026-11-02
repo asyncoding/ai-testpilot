@@ -1,0 +1,17 @@
+{
+  "external_id": "TKT-1001",
+  "title": "裸按侧边键停止响铃后，铃声仍继续播放",
+  "status": "closed",
+  "severity": "P1",
+  "symptom": "闹钟响铃时按侧边键，预期静音，实际铃声继续。历史事故：kill-backup 兜底链路触发。",
+  "repro_steps": [
+    "设定强提醒闹钟并等待响铃",
+    "响铃中短按侧边键",
+    "观察铃声与接力页状态"
+  ],
+  "root_cause": "侧边键停钟存在四层兜底，裸按仅触发第一层；后续由 kill-backup 30s 机制接力",
+  "fix_commit": "a1b2c3d4",
+  "related_case_ids": ["TC-A2", "TC-B7"],
+  "uri": "file://fixtures/tickets/TKT-1001.json",
+  "version": 7
+}

@@ -1,0 +1,37 @@
+[project]
+name = "testpilot-workspace"
+version = "0.1.0"
+description = "研发测试质量智能体平台（TestPilot）workspace 根"
+requires-python = ">=3.12"
+dependencies = [
+    "testpilot-core",
+    "testpilot-adapters",
+    "testpilot-orchestrator",
+    "testpilot-workers",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+testpilot-core = { workspace = true }
+testpilot-adapters = { workspace = true }
+testpilot-orchestrator = { workspace = true }
+testpilot-workers = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+# 本仓无 class 风格用例；收紧模式避免 pytest 误收集 pydantic 模型类（如 TestExecutionRequest）
+python_classes = "TestSuite*"
+pythonpath = ["packages/core/src", "packages/adapters/src", "packages/orchestrator/src", "packages/workers/src"]
+
+[tool.uv]
+package = false

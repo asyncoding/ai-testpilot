@@ -1,0 +1,236 @@
+"""SQLite/FTS5 存储实现。"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime, timezone
+from importlib import resources
+from pathlib import Path
+from typing import Any
+
+from testpilot_core import SCHEMA_VERSION
+from testpilot_core.enums import OutboxStatus
+from testpilot_core.models import (
+    Approval,
+    EventEnvelope,
+    EvalRun,
+    Feedback,
+    KnowledgeChunk,
+    OutboxRecord,
+    SourceDocument,
+)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def bootstrap_store(data_dir: str | Path) -> "Store":
+    """在数据目录下初始化 store/testpilot.sqlite，幂等。"""
+    data_dir = Path(data_dir)
+    db_path = data_dir / "store" / "testpilot.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    schema_sql = resources.files("testpilot_adapters.store").joinpath("schema.sql").read_text(encoding="utf-8")
+    conn.executescript(schema_sql)
+    conn.execute(
+        "INSERT INTO meta(key,value) VALUES('schema_version',?) ON CONFLICT(key) DO NOTHING",
+        (str(SCHEMA_VERSION),),
+    )
+    conn.commit()
+    return Store(conn)
+
+
+class Store:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def close(self) -> None:
+        self.conn.close()
+
+    # ── 元信息 ─────────────────────────────────────────────────────────
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    # ── 文档/切块 + FTS5 ────────────────────────────────────────────────
+    def upsert_document(self, doc: SourceDocument) -> None:
+        self.conn.execute(
+            """INSERT INTO source_documents
+               (urn, source_system, uri, title, version, content_hash,
+                authority_level, acl_scope, branch, mtime, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(urn) DO UPDATE SET
+                 version=excluded.version, content_hash=excluded.content_hash,
+                 mtime=excluded.mtime, raw_json=excluded.raw_json""",
+            (
+                doc.urn, doc.source_system, doc.uri, doc.title, doc.version, doc.content_hash,
+                str(doc.authority_level), doc.acl_scope, doc.branch,
+                doc.mtime.isoformat() if doc.mtime else None,
+                doc.model_dump_json(by_alias=True),
+            ),
+        )
+        self.conn.commit()
+
+    def upsert_chunk(self, chunk: KnowledgeChunk) -> None:
+        self.conn.execute("DELETE FROM chunks_fts WHERE chunk_urn=?", (chunk.urn,))
+        self.conn.execute(
+            """INSERT INTO chunks
+               (urn, doc_urn, idx, kind, text, symbol_urn, quality_score,
+                branch, valid_from, valid_to, stale, content_hash, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(urn) DO UPDATE SET
+                 text=excluded.text, stale=excluded.stale, content_hash=excluded.content_hash""",
+            (
+                chunk.urn, chunk.doc_urn, chunk.index, chunk.kind, chunk.text, chunk.symbol_urn,
+                chunk.quality_score, chunk.branch, chunk.valid_from, chunk.valid_to,
+                str(chunk.stale), chunk.content_hash, chunk.model_dump_json(by_alias=True),
+            ),
+        )
+        self.conn.execute("INSERT INTO chunks_fts(text, chunk_urn) VALUES(?,?)", (chunk.text, chunk.urn))
+        self.conn.commit()
+
+    def search_fts(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
+        if not query.strip():
+            return []
+        rows = self.conn.execute(
+            """SELECT c.urn, c.doc_urn, c.kind, c.stale
+               FROM chunks_fts f JOIN chunks c ON c.urn = f.chunk_urn
+               WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?""",
+            (query, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── 事件（幂等去重 + 死信）─────────────────────────────────────────
+    def record_event_if_new(self, event: EventEnvelope) -> bool:
+        """返回 True=新事件；False=重复投递（docs/08 FR-CON-005 AC1）。"""
+        try:
+            self.conn.execute(
+                """INSERT INTO events
+                   (event_id, event_type, source_system, status, payload_json, occurred_at, received_at)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    event.event_id, event.event_type, event.source_system, "received",
+                    event.model_dump_json(), event.occurred_at.isoformat(), _now_iso(),
+                ),
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def add_dead_letter(self, source: str, payload: dict[str, Any], error: str) -> None:
+        self.conn.execute(
+            "INSERT INTO dead_letters(source, payload_json, error, created_at) VALUES(?,?,?,?)",
+            (source, json.dumps(payload, ensure_ascii=False), error, _now_iso()),
+        )
+        self.conn.commit()
+
+    # ── 审批 ───────────────────────────────────────────────────────────
+    def save_approval(self, approval: Approval) -> None:
+        self.conn.execute(
+            """INSERT INTO approvals
+               (approval_id, action_level, target_system, request_summary, request_diff,
+                decision, reviewer, reason, based_on, created_at, decided_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(approval_id) DO UPDATE SET
+                 decision=excluded.decision, reviewer=excluded.reviewer,
+                 reason=excluded.reason, decided_at=excluded.decided_at""",
+            (
+                approval.approval_id, str(approval.action_level), approval.target_system,
+                approval.request_summary, json.dumps(approval.request_diff, ensure_ascii=False),
+                str(approval.decision), approval.reviewer, approval.reason,
+                json.dumps(approval.based_on_versions, ensure_ascii=False),
+                approval.created_at.isoformat(),
+                approval.decided_at.isoformat() if approval.decided_at else None,
+            ),
+        )
+        self.conn.commit()
+
+    def get_approval(self, approval_id: str) -> Approval | None:
+        row = self.conn.execute(
+            "SELECT * FROM approvals WHERE approval_id=?", (approval_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return Approval(
+            approval_id=row["approval_id"],
+            action_level=row["action_level"],
+            target_system=row["target_system"],
+            request_summary=row["request_summary"],
+            request_diff=json.loads(row["request_diff"]),
+            decision=row["decision"],
+            reviewer=row["reviewer"],
+            reason=row["reason"],
+            based_on_versions=json.loads(row["based_on"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            decided_at=datetime.fromisoformat(row["decided_at"]) if row["decided_at"] else None,
+        )
+
+    # ── Outbox（先账后事）──────────────────────────────────────────────
+    def add_outbox(self, record: OutboxRecord) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO outbox
+               (idempotency_key, action_level, target_system, request_body, status,
+                external_ref, approval_id, attempts, rollback_note, error, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(idempotency_key) DO NOTHING""",
+            (
+                record.idempotency_key, str(record.action_level), record.target_system,
+                json.dumps(record.request_body, ensure_ascii=False), str(record.status),
+                record.external_ref, record.approval_id, record.attempts,
+                record.rollback_note, record.error,
+                record.created_at.isoformat(), _now_iso(),
+            ),
+        )
+        self.conn.commit()
+        return cur.lastrowid or 0
+
+    def list_pending_outbox(self) -> list[sqlite3.Row]:
+        return list(
+            self.conn.execute(
+                "SELECT * FROM outbox WHERE status IN (?,?) ORDER BY id",
+                (str(OutboxStatus.PENDING), str(OutboxStatus.FAILED)),
+            ).fetchall()
+        )
+
+    def mark_outbox(self, idempotency_key: str, status: OutboxStatus, *, external_ref: str | None = None,
+                    error: str = "") -> None:
+        self.conn.execute(
+            """UPDATE outbox SET status=?, external_ref=COALESCE(?, external_ref),
+               attempts=attempts+1, error=?, updated_at=? WHERE idempotency_key=?""",
+            (str(status), external_ref, error, _now_iso(), idempotency_key),
+        )
+        self.conn.commit()
+
+    # ── 反馈 / 评测 ────────────────────────────────────────────────────
+    def add_feedback(self, feedback: Feedback) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO feedback
+               (run_id, target_urn, kind, reason, detail, model_version, created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (
+                feedback.run_id, feedback.target_urn, str(feedback.kind),
+                str(feedback.reason) if feedback.reason else None, feedback.detail,
+                feedback.model_version, feedback.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def add_eval_run(self, run: EvalRun) -> None:
+        self.conn.execute(
+            """INSERT INTO eval_runs
+               (eval_run_id, data_version, model_version, prompt_version, params_version,
+                degraded_path, metrics, report_uri, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                run.eval_run_id, run.version.data_version, run.version.model_version,
+                run.version.prompt_version, run.version.params_version,
+                int(run.version.degraded_path), json.dumps(run.metrics), run.report_uri,
+                run.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()

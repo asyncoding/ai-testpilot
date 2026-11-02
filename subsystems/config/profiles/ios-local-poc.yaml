@@ -1,0 +1,39 @@
+# ios-local-poc：日常开发与主演示 profile（docs/07 §9）
+# S0 阶段 runner/model 仍用录制适配器；S1 起 model→ollama、S3 起 runner→xcode、env→ios-simulator。
+profile: ios-local-poc
+
+project:
+  name: AlarmKitSpike
+  # 真实被测仓在另一个仓库（docs/03）；路径走环境变量，禁止写死：
+  #   export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm/AlarmKitSpike
+  repo_path: ../../../app-calendar-alarm/AlarmKitSpike
+  default_branch: alarmkit-spike
+  tech_stack: ios
+  ios:
+    workspace: AlarmKitSpike.xcworkspace
+    scheme: AlarmKitSpike
+    simulator_udid: 5411787C-8AFF-4EBF-9000-EB5EFD1457D5
+
+paths:
+  data_dir: store/ios-local-poc
+  fixtures_dir: tests/fixtures
+
+external_write_enabled: false
+
+adapters:
+  scm:        {type: stub}
+  docs:
+    type: fs-docs
+    settings:
+      roots: [tests/fixtures/docs]
+  cases:      {type: stub}
+  tickets:    {type: json}
+  ci_events:  {type: json-replay}
+  runner:     {type: recorded}   # S3: xcode
+  environment: {type: stub}
+  artifact:   {type: localfs}
+  logs:       {type: stub}
+  search:     {type: sqlite-fts}
+  model:      {type: recorded}   # S1: ollama
+  queue:      {type: sqlite}     # S3: redis+arq
+  tracer:     {type: noop}       # compose 起来后可切 langfuse

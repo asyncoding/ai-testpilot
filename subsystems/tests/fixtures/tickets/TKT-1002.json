@@ -1,0 +1,17 @@
+{
+  "external_id": "TKT-1002",
+  "title": "回归用例仍断言 kill backup 90s，当前实现为 30s",
+  "status": "open",
+  "severity": "P2",
+  "symptom": "CI 中 AlarmMissionTests.testKillBackupInterval 失败：期望 90s，实际 30s。属用例期望过期，非代码缺陷。",
+  "repro_steps": [
+    "xcodebuild test -only-testing:AlarmKitSpikeTests/AlarmMissionTests/testKillBackupInterval",
+    "断言 XCTAssertEqual(backup, 90) 失败，实际 30"
+  ],
+  "root_cause": "常量从 90s 调整为 30s 后用例未随代码更新",
+  "fix_commit": null,
+  "related_case_ids": ["TC-KILL-01"],
+  "related_run_id": "recorded-run-hostless",
+  "uri": "file://fixtures/tickets/TKT-1002.json",
+  "version": 2
+}
