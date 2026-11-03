@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """S1.1 召回能力探针（临时工具，S1.2 混合检索落地后删除或降级为调试脚本）。
 
-用途：输入一句自然语言，看当前 FTS5 一路能召回什么，建立 S1.2 之前的基线证据。
+用途：输入一句自然语言，看当前索引能召回什么，建立 S1.2 之前的基线证据。
 
-背景：chunks_fts 用 unicode61 分词（中文=逐字成词）；store.search_fts 把查询
-原样喂给 MATCH，自然语言句子里的标点（. : ? 等）会触发 FTS 语法错、中文整句
-做隐式 AND 又近乎必 0 命中。本探针在适配器外做最小查询整形（标点剔除 +
-逐词 OR，排序仍交 BM25 rank），只服务于验证，不进产品链路。
+已实测确认的分词事实（sqlite 3.54，fts3tokenize 取证，勿再想当然）：
+- 生产表 chunks_fts 用 unicode61：**连续汉字段整段是一个 token**，单字只能
+  命中标点/Markdown 语法孤立出来的单字，二元短语只能跨 token 边界巧合命中。
+  所以查询侧无论怎么整形都救不了自然语言（--unicode61/--raw 是对照组）。
+- 默认走 **trigram 模式**：在临时表上用 tokenize='trigram' 对全量切块建索引
+  （每次启动重建，1421 块约秒级），查询拆三元串 OR、BM25 排序。这是零三方
+  依赖下 CJK 子串召回的可行方案，S1.2 FTS 一路的候选（正式实现为入库建表）。
+- 同义/转述（题面"物理键" vs 文档"侧边键/锁屏键"）词面不相交，trigram 也救不了，
+  只能靠 S1.2 向量路。
 
 用法（在 subsystems/ 下）：
   TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm \
   TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
   .venv/bin/python scripts/recall_probe.py "未关闭再响是怎么实现的？" \
-    [--expect 未关闭再响实现] [-k 5] [--raw]
+    [--expect 未关闭再响] [-k 5] [--unicode61 | --raw]
 
   --expect 子串  期望命中的 URN 片段（HIT@K/MISS@K 判定，S1.6 golden 雏形）
-  --raw          不做整形，直接把原句喂 MATCH（对照：看语法错/0 命中现象）
+  --unicode61    走生产 FTS（整形=ASCII 标识符 + 汉字整段精确 token，对照组）
+  --raw          不做整形，原句直喂 MATCH（对照：语法错/0 命中）
 """
 
 from __future__ import annotations
@@ -29,43 +35,81 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages" / "worke
 
 from testpilot_workers._bootstrap import bootstrap  # noqa: E402
 
-# unicode61：ASCII 标识符整词、CJK 逐字；其余字符（标点/FTS 操作符 . : " * 等）全部丢弃
-_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[一-鿿]")
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[一-鿿]+")
 
 
-def shape_query(raw: str) -> str:
-    tokens = _TOKEN_RE.findall(raw)
-    # 去重保序（同字重复只会扭曲 BM25 词频）
+def shape_unicode61(raw: str) -> str:
+    """unicode61 下的诚实整形：ASCII 标识符整词 + 汉字段整段精确 token，OR 连接。
+
+    连续汉字段必须与某 token 完全相等才命中（如文档标题前缀里的原词）；
+    自然语言整句通常 0 命中——这正是 S1.2 要换分词的证据。
+    """
+    toks = _TOKEN_RE.findall(raw)
     seen: set[str] = set()
-    uniq = [t for t in tokens if not (t in seen or seen.add(t))]
+    uniq = [t for t in toks if not (t in seen or seen.add(t))]
     return " OR ".join(uniq)
 
 
+def shape_trigram(raw: str) -> str:
+    """trigram：ASCII 词保留；汉字段取相邻三元串（短于 3 的段退化为整段精确）。"""
+    terms: list[str] = []
+    for tok in _TOKEN_RE.findall(raw):
+        if re.fullmatch(r"[一-鿿]+", tok):
+            if len(tok) < 3:
+                terms.append(tok)
+            else:
+                terms.extend(tok[i : i + 3] for i in range(len(tok) - 2))
+        else:
+            terms.append(tok)
+    seen: set[str] = set()
+    uniq = [t for t in terms if not (t in seen or seen.add(t))]
+    return " OR ".join(uniq)
+
+
+SQL_RESULTS = """
+    SELECT c.urn, c.kind, c.quality_score,
+           snippet({fts}, 0, '[', ']', ' … ', 12) AS snip
+    FROM {fts} JOIN chunks c ON c.urn = {fts}.chunk_urn
+    WHERE {fts} MATCH ? ORDER BY rank LIMIT ?
+"""
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="S1.1 FTS 召回探针")
+    parser = argparse.ArgumentParser(description="S1.1 召回探针（默认 trigram 模式）")
     parser.add_argument("query", help="自然语言查询")
     parser.add_argument("-k", type=int, default=5, help="TopK（默认 5）")
     parser.add_argument("--expect", help="期望 URN 包含的片段，判定 HIT@K/MISS@K")
-    parser.add_argument("--raw", action="store_true", help="原样喂 MATCH（对照实验）")
+    parser.add_argument("--unicode61", action="store_true", help="走生产 FTS + 整形（对照组）")
+    parser.add_argument("--raw", action="store_true", help="原句直喂生产 FTS（对照组）")
     args = parser.parse_args()
 
     container = bootstrap("recall-probe")
     conn = container.adapters["store"].conn
 
-    match_expr = args.query if args.raw else shape_query(args.query)
-    print(f"\n查询原文 : {args.query}")
-    print(f"MATCH 表达式: {match_expr!r}\n")
+    if args.raw or args.unicode61:
+        fts = "chunks_fts"
+        expr = args.query if args.raw else shape_unicode61(args.query)
+        mode = "raw(unicode61)" if args.raw else "shaped(unicode61)"
+    else:
+        # 临时 trigram 索引：只在本次连接存活，不污染生产库
+        conn.execute("DROP TABLE IF EXISTS temp.tri_fts")
+        conn.execute(
+            "CREATE VIRTUAL TABLE temp.tri_fts USING fts5(text, chunk_urn UNINDEXED, "
+            "tokenize='trigram')"
+        )
+        conn.execute("INSERT INTO tri_fts(text, chunk_urn) SELECT text, urn FROM chunks")
+        fts = "tri_fts"
+        expr = shape_trigram(args.query)
+        mode = "trigram(temp)"
+
+    print(f"\n模式 : {mode}")
+    print(f"查询 : {args.query}")
+    print(f"MATCH: {expr[:160]}{' …' if len(expr) > 160 else ''}\n")
 
     try:
-        rows = conn.execute(
-            """SELECT c.urn, c.kind, c.quality_score, c.doc_urn,
-                      snippet(chunks_fts, 0, '[', ']', ' … ', 12) AS snip
-               FROM chunks_fts JOIN chunks c ON c.urn = chunks_fts.chunk_urn
-               WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?""",
-            (match_expr, args.k),
-        ).fetchall()
+        rows = conn.execute(SQL_RESULTS.format(fts=fts), (expr, args.k)).fetchall()
     except Exception as exc:  # noqa: BLE001 - 探针就是要把语法错显形
-        print(f"❌ MATCH 报错（S1.2 检索器需做查询转义/整形）：{type(exc).__name__}: {exc}")
+        print(f"❌ MATCH 报错（S1.2 检索器需做查询转义/分词）：{type(exc).__name__}: {exc}")
         sys.exit(2)
 
     if not rows:
