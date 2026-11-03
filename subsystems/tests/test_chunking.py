@@ -42,6 +42,28 @@ def test_markdown_long_section_splits_with_stable_line_numbers():
     assert chunks[1].start_line > chunks[0].start_line
 
 
+def test_markdown_title_path_is_indexed_when_headings_are_consecutive():
+    # 回归（2026-11-03 recall_probe 发现）：H1 后直接 H2（标题独占）时，
+    # H1 文档标题过去只进 anchor/heading_path，不进 FTS 索引的 text，
+    # 导致"按文档标题词"检索 0 命中。现在标题路径整体前缀化进每个块正文。
+    text = "# iOS 27 侧边键冷启动事故\n\n## 现象\n正文描述\n"
+    chunks = chunk_markdown(text)
+    assert len(chunks) == 1
+    first = chunks[0]
+    assert first.text.startswith("# iOS 27 侧边键冷启动事故\n## 现象\n")
+    assert "正文描述" in first.text
+    # 行范围仍映射原文件：首块从本级 H2 标题行（第 3 行）起，不越界
+    assert first.start_line == 3
+    assert first.end_line == 4
+
+
+def test_markdown_nested_heading_chunk_carries_full_title_prefix():
+    text = "# 文档\n## 章\n### 节\n正文\n"
+    chunks = chunk_markdown(text)
+    assert chunks[0].text.startswith("# 文档\n## 章\n### 节\n")
+    assert chunks[0].heading_path == ("文档", "章", "节")
+
+
 # ── Swift 最简符号切 ─────────────────────────────────────────────────────────
 
 SAMPLE = '''import Foundation

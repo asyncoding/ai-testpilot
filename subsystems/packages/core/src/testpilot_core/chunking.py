@@ -109,44 +109,58 @@ def chunk_markdown(text: str, *, max_chars: int = 1600) -> list[RawChunk]:
             while stack and stack[-1][0] >= level:
                 stack.pop()
             stack.append((level, title))
+            # content 只收正文行，不含任何标题行；标题经 levels/path 在成块时整体前缀化
             current = {
                 "level": level,
                 "title": title,
                 "path": tuple(t for _, t in stack),
-                "lines": [line],
+                "levels": tuple(l for l, _ in stack),
+                "content": [],
                 "start_line": lineno,
             }
         else:
             if current is None:
                 # 标题前的序言
-                current = {"level": 0, "title": "", "path": (), "lines": [], "start_line": lineno}
-            current["lines"].append(line)
+                current = {"level": 0, "title": "", "path": (), "levels": (),
+                           "content": [], "start_line": lineno}
+            current["content"].append(line)
     if current is not None:
         sections.append(current)
 
     chunks: list[RawChunk] = []
     seen_anchors: dict[str, int] = {}
     for sec in sections:
-        body = "\n".join(sec["lines"]).strip("\n")
-        if not body.strip():
-            continue
-        # 标题独占（如 H1 后直接跟 H2）不单独成块：标题已体现在子章节的 heading_path 里
-        content_lines = body.splitlines()[1:] if sec["level"] else body.splitlines()
-        if not any(ln.strip() for ln in content_lines):
+        content = "\n".join(sec["content"]).strip("\n")
+        # 标题独占（如 H1 后直接跟 H2）不单独成块
+        if not content.strip():
             continue
         base_anchor = _slug(sec["title"]) if sec["title"] else "preamble"
         seen_anchors[base_anchor] = seen_anchors.get(base_anchor, 0) + 1
         anchor = base_anchor if seen_anchors[base_anchor] == 1 else f"{base_anchor}-{seen_anchors[base_anchor]}"
         title = " / ".join(sec["path"]) if sec["path"] else (sec["title"] or "序言")
-        for sub_anchor, part_text, line_off in _split_long(body, anchor, max_chars):
+        # 完整标题路径作为前缀进正文：每个块自描述（检索结果自带上下文），且保证 H1 紧贴
+        # H2 等"独占标题"不会从可检索正文丢失——FTS 只索引 text，标题不进 text 就永远
+        # 召不回（2026-11-03 recall_probe 实测：事故文档标题词 0 命中）。
+        prefix = "\n".join(
+            f"{'#' * lvl} {t}" for lvl, t in zip(sec["levels"], sec["path"])
+        )
+        for sub_anchor, part_text, line_off in _split_long(content, anchor, max_chars):
+            text = (f"{prefix}\n{part_text.strip()}\n" if prefix else part_text.strip() + "\n")
+            # 行范围映射回原文件：有序言的章节首块从标题行起；序言块从自身首行起
+            if sec["level"]:
+                start = sec["start_line"] if line_off == 0 else sec["start_line"] + 1 + line_off
+                end = sec["start_line"] + 1 + line_off + part_text.count("\n")
+            else:
+                start = sec["start_line"] + line_off
+                end = start + part_text.count("\n")
             chunks.append(
                 RawChunk(
                     kind="text",
                     anchor=sub_anchor,
                     title=title,
-                    text=part_text.strip() + "\n",
-                    start_line=sec["start_line"] + line_off,
-                    end_line=sec["start_line"] + line_off + part_text.count("\n"),
+                    text=text,
+                    start_line=start,
+                    end_line=end,
                     heading_path=sec["path"],
                 )
             )
