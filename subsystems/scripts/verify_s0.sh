@@ -4,6 +4,10 @@
 set -u
 cd "$(dirname "$0")/.."
 PY=.venv/bin/python
+# 门禁必须确定性运行：屏蔽调用方 shell 残留的 TESTPILOT_*/LANGFUSE_* 覆盖
+# （如手工跑第 7 门禁时 export 的 TESTPILOT_TRACER=langfuse，会让 A2 装出
+# LangfuseTracer、A6 在无 key 时 401）。Langfuse 实链是独立的手动步骤，不在这里。
+unset TESTPILOT_TRACER TESTPILOT_REPO_PATH LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY
 pass_n=0; fail_n=0
 
 echo "=== A1. venv 与依赖（uv sync 后四个包必须可 import） ==="

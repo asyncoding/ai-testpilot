@@ -59,6 +59,12 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml testpilot-ingest
 TESTPILOT_REPO_PATH=/path/to/repo .venv/bin/python -m pytest   # 覆盖被测仓路径
 ```
 
+> 环境隔离说明：`source .venv/bin/activate` 与直接用 `.venv/bin/python` 是同一个解释器，
+> 二者**都原样继承当前 shell 的环境变量**。跑第 7 门禁时若 `export TESTPILOT_TRACER=langfuse`，
+> 残留变量会让手工启动的 uvicorn/worker/smoke 切到 Langfuse（开新终端或 `unset TESTPILOT_TRACER`
+> 即恢复）。pytest 用例会自动清掉 `TESTPILOT_*` 覆盖（`tests/conftest.py`），
+> `verify_s0.sh` 开头也会统一 unset，二者不受 shell 残留影响。
+
 ## 一键验收 S0（已闭合的 6 个自动门禁）
 
 ```bash
