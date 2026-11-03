@@ -50,7 +50,9 @@ def test_bootstrap_idempotent_and_schema_version(tmp_path):
     store = bootstrap_store(tmp_path)
     store2 = bootstrap_store(tmp_path)  # 二次启动不报错
     try:
-        assert store.get_meta("schema_version") == "1"
+        # 版本号以 core 常量为准（S1.1 已升到 2）
+        from testpilot_core import SCHEMA_VERSION
+        assert store.get_meta("schema_version") == str(SCHEMA_VERSION)
     finally:
         store.close()
         store2.close()

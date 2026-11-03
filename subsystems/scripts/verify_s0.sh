@@ -15,7 +15,7 @@ echo "=== A1. venv 与依赖（uv sync 后四个包必须可 import） ==="
 $PY -c "import testpilot_core,testpilot_adapters,testpilot_orchestrator,testpilot_workers" \
   && { echo PASS; pass_n=$((pass_n+1)); } || { echo "FAIL  空壳 editable，修复见 README（uv sync --reinstall-package ...）"; fail_n=$((fail_n+1)); }
 
-echo "=== A2. 契约测试（期望 28 passed） ==="
+echo "=== A2. 契约测试（S1.1 起期望 46 passed） ==="
 $PY -m pytest -q > /tmp/tp_pytest.log 2>&1 && { echo "PASS  $(tail -1 /tmp/tp_pytest.log)"; pass_n=$((pass_n+1)); } || { echo "FAIL  见 /tmp/tp_pytest.log"; fail_n=$((fail_n+1)); }
 
 echo "=== A3. core 防腐门禁（禁止 IO/SDK/兄弟包） ==="

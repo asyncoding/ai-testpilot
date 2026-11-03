@@ -13,11 +13,13 @@ from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import OutboxStatus
 from testpilot_core.models import (
     Approval,
+    Entity,
     EventEnvelope,
     EvalRun,
     Feedback,
     KnowledgeChunk,
     OutboxRecord,
+    Relation,
     SourceDocument,
 )
 
@@ -26,8 +28,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 老库平滑升级：表已存在时 CREATE IF NOT EXISTS 不会加列，按 PRAGMA 检查后 ALTER。
+_COLUMN_MIGRATIONS = {
+    "entities": {"doc_urn": "TEXT"},
+    "relations": {"doc_urn": "TEXT"},
+}
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _COLUMN_MIGRATIONS.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def bootstrap_store(data_dir: str | Path) -> "Store":
-    """在数据目录下初始化 store/testpilot.sqlite，幂等。"""
+    """在数据目录下初始化 store/testpilot.sqlite，幂等；老库自动平滑升级。"""
     data_dir = Path(data_dir)
     db_path = data_dir / "store" / "testpilot.sqlite"
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,8 +52,10 @@ def bootstrap_store(data_dir: str | Path) -> "Store":
     conn.row_factory = sqlite3.Row
     schema_sql = resources.files("testpilot_adapters.store").joinpath("schema.sql").read_text(encoding="utf-8")
     conn.executescript(schema_sql)
+    _migrate_columns(conn)
     conn.execute(
-        "INSERT INTO meta(key,value) VALUES('schema_version',?) ON CONFLICT(key) DO NOTHING",
+        """INSERT INTO meta(key,value) VALUES('schema_version',?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
         (str(SCHEMA_VERSION),),
     )
     conn.commit()
@@ -103,23 +122,189 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    # ── 事件（幂等去重 + 死信）─────────────────────────────────────────
-    def record_event_if_new(self, event: EventEnvelope) -> bool:
-        """返回 True=新事件；False=重复投递（docs/08 FR-CON-005 AC1）。"""
+    # ── 入库管线（schema v2，FR-ING-001）────────────────────────────────
+    def list_documents(self, source_system: str) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT urn, content_hash FROM source_documents WHERE source_system=?",
+            (source_system,),
+        ).fetchall()
+
+    def get_document(self, urn: str) -> SourceDocument | None:
+        row = self.conn.execute(
+            "SELECT raw_json FROM source_documents WHERE urn=?", (urn,)
+        ).fetchone()
+        return SourceDocument.model_validate(json.loads(row["raw_json"])) if row else None
+
+    def replace_document_index(
+        self,
+        doc: SourceDocument,
+        chunks: list[KnowledgeChunk],
+        entities: list[Entity],
+        relations: list[tuple[Relation, list[str]]],
+        run_id: str,
+    ) -> None:
+        """单事务：登记文档 → 清旧切块/FTS/实体关系 → 写新版。重跑同输入结果不变。"""
+        cur = self.conn
         try:
-            self.conn.execute(
-                """INSERT INTO events
-                   (event_id, event_type, source_system, status, payload_json, occurred_at, received_at)
-                   VALUES (?,?,?,?,?,?,?)""",
+            cur.execute("BEGIN")
+            cur.execute(
+                """INSERT INTO source_documents
+                   (urn, source_system, uri, title, version, content_hash,
+                    authority_level, acl_scope, branch, mtime, raw_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(urn) DO UPDATE SET
+                     version=excluded.version, content_hash=excluded.content_hash,
+                     authority_level=excluded.authority_level,
+                     mtime=excluded.mtime, raw_json=excluded.raw_json""",
                 (
-                    event.event_id, event.event_type, event.source_system, "received",
-                    event.model_dump_json(), event.occurred_at.isoformat(), _now_iso(),
+                    doc.urn, doc.source_system, doc.uri, doc.title, doc.version,
+                    doc.content_hash, str(doc.authority_level), doc.acl_scope, doc.branch,
+                    doc.mtime.isoformat() if doc.mtime else None,
+                    doc.model_dump_json(by_alias=True),
                 ),
             )
-            self.conn.commit()
-            return True
-        except sqlite3.IntegrityError:
+            cur.execute(
+                "DELETE FROM chunks_fts WHERE chunk_urn IN (SELECT urn FROM chunks WHERE doc_urn=?)",
+                (doc.urn,),
+            )
+            cur.execute("DELETE FROM chunks WHERE doc_urn=?", (doc.urn,))
+            cur.execute("DELETE FROM relations WHERE doc_urn=?", (doc.urn,))
+            cur.execute("DELETE FROM entities WHERE doc_urn=?", (doc.urn,))
+
+            for chunk in chunks:
+                cur.execute(
+                    """INSERT INTO chunks
+                       (urn, doc_urn, idx, kind, text, symbol_urn, quality_score,
+                        branch, valid_from, valid_to, stale, content_hash, raw_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        chunk.urn, chunk.doc_urn, chunk.index, chunk.kind, chunk.text,
+                        chunk.symbol_urn, chunk.quality_score, chunk.branch,
+                        chunk.valid_from, chunk.valid_to, str(chunk.stale),
+                        chunk.content_hash, chunk.model_dump_json(by_alias=True),
+                    ),
+                )
+                cur.execute(
+                    "INSERT INTO chunks_fts(text, chunk_urn) VALUES(?,?)",
+                    (chunk.text, chunk.urn),
+                )
+            for entity in entities:
+                cur.execute(
+                    """INSERT INTO entities(urn, kind, name, branch, doc_urn, raw_json)
+                       VALUES (?,?,?,?,?,?)
+                       ON CONFLICT(urn) DO UPDATE SET
+                         kind=excluded.kind, name=excluded.name, raw_json=excluded.raw_json""",
+                    (entity.urn, entity.kind, entity.name, entity.branch, doc.urn,
+                     entity.model_dump_json(by_alias=True)),
+                )
+            for relation, evidence_lines in relations:
+                cur.execute(
+                    """INSERT INTO relations
+                       (urn, source_urn, target_urn, kind, confidence, evidence_json, doc_urn)
+                       VALUES (?,?,?,?,?,?,?)
+                       ON CONFLICT(urn) DO UPDATE SET
+                         confidence=excluded.confidence, evidence_json=excluded.evidence_json""",
+                    (
+                        relation.urn, relation.source_urn, relation.target_urn, relation.kind,
+                        relation.confidence,
+                        json.dumps({"lines": evidence_lines, "urns": relation.evidence_urns},
+                                   ensure_ascii=False),
+                        doc.urn,
+                    ),
+                )
+            avg = round(sum(c.quality_score for c in chunks) / len(chunks), 4) if chunks else 0.0
+            cur.execute(
+                """INSERT INTO ingestion_status
+                   (doc_urn, source_system, content_hash, stage, chunk_count, avg_quality,
+                    last_run_id, error, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(doc_urn) DO UPDATE SET
+                     content_hash=excluded.content_hash, stage='indexed',
+                     chunk_count=excluded.chunk_count, avg_quality=excluded.avg_quality,
+                     last_run_id=excluded.last_run_id, error='', updated_at=excluded.updated_at""",
+                (doc.urn, doc.source_system, doc.content_hash, "indexed", len(chunks), avg,
+                 run_id, "", _now_iso()),
+            )
+            cur.commit()
+        except Exception:
+            cur.rollback()
+            raise
+
+    def delete_document_cascade(self, urn: str) -> bool:
+        """删除文档及其全部切块/FTS/实体/关系/加工状态。返回是否命中。"""
+        if self.conn.execute("SELECT 1 FROM source_documents WHERE urn=?", (urn,)).fetchone() is None:
             return False
+        cur = self.conn
+        cur.execute(
+            "DELETE FROM chunks_fts WHERE chunk_urn IN (SELECT urn FROM chunks WHERE doc_urn=?)",
+            (urn,),
+        )
+        cur.execute("DELETE FROM chunks WHERE doc_urn=?", (urn,))
+        cur.execute("DELETE FROM relations WHERE doc_urn=?", (urn,))
+        cur.execute("DELETE FROM entities WHERE doc_urn=?", (urn,))
+        cur.execute("DELETE FROM ingestion_status WHERE doc_urn=?", (urn,))
+        cur.execute("DELETE FROM source_documents WHERE urn=?", (urn,))
+        cur.commit()
+        return True
+
+    def mark_document_failed(
+        self, doc_urn: str, source_system: str, content_hash: str, run_id: str, error: str
+    ) -> None:
+        self.conn.execute(
+            """INSERT INTO ingestion_status
+               (doc_urn, source_system, content_hash, stage, chunk_count, avg_quality,
+                last_run_id, error, updated_at)
+               VALUES (?,?,?,?,0,0,?,?,?)
+               ON CONFLICT(doc_urn) DO UPDATE SET
+                 stage='failed', error=excluded.error, last_run_id=excluded.last_run_id,
+                 updated_at=excluded.updated_at""",
+            (doc_urn, source_system, content_hash, "failed", run_id, error[:2000], _now_iso()),
+        )
+        self.conn.commit()
+
+    def start_ingestion_run(self, run_id: str, source_system: str, trigger: str) -> None:
+        self.conn.execute(
+            """INSERT INTO ingestion_runs(run_id, source_system, trigger, status, started_at)
+               VALUES (?,?,?, 'running', ?)""",
+            (run_id, source_system, trigger, _now_iso()),
+        )
+        self.conn.commit()
+
+    def finish_ingestion_run(
+        self, run_id: str, status: str, counts: dict[str, int], report: dict[str, Any]
+    ) -> None:
+        self.conn.execute(
+            """UPDATE ingestion_runs SET status=?, docs_seen=?, docs_created=?, docs_updated=?,
+                 docs_deleted=?, docs_unchanged=?, docs_failed=?, chunks_total=?,
+                 report_json=?, finished_at=? WHERE run_id=?""",
+            (
+                status, counts.get("seen", 0), counts.get("created", 0),
+                counts.get("updated", 0), counts.get("deleted", 0),
+                counts.get("unchanged", 0), counts.get("failed", 0),
+                counts.get("chunks_total", 0),
+                json.dumps(report, ensure_ascii=False), _now_iso(), run_id,
+            ),
+        )
+        self.conn.commit()
+
+    # ── 事件（幂等去重 + 死信）─────────────────────────────────────────
+    def record_event_if_new(self, event: EventEnvelope) -> bool:
+        """返回 True=新事件；False=重复投递（docs/08 FR-CON-005 AC1）。
+
+        用 INSERT OR IGNORE：重复 event_id 时不能让隐式事务挂着，否则后续
+        显式 BEGIN 报 "cannot start a transaction within a transaction"。
+        """
+        cur = self.conn.execute(
+            """INSERT OR IGNORE INTO events
+               (event_id, event_type, source_system, status, payload_json, occurred_at, received_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (
+                event.event_id, event.event_type, event.source_system, "received",
+                event.model_dump_json(), event.occurred_at.isoformat(), _now_iso(),
+            ),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
 
     def add_dead_letter(self, source: str, payload: dict[str, Any], error: str) -> None:
         self.conn.execute(

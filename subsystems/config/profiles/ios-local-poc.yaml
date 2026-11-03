@@ -4,13 +4,13 @@ profile: ios-local-poc
 
 project:
   name: AlarmKitSpike
-  # 真实被测仓在另一个仓库（docs/03）；路径走环境变量，禁止写死：
-  #   export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm/AlarmKitSpike
-  repo_path: ../../../app-calendar-alarm/AlarmKitSpike
+  # 真实被测仓在另一个仓库（docs/03），不拷贝进本仓；路径走环境变量覆盖，禁止写死：
+  #   export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
+  repo_path: ../../app-calendar-alarm
   default_branch: alarmkit-spike
   tech_stack: ios
   ios:
-    workspace: AlarmKitSpike.xcworkspace
+    workspace: AlarmKitSpike/AlarmKitSpike.xcworkspace
     scheme: AlarmKitSpike
     simulator_udid: 5411787C-8AFF-4EBF-9000-EB5EFD1457D5
 
@@ -25,7 +25,50 @@ adapters:
   docs:
     type: fs-docs
     settings:
-      roots: [tests/fixtures/docs]
+      roots:
+        - ${REPO_PATH}            # 事故复盘/PRD/技术方案等 Markdown（配合 excludes）
+      # 仅当前产品 AlarmKitSpike（workspace 实际编译的 target）。
+      # 仓库根 Package.swift(名=CalendarStrongReminder)/顶层 Sources/ 是 2026-08 已作废的
+      # 旧 SPM 包（EventDetailView/CalendarStrongReminderApp 等），workspace 不引用它，
+      # 禁止纳入 code_roots——否则代码类问题全部召回作废 App（2026-11-03 实测踩坑，见
+      # .agent-handoff/2026-11-03-s1-knowledge-qa.md §S1.1.1）。
+      # Tests/UITests 暂不纳入，留到 S2/S3 测试相关阶段。
+      code_roots:
+        - ${REPO_PATH}/AlarmKitSpike/Sources
+        - ${REPO_PATH}/AlarmKitSpike/Shared
+        - ${REPO_PATH}/AlarmKitSpike/WidgetExtension
+      excludes:
+        - "**/node_modules/**"
+        - "**/build/**"
+        - "**/Pods/**"
+        - "**/.git/**"
+        - "**/.agent-handoff/**"
+        - "**/icon-drafts/**"
+        - "**/*.bak"
+        - "**/CLAUDE.md"
+        - "**/AGENT.md"
+        - "**/小红书文案.md"
+        # 2026-08 作废工程/转型前方案文档（头部均署名 CalendarStrongReminder），
+        # 当前权威是 docs/V1需求|技术设计|测试用例文档（2026-10，AlarmKitSpike V1.2）。
+        - "docs/功能设计文档.md"
+        - "docs/功能细化设计文档.md"
+        - "docs/技术方案文档.md"
+        - "docs/项目计划文档.md"
+        - "docs/日历闹钟-本地通知版.md"
+        - "docs/日历闹钟-快捷指令版.md"
+        # 仓根 PRD/TECHNICAL-PLAN 是 2026-08-26 转型前 V1（Calendar Strong Reminder），
+        # 已被 docs/V1* 取代；根 README 描述旧 SPM 布局，一并排除。
+        - "PRD.md"
+        - "TECHNICAL-PLAN.md"
+        - "README.md"
+        # 噪音：0 字节空文件、与产品无关的 meta 文案
+        - "2026-09-15.md"
+        - "Claude code vs 其他Agent的优势.md"
+      authority_overrides:
+        # docs/V1* 三件套与 AlarmKitSpike-* 复盘经 docs/** 自动获得 L1；
+        # 已排除的根 PRD.md/TECHNICAL-PLAN.md 不再给权威权重。
+        - {glob: "docs/**", level: L1_authoritative}
+        - {glob: "Resources/**", level: L1_authoritative}
   cases:      {type: stub}
   tickets:    {type: json}
   ci_events:  {type: json-replay}

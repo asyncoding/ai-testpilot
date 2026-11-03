@@ -39,7 +39,8 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（28 个：URN/策略、四类适配器契约、SQLite+FTS5、队列幂等、装配、核心防腐）
+# 全量契约测试（46 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 核心防腐、S1.1 切块/质量分/入库管线：增量、删除级联、幂等、坏文件隔离、符号召回）
 .venv/bin/python -m pytest -q
 
 # 核心层防腐门禁（core 禁止 import fastapi/sqlite/yaml/各兄弟包等）
@@ -64,6 +65,43 @@ TESTPILOT_REPO_PATH=/path/to/repo .venv/bin/python -m pytest   # 覆盖被测仓
 > 残留变量会让手工启动的 uvicorn/worker/smoke 切到 Langfuse（开新终端或 `unset TESTPILOT_TRACER`
 > 即恢复）。pytest 用例会自动清掉 `TESTPILOT_*` 覆盖（`tests/conftest.py`），
 > `verify_s0.sh` 开头也会统一 unset，二者不受 shell 残留影响。
+
+## 知识入库（S1.1）
+
+ingest-worker 已从"装配自检"升级为真实管线：扫描 → content_hash 对账
+（created/updated/deleted/unchanged）→ Markdown 章节切块 / Swift 最简符号切块 →
+可解释质量评分 → 符号实体与同文件调用关系 → 单事务写 SQLite + FTS5。
+
+```bash
+# 离线夹具（offline-demo，默认 store/offline-demo）
+.venv/bin/testpilot-ingest                 # 增量；重复跑 unchanged，幂等
+.venv/bin/testpilot-ingest --full          # 全量重切（结果不变，可安全重跑）
+.venv/bin/testpilot-ingest --inventory /tmp/inventory.json   # 语料盘点（FR-CON-002 AC3）
+
+# 真实被测仓（另一仓库，路径走配置/环境变量，不拷贝代码）
+export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
+TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml .venv/bin/testpilot-ingest
+```
+
+语义与证据：
+
+- 文档 URN 按「根别名/相对路径」稳定，内容变化只改 version/content_hash；
+  改一篇只重切该篇；删除文件产生 DocumentDeleted 事件并级联清 chunks/FTS（无残留索引）。
+- 单文档失败（编码错误、切块异常等）进 `dead_letters` + `ingestion_status.stage=failed`，
+  批次状态 partial，不阻断整批；修复后重跑自动覆盖为 indexed。
+- 入库批次留痕 `ingestion_runs`，文档级状态留痕 `ingestion_status`
+  （chunk_count / avg_quality / hash / run_id），切块质量分构成存在 chunk metadata。
+- Swift 切块是**词法扫描的最简符号切**（类/结构体/枚举/actor/protocol/extension/func、
+  selector 风格符号 ID、同文件 calls 关系、注释字符串屏蔽、struct+extension 重名去歧）；
+  生产可换 SwiftSyntax，产出契约不变（FR-ING-002 AC3 命中率对比在评测期补）。
+- 实测（2026-11-03，AlarmKitSpike 真实仓）：65 文档 / 1238 切块 / 136 符号 /
+  103 调用关系；`scheduleAlarm` 类查询代码符号块 BM25 排名第一。注意事故文档里的
+  `MissionCoordinator.schedulePrimary` 在当前 HEAD 已不存在——这是 S1.4 live-verify
+  与"历史证词并列"要处理的真实重构陷阱素材。
+- 重置演示库：`rm -rf store/ios-local-poc`（生成物，不入库）。
+
+已知限制（后续阶段处理）：向量/混合检索在 S1.2；FTS5 查询串中的 `.`/`:` 等需转义
+（检索器实现时处理）；实体关系层目前只有 Swift calls，doc 章节/需求实体在 S2/S4。
 
 ## 一键验收 S0（已闭合的 6 个自动门禁）
 

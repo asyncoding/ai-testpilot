@@ -51,10 +51,30 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     container.adapters["queue"] = SqliteQueue(store.conn)
 
     # ── 文档知识源 ──
-    docs_roots = a.docs.settings.get("roots", [])
+    docs_settings = a.docs.settings
+    docs_roots = docs_settings.get("roots", [])
     if a.docs.type == "fs-docs":
+        from testpilot_adapters.fs_docs import AuthorityRule
+        from testpilot_core.enums import AuthorityLevel
+
+        overrides = [
+            AuthorityRule(glob=r["glob"], level=AuthorityLevel(r["level"]))
+            for r in docs_settings.get("authority_overrides", [])
+        ]
+        # repo 内代码根支持 ${REPO_PATH} 占位（路径配置化，不写死机器路径）
+        repo_path = Path(config.project.repo_path).expanduser()
+        if not repo_path.is_absolute():
+            repo_path = (base_dir / repo_path).resolve()
+
+        def _resolve(root: str) -> Path:
+            root = root.replace("${REPO_PATH}", str(repo_path))
+            return _p(base_dir, root)
+
         container.adapters["docs"] = FileSystemDocsAdapter(
-            [_p(base_dir, r) for r in docs_roots] or [fixtures_dir / "docs"]
+            [_resolve(r) for r in docs_roots] or [fixtures_dir / "docs"],
+            code_roots=[_resolve(r) for r in docs_settings.get("code_roots", [])],
+            excludes=docs_settings.get("excludes", []),
+            authority_overrides=overrides,
         )
     elif a.docs.type != "stub":
         raise ValueError(f"未知 docs 适配器类型: {a.docs.type}")

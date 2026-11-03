@@ -1,4 +1,5 @@
--- TestPilot S0 schema（schema_version = 1，docs/08 FR-CFG-003 AC2：迁移脚本版本化）
+-- TestPilot schema（当前 schema_version = 2；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
+-- v1：S0 骨架；v2：入库批次/文档加工状态、entities/relations 挂 doc_urn（S1.1）
 
 PRAGMA journal_mode = WAL;
 
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS entities (
     kind      TEXT NOT NULL,
     name      TEXT NOT NULL,
     branch    TEXT NOT NULL DEFAULT 'main',
+    doc_urn   TEXT,
     raw_json  TEXT NOT NULL
 );
 
@@ -61,8 +63,40 @@ CREATE TABLE IF NOT EXISTS relations (
     target_urn    TEXT NOT NULL,
     kind          TEXT NOT NULL,
     confidence    REAL NOT NULL,
-    evidence_json TEXT NOT NULL DEFAULT '[]'
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    doc_urn       TEXT
 );
+
+-- 入库批次与文档加工状态（v2，FR-ING-001：每步留痕、可查可重跑）
+CREATE TABLE IF NOT EXISTS ingestion_runs (
+    run_id         TEXT PRIMARY KEY,
+    source_system  TEXT NOT NULL,
+    trigger        TEXT NOT NULL DEFAULT 'manual',
+    status         TEXT NOT NULL DEFAULT 'running',
+    docs_seen      INTEGER NOT NULL DEFAULT 0,
+    docs_created   INTEGER NOT NULL DEFAULT 0,
+    docs_updated   INTEGER NOT NULL DEFAULT 0,
+    docs_deleted   INTEGER NOT NULL DEFAULT 0,
+    docs_unchanged INTEGER NOT NULL DEFAULT 0,
+    docs_failed    INTEGER NOT NULL DEFAULT 0,
+    chunks_total   INTEGER NOT NULL DEFAULT 0,
+    report_json    TEXT NOT NULL DEFAULT '{}',
+    started_at     TEXT NOT NULL,
+    finished_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_status (
+    doc_urn       TEXT PRIMARY KEY,
+    source_system TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    stage         TEXT NOT NULL,          -- indexed / failed
+    chunk_count   INTEGER NOT NULL DEFAULT 0,
+    avg_quality   REAL NOT NULL DEFAULT 0,
+    last_run_id   TEXT NOT NULL,
+    error         TEXT NOT NULL DEFAULT '',
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ingestion_status_stage ON ingestion_status(stage);
 
 -- 人审
 CREATE TABLE IF NOT EXISTS approvals (
