@@ -1,8 +1,12 @@
 """适配器装配工厂（依赖注入根，docs/08 FR-CFG-002 AC3）。
 
 换 profile = 换适配器实现，工作流代码零改动。
-S0 支持的 type：stub / fs-docs / json / json-replay / recorded / localfs /
-sqlite-fts / sqlite / noop / langfuse；其余在 S1–S3 引入（git / ollama / xcode …）。
+支持的 type：stub / fs-docs / json / json-replay / recorded / localfs /
+sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/ chroma（vectors）；
+其余在 S2–S3 引入（git / xcode …）。
+
+降级是运行期行为（向量通道故障→FTS-only），不是装配期选项：hybrid 必须配齐
+model+vectors，否则 build_container 直接 ValueError（防止静默退化为单路而不自知）。
 """
 
 from __future__ import annotations
@@ -109,29 +113,93 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.artifact.type != "stub":
         raise ValueError(f"未知 artifact 适配器类型: {a.artifact.type}")
 
-    # ── 检索 / 模型 / trace ──
-    if a.search.type == "sqlite-fts":
-        container.adapters["search"] = FtsSearchAdapter(store)
-    elif a.search.type != "stub":
-        raise ValueError(f"未知 search 适配器类型: {a.search.type}")
-
-    if a.model.type == "recorded":
-        container.adapters["model"] = RecordedModelGateway(fixtures_dir / "model" / "responses.json")
-    elif a.model.type != "stub":
-        raise ValueError(f"未知 model 适配器类型: {a.model.type}")
-
+    # ── trace（先装配：模型网关构造时注入，span 随调用链）──
     if a.tracer.type == "noop":
-        container.adapters["tracer"] = NoopTracer()
+        tracer = NoopTracer()
     elif a.tracer.type == "langfuse":
         import os
 
-        container.adapters["tracer"] = LangfuseTracer(
+        tracer = LangfuseTracer(
             host=os.environ.get("LANGFUSE_HOST", "http://localhost:3030"),
             public_key=os.environ.get("LANGFUSE_PUBLIC_KEY", "pk-lf-local"),
             secret_key=os.environ.get("LANGFUSE_SECRET_KEY", "sk-lf-local"),
         )
     else:
         raise ValueError(f"未知 tracer 类型: {a.tracer.type}")
+    container.adapters["tracer"] = tracer
+
+    # ── 模型网关（S1.2：recorded / ollama）──
+    if a.model.type == "recorded":
+        model_gw = RecordedModelGateway(fixtures_dir / "model" / "responses.json")
+        container.adapters["model"] = model_gw
+    elif a.model.type == "ollama":
+        from testpilot_adapters.ollama_model import OllamaModelGateway
+
+        ms = a.model.settings
+        model_gw = OllamaModelGateway(
+            base_url=ms.get("base_url", "http://localhost:11434"),
+            chat_model=ms.get("chat_model", "qwen2.5:7b"),
+            embed_model=ms.get("embed_model", "shaw/dmeta-embedding-zh"),
+            timeout=float(ms.get("timeout", 60.0)),
+            max_retries=int(ms.get("max_retries", 2)),
+            backoff_seconds=float(ms.get("backoff_seconds", 0.5)),
+            tracer=tracer,
+        )
+        container.adapters["model"] = model_gw
+    elif a.model.type != "stub":
+        raise ValueError(f"未知 model 适配器类型: {a.model.type}")
+    else:
+        model_gw = None
+
+    # ── 向量库（S1.2：stub=不注册，入库/检索自动跳过向量通道；chroma）──
+    if a.vectors.type == "chroma":
+        from testpilot_adapters.chroma_vector import ChromaVectorStore
+
+        vs = a.vectors.settings
+        vector_store = ChromaVectorStore(
+            base_url=vs.get("base_url", "http://localhost:8000"),
+            collection=vs.get("collection", "chunks"),
+            timeout=float(vs.get("timeout", 30.0)),
+            max_retries=int(vs.get("max_retries", 2)),
+            backoff_seconds=float(vs.get("backoff_seconds", 0.5)),
+        )
+        container.adapters["vectors"] = vector_store
+    elif a.vectors.type != "stub":
+        raise ValueError(f"未知 vectors 适配器类型: {a.vectors.type}")
+    else:
+        vector_store = None
+
+    # ── 检索（sqlite-fts 单路 / hybrid=FTS+向量 RRF 融合）──
+    if a.search.type == "sqlite-fts":
+        container.adapters["search"] = FtsSearchAdapter(store)
+    elif a.search.type == "hybrid":
+        from testpilot_adapters.hybrid_search import HybridSearchAdapter
+
+        if model_gw is None or vector_store is None:
+            # 装配期就拦住降级配置错误：hybrid 缺通道时运行期只会静默退化成
+            # FTS-only，难以察觉；要纯 FTS 请显式用 sqlite-fts
+            raise ValueError(
+                "search=hybrid 要求 model 与 vectors 均为真实适配器"
+                f"（当前 model={a.model.type}, vectors={a.vectors.type}）；"
+                "纯 FTS 检索请显式配置 search: sqlite-fts"
+            )
+        ss = a.search.settings
+        container.adapters["search"] = HybridSearchAdapter(
+            store,
+            model_gw,
+            vector_store,
+            project=config.project.name,
+            channel_top_k=int(ss.get("channel_top_k", 20)),
+            rrf_k=int(ss.get("rrf_k", 60)),
+            quality_power=float(ss.get("quality_power", 1.0)),
+            half_life_days=(
+                float(ss["half_life_days"])
+                if ss.get("half_life_days") is not None
+                else None
+            ),
+        )
+    elif a.search.type != "stub":
+        raise ValueError(f"未知 search 适配器类型: {a.search.type}")
 
     # stub 位（S1+ 实现）：scm / cases / environment / logs
     for name in ("scm", "cases", "environment", "logs"):

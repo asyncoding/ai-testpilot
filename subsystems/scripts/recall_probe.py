@@ -1,127 +1,205 @@
 #!/usr/bin/env python3
-"""S1.1 召回能力探针（临时工具，S1.2 混合检索落地后删除或降级为调试脚本）。
+"""S1.2 三通道召回对照探针（docs/08 FR-KNO-001 AC1：各检索阶段命中率可对比）。
 
-用途：输入一句自然语言，看当前索引能召回什么，建立 S1.2 之前的基线证据。
+对同一题面分别跑 BM25-only（trigram FTS）、vector-only（query embedding→Chroma）、
+hybrid（RRF 融合）三路 TopK，按 --expect 子串判 HIT@K，并汇总每路命中率。
+三通道都走生产代码路径（HybridSearchAdapter 的 _fts_recall/_vector_recall/search），
+不重复实现检索逻辑；hybrid 一路同时在 retrieval_events 留痕。
 
-已实测确认的分词事实（sqlite 3.54，fts3tokenize 取证，勿再想当然）：
-- 生产表 chunks_fts 用 unicode61：**连续汉字段整段是一个 token**，单字只能
-  命中标点/Markdown 语法孤立出来的单字，二元短语只能跨 token 边界巧合命中。
-  所以查询侧无论怎么整形都救不了自然语言（--unicode61/--raw 是对照组）。
-- 默认走 **trigram 模式**：在临时表上用 tokenize='trigram' 对全量切块建索引
-  （每次启动重建，1421 块约秒级），查询拆三元串 OR、BM25 排序。这是零三方
-  依赖下 CJK 子串召回的可行方案，S1.2 FTS 一路的候选（正式实现为入库建表）。
-- 同义/转述（题面"物理键" vs 文档"侧边键/锁屏键"）词面不相交，trigram 也救不了，
-  只能靠 S1.2 向量路。
+内置题集（--cases builtin，不传 query 时默认跑）：
+1. 机身键/熄屏→锁屏按键日志：题面与文档词面（锁屏/按键/物理键）零三元串交集，
+   BM25 只弱命中调度器符号、目标缺席，向量语义翻盘 @4、hybrid 顶到 #1；
+2. 未关闭再响；3. iOS27 侧边键冷启动误挂静音门；
+4. EventDetailView 定界负例（作废 SPM 包已排除：任何通道 TopK 出现该符号切块即回归；
+   通用中文三元串/语义近邻带来的其他噪声不算回归）。
 
 用法（在 subsystems/ 下）：
   TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm \
   TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
-  .venv/bin/python scripts/recall_probe.py "未关闭再响是怎么实现的？" \
-    [--expect 未关闭再响] [-k 5] [--unicode61 | --raw]
-
-  --expect 子串  期望命中的 URN 片段（HIT@K/MISS@K 判定，S1.6 golden 雏形）
-  --unicode61    走生产 FTS（整形=ASCII 标识符 + 汉字整段精确 token，对照组）
-  --raw          不做整形，原句直喂 MATCH（对照：语法错/0 命中）
+  .venv/bin/python scripts/recall_probe.py                      # 跑内置题集
+  .venv/bin/python scripts/recall_probe.py "自然语言问题" --expect URN片段 [-k 5]
+  .venv/bin/python scripts/recall_probe.py --cases builtin -k 5
 """
 
 from __future__ import annotations
 
 import argparse
-import re
+import asyncio
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages" / "workers" / "src"))
 
+from testpilot_adapters.hybrid_search import HybridSearchAdapter  # noqa: E402
+from testpilot_core.retrieval import shape_trigram_query  # noqa: E402
 from testpilot_workers._bootstrap import bootstrap  # noqa: E402
 
-_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[一-鿿]+")
+
+@dataclass
+class Case:
+    name: str
+    query: str
+    expect: str | None = None  # 命中判定：TopK 的 URN 含此子串即 HIT
+    forbid: str | None = None  # 负例回归：TopK 的 URN 一律不得含此子串
+    note: str = ""
 
 
-def shape_unicode61(raw: str) -> str:
-    """unicode61 下的诚实整形：ASCII 标识符整词 + 汉字段整段精确 token，OR 连接。
+BUILTIN_CASES = [
+    Case(
+        name="机身键/熄屏→锁屏按键日志（向量翻盘题）",
+        # 与文档词面（锁屏/按键/物理键）零三元串交集：BM25 只弱命中调度器符号、
+        # 目标文档缺席；向量靠语义把目标块带进 @5；hybrid 再用 RRF+权威质量分顶到 #1。
+        query="不用触屏按机身键时，熄灭的屏幕上如何记录这条操作？",
+        expect="锁屏按键日志",
+        note="题面与'锁屏键/物理键'零词面交集：BM25 预期 MISS、向量翻盘、hybrid 置顶",
+    ),
+    Case(
+        name="未关闭再响实现与真机验证",
+        query="未关闭再响是怎么实现的？真机上怎么验证？",
+        expect="未关闭再响实现与真机验证",
+    ),
+    Case(
+        name="iOS27 侧边键冷启动误挂静音门",
+        query="iOS27 侧边键冷启动后快照误挂静音门是什么问题？怎么修的？",
+        expect="侧边键冷启动",
+    ),
+    Case(
+        name="EventDetailView 不回归（语料定界负例）",
+        query="EventDetailView 是怎么把事件传给详情页的？",
+        forbid="EventDetailView",
+        # 不能要求整句 0 命中：查询里的通用中文三元串（怎么把/事件传/详情页）在
+        # trigram OR 语义下会弱命中无关块，向量也会给语义近邻的其他 View——
+        # 这些是"无证据问题"的噪声（S1.4 答案层判无证据），不是定界回归。
+        # 真正要守的线：作废 SPM 包的 EventDetailView 切块绝不出现在任何通道 TopK。
+        note="EventDetailView 属 2026-08 作废 SPM 包（已排除 code_roots）；TopK 出现即回归",
+    ),
+]
 
-    连续汉字段必须与某 token 完全相等才命中（如文档标题前缀里的原词）；
-    自然语言整句通常 0 命中——这正是 S1.2 要换分词的证据。
-    """
-    toks = _TOKEN_RE.findall(raw)
-    seen: set[str] = set()
-    uniq = [t for t in toks if not (t in seen or seen.add(t))]
-    return " OR ".join(uniq)
+
+def _short(urn: str) -> str:
+    return urn.replace("urn:testpilot:fs-docs:chunk:", "")
 
 
-def shape_trigram(raw: str) -> str:
-    """trigram：ASCII 词保留；汉字段取相邻三元串（短于 3 的段退化为整段精确）。"""
-    terms: list[str] = []
-    for tok in _TOKEN_RE.findall(raw):
-        if re.fullmatch(r"[一-鿿]+", tok):
-            if len(tok) < 3:
-                terms.append(tok)
-            else:
-                terms.extend(tok[i : i + 3] for i in range(len(tok) - 2))
-        else:
-            terms.append(tok)
-    seen: set[str] = set()
-    uniq = [t for t in terms if not (t in seen or seen.add(t))]
-    return " OR ".join(uniq)
+async def _channels(adapter: HybridSearchAdapter, query: str, k: int) -> dict:
+    """同一题面跑三通道；返回 {channel: [urn,...]/None(通道不可用)}。"""
+    match_expr, like_terms = shape_trigram_query(query)
+    fts_rank, vec_rank, hybrid = await asyncio.gather(
+        adapter._fts_recall(match_expr, like_terms, "main", "default", ()),  # noqa: SLF001
+        adapter._vector_recall(query, "main", "default", ()),  # noqa: SLF001
+        adapter.search(query, limit=k),
+    )
+    return {
+        "BM25": fts_rank.urns[:k],
+        "vector": None if vec_rank.error else vec_rank.urns[:k],
+        "vector_error": vec_rank.error,
+        "hybrid": [c.urn for c in hybrid.chunks][:k],
+        "degraded": hybrid.trace.degraded,
+    }
 
 
-SQL_RESULTS = """
-    SELECT c.urn, c.kind, c.quality_score,
-           snippet({fts}, 0, '[', ']', ' … ', 12) AS snip
-    FROM {fts} JOIN chunks c ON c.urn = {fts}.chunk_urn
-    WHERE {fts} MATCH ? ORDER BY rank LIMIT ?
-"""
+def _judge(case: Case, urns: list[str] | None) -> bool | None:
+    if urns is None:
+        return None  # 通道不可用：不计入命中率分母
+    if case.forbid is not None:
+        return not any(case.forbid in u for u in urns)  # 负例：出现禁词即失败
+    if case.expect is not None:
+        return any(case.expect in u for u in urns)
+    return None  # 无判定条件：只展示
+
+
+async def run_case(adapter: HybridSearchAdapter, case: Case, k: int, verbose: bool) -> dict:
+    res = await _channels(adapter, case.query, k)
+    print(f"\n{'=' * 78}")
+    print(f"题: {case.name}")
+    print(f"问: {case.query}")
+    if case.note:
+        print(f"注: {case.note}")
+    if case.forbid is not None:
+        label = f"负例：TopK 不得含 {case.forbid!r}"
+    elif case.expect is not None:
+        label = f"期望 URN 含 {case.expect!r}"
+    else:
+        label = "无判定（仅展示）"
+    print(f"{label}（K={k}）")
+    if res["vector_error"]:
+        print(f"⚠️  向量通道不可用（降级 FTS-only）：{res['vector_error']}")
+    if res["degraded"]:
+        print("⚠️  hybrid 本次为降级结果")
+
+    outcomes = {}
+    for channel in ("BM25", "vector", "hybrid"):
+        urns = res[channel]
+        ok = _judge(case, urns)
+        outcomes[channel] = ok
+        mark = "—" if ok is None else ("✅" if ok else "❌")
+        state = "不可用" if urns is None else ("0 命中" if not urns else f"{len(urns)} 条")
+        print(f"  {mark} {channel:7s} [{state}]")
+        if verbose and urns:
+            for i, urn in enumerate(urns[:k], 1):
+                if case.forbid is not None:
+                    star = " ← 违禁!" if case.forbid in urn else ""
+                elif case.expect is not None:
+                    star = " ← HIT" if case.expect in urn else ""
+                else:
+                    star = ""
+                print(f"       #{i} {_short(urn)}{star}")
+    return outcomes
+
+
+async def amain() -> int:
+    parser = argparse.ArgumentParser(description="S1.2 三通道召回对照探针（BM25 / vector / hybrid）")
+    parser.add_argument("query", nargs="?", help="自然语言查询；省略则跑内置题集")
+    parser.add_argument("-k", type=int, default=5, help="TopK（默认 5）")
+    parser.add_argument("--expect", help="期望命中的 URN 片段（单题模式）")
+    parser.add_argument("--cases", choices=["builtin"], help="题集：builtin（默认，无 query 时）")
+    parser.add_argument("-q", "--quiet", action="store_true", help="只打印命中行，不列 TopK")
+    args = parser.parse_args()
+
+    if args.query is None or args.cases == "builtin":
+        cases = BUILTIN_CASES
+    else:
+        cases = [Case(name="ad-hoc", query=args.query, expect=args.expect)]
+
+    container = bootstrap("recall-probe")
+    adapter = container.get("search")
+    if not isinstance(adapter, HybridSearchAdapter):
+        print(
+            "当前 profile 的 search 不是 hybrid（离线/FTS-only profile 无向量通道）。\n"
+            "请用：TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml "
+            "TESTPILOT_REPO_PATH=... python scripts/recall_probe.py",
+            file=sys.stderr,
+        )
+        return 2
+
+    # 预检：向量库活着才跑（embed 失败会在通道里显形，但容器没起时给前置提示更友好）
+    if not await adapter.vectors.healthcheck():
+        print("⚠️  Chroma healthcheck 失败：vector 通道将显示不可用，hybrid 走降级 FTS-only",
+              file=sys.stderr)
+
+    tally = {"BM25": [0, 0], "vector": [0, 0], "hybrid": [0, 0]}  # [命中数, 有效题数]
+    try:
+        for case in cases:
+            outcomes = await run_case(adapter, case, args.k, verbose=not args.quiet)
+            for ch, hit in outcomes.items():
+                if hit is not None:
+                    tally[ch][1] += 1
+                    tally[ch][0] += int(hit)
+    finally:
+        container.get("store").close()
+
+    print(f"\n{'=' * 78}")
+    print(f"FR-KNO-001 AC1 各阶段 HIT@{args.k} 汇总（{len(cases)} 题；不可用通道不计分母）")
+    for ch, (hits, total) in tally.items():
+        rate = f"{hits}/{total}" if total else "n/a"
+        pct = f"（{hits / total:.0%}）" if total else ""
+        print(f"  {ch:7s} {rate}{pct}")
+    failed = [ch for ch, (hits, total) in tally.items() if total and hits < total]
+    return 1 if failed else 0
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="S1.1 召回探针（默认 trigram 模式）")
-    parser.add_argument("query", help="自然语言查询")
-    parser.add_argument("-k", type=int, default=5, help="TopK（默认 5）")
-    parser.add_argument("--expect", help="期望 URN 包含的片段，判定 HIT@K/MISS@K")
-    parser.add_argument("--unicode61", action="store_true", help="走生产 FTS + 整形（对照组）")
-    parser.add_argument("--raw", action="store_true", help="原句直喂生产 FTS（对照组）")
-    args = parser.parse_args()
-
-    container = bootstrap("recall-probe")
-    conn = container.adapters["store"].conn
-
-    if args.raw or args.unicode61:
-        fts = "chunks_fts"
-        expr = args.query if args.raw else shape_unicode61(args.query)
-        mode = "raw(unicode61)" if args.raw else "shaped(unicode61)"
-    else:
-        # 临时 trigram 索引：只在本次连接存活，不污染生产库
-        conn.execute("DROP TABLE IF EXISTS temp.tri_fts")
-        conn.execute(
-            "CREATE VIRTUAL TABLE temp.tri_fts USING fts5(text, chunk_urn UNINDEXED, "
-            "tokenize='trigram')"
-        )
-        conn.execute("INSERT INTO tri_fts(text, chunk_urn) SELECT text, urn FROM chunks")
-        fts = "tri_fts"
-        expr = shape_trigram(args.query)
-        mode = "trigram(temp)"
-
-    print(f"\n模式 : {mode}")
-    print(f"查询 : {args.query}")
-    print(f"MATCH: {expr[:160]}{' …' if len(expr) > 160 else ''}\n")
-
-    try:
-        rows = conn.execute(SQL_RESULTS.format(fts=fts), (expr, args.k)).fetchall()
-    except Exception as exc:  # noqa: BLE001 - 探针就是要把语法错显形
-        print(f"❌ MATCH 报错（S1.2 检索器需做查询转义/分词）：{type(exc).__name__}: {exc}")
-        sys.exit(2)
-
-    if not rows:
-        print("（0 命中）")
-    for i, r in enumerate(rows, 1):
-        short = r["urn"].replace("urn:testpilot:fs-docs:chunk:", "")
-        print(f"#{i} [{r['kind']}] q={r['quality_score']:.2f} {short}")
-        print(f"    {r['snip']}")
-
-    if args.expect:
-        hit = any(args.expect in r["urn"] for r in rows)
-        print(f"\n判定: {'✅ HIT@%d' % args.k if hit else '❌ MISS@%d' % args.k}（期望片段 {args.expect!r}）")
+    sys.exit(asyncio.run(amain()))
 
 
 if __name__ == "__main__":

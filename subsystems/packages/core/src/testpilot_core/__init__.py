@@ -4,6 +4,6 @@
 只允许依赖 pydantic 与标准库。import-lint（scripts/import_lint.py）强制该校验。
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 __all__ = ["SCHEMA_VERSION"]

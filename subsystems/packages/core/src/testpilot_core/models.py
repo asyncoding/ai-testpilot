@@ -86,6 +86,31 @@ class KnowledgeChunk(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class VectorItem(BaseModel):
+    """向量库写入单元（S1.2）：id 直接用 chunk URN，稳定且幂等。
+
+    metadata 承载 project/branch/acl_scope/kind/content_hash/quality，
+    供向量库侧过滤；不同 profile 的 collection 名由配置决定。
+    """
+
+    id: str
+    embedding: list[float]
+    text: str = ""
+    metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata")
+
+    model_config = {"populate_by_name": True}
+
+
+class VectorHit(BaseModel):
+    """向量库单条命中；distance 为引擎原生距离（越小越近），已按升序排列。"""
+
+    id: str
+    distance: float
+    metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata")
+
+    model_config = {"populate_by_name": True}
+
+
 class Entity(BaseModel):
     urn: str
     kind: Literal["requirement", "test_case", "code_symbol", "issue", "doc_section", "incident", "pipeline"]

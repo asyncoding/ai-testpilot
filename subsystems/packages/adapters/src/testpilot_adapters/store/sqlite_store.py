@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import OutboxStatus
@@ -32,6 +32,15 @@ def _now_iso() -> str:
 _COLUMN_MIGRATIONS = {
     "entities": {"doc_urn": "TEXT"},
     "relations": {"doc_urn": "TEXT"},
+    # v3 向量嵌入阶段（FR-ING-001：每步留痕可重跑）
+    "ingestion_status": {
+        "embed_stage": "TEXT NOT NULL DEFAULT ''",
+        "embed_model": "TEXT NOT NULL DEFAULT ''",
+        "embed_dim": "INTEGER NOT NULL DEFAULT 0",
+        "embed_latency_ms": "INTEGER NOT NULL DEFAULT 0",
+        "embed_error": "TEXT NOT NULL DEFAULT ''",
+        "embedded_at": "TEXT",
+    },
 }
 
 
@@ -41,6 +50,22 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
         for name, decl in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def _migrate_fts_to_trigram(conn: sqlite3.Connection) -> None:
+    """v2→v3：FTS5 不支持原地换 tokenizer。老库的 unicode61 表 DROP 后按
+    trigram 重建并从 chunks 回填（连续汉字在 unicode61 下整段成词，自然语言
+    检索必 0 命中，见 handoff S1.1.2 取证）。"""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'"
+    ).fetchone()
+    if row and row["sql"] and "trigram" not in row["sql"]:
+        conn.execute("DROP TABLE chunks_fts")
+        conn.execute(
+            "CREATE VIRTUAL TABLE chunks_fts USING fts5("
+            "text, chunk_urn UNINDEXED, tokenize='trigram')"
+        )
+        conn.execute("INSERT INTO chunks_fts(text, chunk_urn) SELECT text, urn FROM chunks")
 
 
 def bootstrap_store(data_dir: str | Path) -> "Store":
@@ -53,6 +78,7 @@ def bootstrap_store(data_dir: str | Path) -> "Store":
     schema_sql = resources.files("testpilot_adapters.store").joinpath("schema.sql").read_text(encoding="utf-8")
     conn.executescript(schema_sql)
     _migrate_columns(conn)
+    _migrate_fts_to_trigram(conn)
     conn.execute(
         """INSERT INTO meta(key,value) VALUES('schema_version',?)
            ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
@@ -121,6 +147,142 @@ class Store:
             (query, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def _like_escape(term: str) -> str:
+        return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    def search_fts_matches(
+        self,
+        match_expr: str,
+        like_terms: Sequence[str] = (),
+        *,
+        branch: str = "main",
+        acl_scope: str = "default",
+        kinds: Sequence[str] = (),
+        include_stale: bool = False,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """trigram FTS 布尔查询 + 短词 LIKE 兜底（retrieval.shape_trigram_query 产物）。
+
+        返回 [{urn, score}]，score=-bm25（越大越相关）。match_expr 与 like_terms
+        之间 OR；project/分支/密级/类型过滤在 SQL 内完成。输入已由纯函数整形，
+        LIKE 词只含字母/数字/下划线/CJK，仍做 % _ 转义。
+        """
+        # FTS5 下 bm25() 只能用在"带 MATCH 的那条 SELECT 本身"：与 LIKE 在
+        # WHERE 里 OR 并列报 "unable to use function MATCH..."；包进子查询
+        # 再聚合，trigram 分词器命中首行即报 "unable to use function bm25..."
+        # （均已实测）。故两条路径分别查询，Python 合并去重：MATCH 命中按
+        # bm25 排序在前，LIKE-only 命中置后——融合阶段只消费排名。
+        filter_sql = ["AND c.branch = ?", "AND d.acl_scope = ?"]
+        filter_params: list[Any] = [branch, acl_scope]
+        if kinds:
+            filter_sql.append(f"AND c.kind IN ({','.join('?' for _ in kinds)})")
+            filter_params.extend(kinds)
+        if not include_stale:
+            filter_sql.append("AND c.stale = 'fresh'")
+        filters = "\n".join(filter_sql)
+
+        merged: dict[str, float] = {}
+        order: list[str] = []
+        if match_expr:
+            sql = (
+                "SELECT c.urn AS urn, -bm25(chunks_fts) AS score\n"
+                "FROM chunks_fts JOIN chunks c ON c.urn = chunks_fts.chunk_urn\n"
+                "JOIN source_documents d ON d.urn = c.doc_urn\n"
+                "WHERE chunks_fts MATCH ?\n" + filters + "\n"
+                "ORDER BY score DESC, c.doc_urn, c.idx LIMIT ?"
+            )
+            for r in self.conn.execute(
+                sql, [match_expr, *filter_params, limit]
+            ).fetchall():
+                if r["urn"] not in merged:
+                    merged[r["urn"]] = r["score"]
+                    order.append(r["urn"])
+        if like_terms and len(order) < limit:
+            like_sql = " OR ".join("c.text LIKE ? ESCAPE '\\'" for _ in like_terms)
+            sql = (
+                "SELECT c.urn AS urn\n"
+                "FROM chunks c JOIN source_documents d ON d.urn = c.doc_urn\n"
+                f"WHERE ({like_sql})\n" + filters + "\n"
+                "ORDER BY c.doc_urn, c.idx LIMIT ?"
+            )
+            params = [
+                f"%{self._like_escape(t)}%" for t in like_terms
+            ] + filter_params + [limit]
+            for r in self.conn.execute(sql, params).fetchall():
+                if r["urn"] not in merged:
+                    merged[r["urn"]] = 0.0
+                    order.append(r["urn"])
+        return [{"urn": urn, "score": merged[urn]} for urn in order[:limit]]
+
+    def load_retrieval_chunks(self, urns: Sequence[str]) -> list[dict[str, Any]]:
+        """按 URN 批量取切块与所属文档元信息（KNO-001 AC2：URI + content_hash）。
+
+        返回顺序与传入 urns 一致（融合排序在调用侧）；缺失 URN 跳过。
+        """
+        if not urns:
+            return []
+        placeholders = ",".join("?" for _ in urns)
+        rows = self.conn.execute(
+            f"""SELECT c.raw_json AS chunk_json, c.quality_score AS quality_score,
+                       d.uri AS doc_uri, d.mtime AS doc_mtime,
+                       d.authority_level AS doc_authority,
+                       d.content_hash AS doc_content_hash,
+                       d.acl_scope AS acl_scope
+                FROM chunks c JOIN source_documents d ON d.urn = c.doc_urn
+                WHERE c.urn IN ({placeholders})""",
+            list(urns),
+        ).fetchall()
+        by_urn = {}
+        for r in rows:
+            chunk = json.loads(r["chunk_json"])
+            chunk["doc_uri"] = r["doc_uri"]
+            chunk["doc_mtime"] = r["doc_mtime"]
+            chunk["doc_authority"] = r["doc_authority"]
+            chunk["doc_content_hash"] = r["doc_content_hash"]
+            by_urn[chunk["urn"]] = chunk
+        return [by_urn[u] for u in urns if u in by_urn]
+
+    def record_retrieval_event(
+        self,
+        *,
+        query: str,
+        query_sha: str,
+        project: str,
+        branch: str,
+        acl_scope: str,
+        kinds: Sequence[str],
+        model_version: str,
+        fts_available: bool,
+        vector_available: bool,
+        degraded: bool,
+        fts_urns: Sequence[str],
+        vector_urns: Sequence[str],
+        fused_urns: Sequence[str],
+        fts_latency_ms: int,
+        vector_latency_ms: int,
+        extra: dict[str, Any] | None = None,
+    ) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO retrieval_events
+               (ts, query, query_sha, project, branch, acl_scope, kinds, model_version,
+                fts_available, vector_available, degraded, fts_urns, vector_urns,
+                fused_urns, fts_latency_ms, vector_latency_ms, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                _now_iso(), query, query_sha, project, branch, acl_scope,
+                ",".join(kinds), model_version,
+                int(fts_available), int(vector_available), int(degraded),
+                json.dumps(list(fts_urns), ensure_ascii=False),
+                json.dumps(list(vector_urns), ensure_ascii=False),
+                json.dumps(list(fused_urns), ensure_ascii=False),
+                fts_latency_ms, vector_latency_ms,
+                json.dumps(extra or {}, ensure_ascii=False),
+            ),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
 
     # ── 入库管线（schema v2，FR-ING-001）────────────────────────────────
     def list_documents(self, source_system: str) -> list[sqlite3.Row]:
@@ -221,7 +383,10 @@ class Store:
                    ON CONFLICT(doc_urn) DO UPDATE SET
                      content_hash=excluded.content_hash, stage='indexed',
                      chunk_count=excluded.chunk_count, avg_quality=excluded.avg_quality,
-                     last_run_id=excluded.last_run_id, error='', updated_at=excluded.updated_at""",
+                     last_run_id=excluded.last_run_id, error='',
+                     -- 内容变了：旧向量作废，等待嵌入阶段重建
+                     embed_stage='', embed_error='',
+                     updated_at=excluded.updated_at""",
                 (doc.urn, doc.source_system, doc.content_hash, "indexed", len(chunks), avg,
                  run_id, "", _now_iso()),
             )
@@ -259,6 +424,79 @@ class Store:
                  stage='failed', error=excluded.error, last_run_id=excluded.last_run_id,
                  updated_at=excluded.updated_at""",
             (doc_urn, source_system, content_hash, "failed", run_id, error[:2000], _now_iso()),
+        )
+        self.conn.commit()
+
+    # ── 向量嵌入阶段（v3）──────────────────────────────────────────────
+    def list_chunk_urns(self, doc_urn: str) -> list[str]:
+        """文档当前全部切块 URN（删文档/更新文档前取旧集合做向量孤儿清理）。"""
+        return [
+            r["urn"]
+            for r in self.conn.execute(
+                "SELECT urn FROM chunks WHERE doc_urn=? ORDER BY idx", (doc_urn,)
+            ).fetchall()
+        ]
+
+    def list_doc_chunks_for_embed(self, doc_urn: str) -> list[dict[str, Any]]:
+        """取文档切块 + 向量 metadata 所需的文档字段（只取 fresh）。"""
+        rows = self.conn.execute(
+            """SELECT c.urn AS urn, c.doc_urn AS doc_urn, c.kind AS kind,
+                      c.text AS text, c.quality_score AS quality_score,
+                      c.branch AS branch, c.content_hash AS content_hash,
+                      d.acl_scope AS acl_scope, d.uri AS doc_uri,
+                      d.content_hash AS doc_content_hash
+               FROM chunks c JOIN source_documents d ON d.urn = c.doc_urn
+               WHERE c.doc_urn=? AND c.stale='fresh' ORDER BY c.idx""",
+            (doc_urn,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_docs_pending_embed(self, source_system: str) -> list[str]:
+        """内容已 indexed 但向量未就绪的文档（历史失败重试 / 向量能力新启用时的补偿）。"""
+        return [
+            r["doc_urn"]
+            for r in self.conn.execute(
+                """SELECT doc_urn FROM ingestion_status
+                   WHERE source_system=? AND stage='indexed'
+                     AND embed_stage IS DISTINCT FROM 'embedded'""",
+                (source_system,),
+            ).fetchall()
+        ]
+
+    def mark_document_embedded(
+        self, doc_urn: str, *, model: str, dim: int, latency_ms: int
+    ) -> None:
+        doc = self.conn.execute(
+            "SELECT source_system, content_hash FROM source_documents WHERE urn=?",
+            (doc_urn,),
+        ).fetchone()
+        if doc is None:
+            return  # 文档已删（本轮处理中被对账删除的竞态）
+        self.conn.execute(
+            """INSERT INTO ingestion_status
+                 (doc_urn, source_system, content_hash, stage, last_run_id,
+                  embed_stage, embed_model, embed_dim, embed_latency_ms,
+                  embed_error, embedded_at, updated_at)
+               VALUES (?,?,?, 'indexed', '', 'embedded', ?, ?, ?, '', ?, ?)
+               ON CONFLICT(doc_urn) DO UPDATE SET
+                 embed_stage='embedded', embed_model=excluded.embed_model,
+                 embed_dim=excluded.embed_dim,
+                 embed_latency_ms=excluded.embed_latency_ms,
+                 embed_error='', embedded_at=excluded.embedded_at,
+                 updated_at=excluded.updated_at""",
+            (doc_urn, doc["source_system"], doc["content_hash"], model, dim,
+             latency_ms, _now_iso(), _now_iso()),
+        )
+        self.conn.commit()
+
+    def mark_document_embed_failed(
+        self, doc_urn: str, run_id: str, error: str
+    ) -> None:
+        # 走到嵌入阶段说明内容加工已成功，ingestion_status 行必然存在
+        self.conn.execute(
+            """UPDATE ingestion_status SET embed_stage='failed', embed_error=?,
+                 last_run_id=?, updated_at=? WHERE doc_urn=?""",
+            (error[:2000], run_id, _now_iso(), doc_urn),
         )
         self.conn.commit()
 

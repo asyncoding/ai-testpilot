@@ -1,5 +1,6 @@
 # ios-local-poc：日常开发与主演示 profile（docs/07 §9）
-# S0 阶段 runner/model 仍用录制适配器；S1 起 model→ollama、S3 起 runner→xcode、env→ios-simulator。
+# S1.2 起 model=ollama、vectors=chroma、search=hybrid（真实嵌入+混合检索）；
+# runner 仍为 recorded（S3 起 xcode）、environment 仍 stub（S3 起 ios-simulator）。
 profile: ios-local-poc
 
 project:
@@ -76,7 +77,28 @@ adapters:
   environment: {type: stub}
   artifact:   {type: localfs}
   logs:       {type: stub}
-  search:     {type: sqlite-fts}
-  model:      {type: recorded}   # S1: ollama
+  # S1.2 混合检索：BM25(trigram) + dmeta 向量 RRF 融合。
+  # 起服务：docker compose -f deploy/docker-compose.yml up -d chroma；ollama serve。
+  # 向量通道运行期故障会自动降级 FTS-only 并在 retrieval_events 留痕（非装配错误）。
+  search:
+    type: hybrid
+    settings:
+      channel_top_k: 20
+      rrf_k: 60
+      quality_power: 1.0
+      half_life_days: null       # 语料 mtime 集中在近期同批，先不启用新鲜度衰减
+  model:
+    type: ollama                 # 地址可用 TESTPILOT_OLLAMA_URL 覆盖
+    settings:
+      base_url: http://localhost:11434
+      chat_model: qwen2.5:7b
+      embed_model: shaw/dmeta-embedding-zh   # ~200MB；拉取失败退 bge-m3
+      timeout: 60
+  vectors:
+    type: chroma                 # 地址可用 TESTPILOT_CHROMA_URL 覆盖
+    settings:
+      base_url: http://localhost:8000
+      collection: alarmkitspike-chunks
+      timeout: 30
   queue:      {type: sqlite}     # S3: redis+arq
-  tracer:     {type: noop}       # compose 起来后可切 langfuse
+  tracer:     {type: noop}       # compose observability profile 起来后可切 langfuse

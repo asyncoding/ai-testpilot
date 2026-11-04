@@ -23,6 +23,8 @@ from .models import (
     TestCase,
     TestExecutionRequest,
     TestRun,
+    VectorHit,
+    VectorItem,
 )
 
 
@@ -146,6 +148,30 @@ class ModelGatewayPort(Protocol):
         ...
 
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+@runtime_checkable
+class VectorStorePort(Protocol):
+    """切块向量索引（S1.2，Chroma REST 实现）；一个适配器绑一个 collection。"""
+
+    async def healthcheck(self) -> bool: ...
+
+    async def upsert(self, items: list[VectorItem]) -> None:
+        """按 id（chunk URN）幂等写入；含同名 collection 自动 get-or-create。"""
+        ...
+
+    async def query(
+        self,
+        vector: list[float],
+        top_k: int,
+        where: dict[str, Any] | None = None,
+    ) -> list[VectorHit]:
+        """按距离升序返回；where 为引擎原生 metadata 过滤。"""
+        ...
+
+    async def delete(self, ids: list[str]) -> None:
+        """按 id 删除（文档级联：ingest 删除文档时同步清理向量）。"""
+        ...
 
 
 @runtime_checkable

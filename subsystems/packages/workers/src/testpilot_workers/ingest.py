@@ -40,11 +40,14 @@ def main() -> None:
     trigger = "full" if args.full else "incremental"
     report = asyncio.run(run_ingestion(container, trigger=trigger, full=args.full))
     print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
-    if report.failed:
+    if report.failed or report.embed_failed:
         print(
-            f"[ingest-worker] {report.failed} 个文档加工失败（已进 dead_letters，不阻断整批）",
+            f"[ingest-worker] 批次 {report.status}：{report.failed} 个文档加工失败、"
+            f"{report.embed_failed} 个文档嵌入失败（均进 dead_letters，可重跑补偿）",
             file=sys.stderr,
         )
+        # partial 显式非零退出：手工/CI 不能把降级批次误读为成功
+        sys.exit(1)
 
 
 if __name__ == "__main__":

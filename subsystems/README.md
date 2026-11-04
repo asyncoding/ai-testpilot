@@ -39,8 +39,9 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（46 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
-# 核心防腐、S1.1 切块/质量分/入库管线：增量、删除级联、幂等、坏文件隔离、符号召回）
+# 全量契约测试（110+ 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 核心防腐、S1.1 切块/质量分/入库管线、S1.2 Ollama/Chroma 契约与三通道融合；
+# 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
 # 核心层防腐门禁（core 禁止 import fastapi/sqlite/yaml/各兄弟包等）
@@ -94,14 +95,78 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml .venv/bin/testpilot-ingest
 - Swift 切块是**词法扫描的最简符号切**（类/结构体/枚举/actor/protocol/extension/func、
   selector 风格符号 ID、同文件 calls 关系、注释字符串屏蔽、struct+extension 重名去歧）；
   生产可换 SwiftSyntax，产出契约不变（FR-ING-002 AC3 命中率对比在评测期补）。
-- 实测（2026-11-03，AlarmKitSpike 真实仓）：65 文档 / 1238 切块 / 136 符号 /
-  103 调用关系；`scheduleAlarm` 类查询代码符号块 BM25 排名第一。注意事故文档里的
+- 实测（2026-11-03，AlarmKitSpike 真实仓）：84 文档 / 1421 切块（S1.1.1 语料定界
+  修正后；44 Sources + 3 Shared + 3 WidgetExtension + 34 md）；`scheduleAlarm`
+  类查询代码符号块 BM25 排名第一。注意事故文档里的
   `MissionCoordinator.schedulePrimary` 在当前 HEAD 已不存在——这是 S1.4 live-verify
   与"历史证词并列"要处理的真实重构陷阱素材。
 - 重置演示库：`rm -rf store/ios-local-poc`（生成物，不入库）。
 
-已知限制（后续阶段处理）：向量/混合检索在 S1.2；FTS5 查询串中的 `.`/`:` 等需转义
-（检索器实现时处理）；实体关系层目前只有 Swift calls，doc 章节/需求实体在 S2/S4。
+## 混合检索（S1.2）：Ollama 嵌入 + Chroma + BM25 RRF
+
+`ios-local-poc` profile 现在是**真实模型/真实向量库**（非录制）：
+`model=ollama`（chat `qwen2.5:7b`、embed `shaw/dmeta-embedding-zh`）、
+`vectors=chroma`（collection `alarmkitspike-chunks`）、`search=hybrid`
+（trigram-BM25 ∥ 向量召回 → RRF k=60 × 质量分 × 可选新鲜度衰减）。
+`offline-demo` 保持 recorded + `sqlite-fts` + 无 vectors，离线可完整演示。
+
+```bash
+# 1) 起 Chroma（数据在 docker volume chroma-data；镜像拉取不通见文末备用路径）
+docker compose -f deploy/docker-compose.yml up -d chroma
+
+# 2) 起 Ollama 并拉模型（embed 模型约 200MB；registry 不通可退 bge-m3，
+#    改 profile 里 model.settings.embed_model 即可，维度随模型自动记录）
+ollama serve &
+ollama pull shaw/dmeta-embedding-zh
+
+# 3) 入库（内容加工后自动跑嵌入补偿阶段；--full 全量重切重嵌）
+export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
+TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml .venv/bin/testpilot-ingest --full
+
+# 4) 三通道召回对照（BM25-only / vector-only / hybrid 的 HIT@5 与翻盘证据）
+TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
+  .venv/bin/python scripts/recall_probe.py
+```
+
+嵌入阶段语义（`ingestion_status` 留痕 embed_stage/model/dim/latency_ms）：
+
+- 只嵌「内容已 indexed 但向量未就绪」的文档：**unchanged 且已嵌入的文档不再调模型**
+  （幂等省钱）；历史嵌入失败、向量能力首次启用的全量补偿在普通增量跑里自动完成，
+  不需要 `--full`；单文档 embed/upsert 失败进死信（`ingestion-embed`）、批次 partial，
+  内容加工与 FTS 不受影响。
+- 文档删除同步删 Chroma 切块；文档改标题导致 anchor 变化时，旧 anchor 向量作孤儿清除。
+- 检索期向量通道故障（Ollama/Chroma 停了）→ 自动降级 **FTS-only**，`degraded=true`
+  与错误写 `retrieval_events.raw_json.vector_error`，不吞错；两通道都空 = 真空结果，
+  不算降级。装配期配错（hybrid 却没配 vectors）直接 ValueError，不许静默退化。
+
+> 本机代理注意：Clash 类工具会把系统代理写进 macOS SystemConfiguration，
+> httpx/urllib 对 localhost 的请求也会被代理 502（curl 直连 200）。适配器对
+> loopback 目标自动 `trust_env=False` 绕过（`adapters/http_util.py`）；远端地址仍读
+> 环境代理。Ollama/Chroma 地址可用 `TESTPILOT_OLLAMA_URL` / `TESTPILOT_CHROMA_URL`
+> 覆盖，不写死在 profile 里。
+
+已知行为/限制（后续阶段处理）：
+
+- 无强匹配词的查询，BM25 会被查询里的**通用中文三元串**（"怎么把/事件传"）弱命中无关块
+  （trigram OR 语义：任一三元串命中即返回，2026-11-04 EventDetailView 负例实测）；
+  向量通道同理会给语义近邻。这类"知识库里实际没有"的问题靠 S1.4 答案层做证据充分性
+  判定（无证据显式回答不知道），不在这里靠召回层硬滤。
+- 实体关系层目前只有 Swift calls，doc 章节/需求实体在 S2/S4；
+  新鲜度衰减当前显式关闭（语料 mtime 集中在近期同批，`half_life_days: null`）。
+
+三通道 HIT@5 实测（2026-11-04，84 文档/1421 切块，dmeta-embedding-zh 768 维，
+`scripts/recall_probe.py`，证据见 `.agent-handoff/`）：
+
+| 题例 | BM25 | vector | hybrid |
+|---|---|---|---|
+| 机身键/熄屏→锁屏按键日志（零词面交集） | ❌ | ✅ #4 | ✅ **#1** |
+| 未关闭再响实现与真机验证 | ✅ | ✅ | ✅ |
+| iOS27 侧边键冷启动误挂静音门 | ✅ | ✅ | ✅ |
+| EventDetailView 不回归（负例） | ✅ | ✅ | ✅ |
+| **HIT@5** | **3/4（75%）** | **4/4（100%）** | **4/4（100%）** |
+
+降级实测：Chroma 指向死端口时 hybrid 退化为 FTS-only（17 条 FTS 候选照常出答案），
+`retrieval_events.degraded=1`、`raw_json.vector_error="ConnectError: …"`。
 
 ## 一键验收 S0（已闭合的 6 个自动门禁）
 
@@ -116,7 +181,8 @@ bash scripts/verify_s0.sh    # 6 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ## 基础设施（Docker）
 
 ```bash
-# S1+ 用：redis（arq 队列）、chroma（向量检索）。S0 门禁不需要它俩（redis 只在容器网内被 langfuse 用）
+# S1.2 起只用 chroma 即可：docker compose -f deploy/docker-compose.yml up -d chroma
+# 全量起：redis（S3 arq 队列；S0 只在容器网内被 langfuse 用）+ chroma（S1.2 向量检索）
 docker compose -f deploy/docker-compose.yml up -d
 
 # S0 trace 门禁：Langfuse v3 自托管栈（pg/clickhouse/minio 占位/langfuse web + worker）

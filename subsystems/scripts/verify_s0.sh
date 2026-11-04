@@ -7,7 +7,8 @@ PY=.venv/bin/python
 # 门禁必须确定性运行：屏蔽调用方 shell 残留的 TESTPILOT_*/LANGFUSE_* 覆盖
 # （如手工跑第 7 门禁时 export 的 TESTPILOT_TRACER=langfuse，会让 A2 装出
 # LangfuseTracer、A6 在无 key 时 401）。Langfuse 实链是独立的手动步骤，不在这里。
-unset TESTPILOT_TRACER TESTPILOT_REPO_PATH LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY
+unset TESTPILOT_TRACER TESTPILOT_REPO_PATH TESTPILOT_OLLAMA_URL TESTPILOT_CHROMA_URL \
+      LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY
 pass_n=0; fail_n=0
 
 echo "=== A1. venv 与依赖（uv sync 后四个包必须可 import） ==="
@@ -15,7 +16,7 @@ echo "=== A1. venv 与依赖（uv sync 后四个包必须可 import） ==="
 $PY -c "import testpilot_core,testpilot_adapters,testpilot_orchestrator,testpilot_workers" \
   && { echo PASS; pass_n=$((pass_n+1)); } || { echo "FAIL  空壳 editable，修复见 README（uv sync --reinstall-package ...）"; fail_n=$((fail_n+1)); }
 
-echo "=== A2. 契约测试（S1.1 起期望 46 passed） ==="
+echo "=== A2. 全量契约测试（期望 0 failed；Chroma 未起时 3 例集成测试自动 skip） ==="
 $PY -m pytest -q > /tmp/tp_pytest.log 2>&1 && { echo "PASS  $(tail -1 /tmp/tp_pytest.log)"; pass_n=$((pass_n+1)); } || { echo "FAIL  见 /tmp/tp_pytest.log"; fail_n=$((fail_n+1)); }
 
 echo "=== A3. core 防腐门禁（禁止 IO/SDK/兄弟包） ==="

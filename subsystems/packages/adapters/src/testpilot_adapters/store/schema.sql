@@ -1,5 +1,7 @@
--- TestPilot schema（当前 schema_version = 2；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
+-- TestPilot schema（当前 schema_version = 3；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
 -- v1：S0 骨架；v2：入库批次/文档加工状态、entities/relations 挂 doc_urn（S1.1）
+-- v3：chunks_fts 换 trigram 分词（CJK 子串召回，S1.2；老库由 _migrate_fts_to_trigram
+--     DROP+回填）、retrieval_events 各检索阶段命中率留痕（FR-KNO-001 AC1）
 
 PRAGMA journal_mode = WAL;
 
@@ -41,10 +43,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     UNIQUE(doc_urn, idx)
 );
 
+-- trigram：连续汉字整段成词的 unicode61 对自然语言必 0 命中（实测，见 handoff
+-- S1.1.2）；trigram 按 3 字子串索引，支持 CJK 子串召回（<3 字符词不索引，
+-- 查询侧用 LIKE 兜底，见 HybridSearchAdapter）。
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     text,
     chunk_urn UNINDEXED,
-    tokenize = 'unicode61'
+    tokenize = 'trigram'
 );
 
 -- 实体与关系（L1）
@@ -89,14 +94,44 @@ CREATE TABLE IF NOT EXISTS ingestion_status (
     doc_urn       TEXT PRIMARY KEY,
     source_system TEXT NOT NULL,
     content_hash  TEXT NOT NULL,
-    stage         TEXT NOT NULL,          -- indexed / failed
+    stage         TEXT NOT NULL,          -- indexed / failed（内容加工阶段）
     chunk_count   INTEGER NOT NULL DEFAULT 0,
     avg_quality   REAL NOT NULL DEFAULT 0,
     last_run_id   TEXT NOT NULL,
     error         TEXT NOT NULL DEFAULT '',
-    updated_at    TEXT NOT NULL
+    updated_at    TEXT NOT NULL,
+    -- v3 增量列：向量嵌入阶段（独立于内容加工，失败可重试，unchanged 不重嵌）
+    embed_stage       TEXT NOT NULL DEFAULT '',  -- '' / embedded / failed
+    embed_model       TEXT NOT NULL DEFAULT '',
+    embed_dim         INTEGER NOT NULL DEFAULT 0,
+    embed_latency_ms  INTEGER NOT NULL DEFAULT 0,
+    embed_error       TEXT NOT NULL DEFAULT '',
+    embedded_at       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ingestion_status_stage ON ingestion_status(stage);
+
+-- 检索各阶段留痕（v3，FR-KNO-001 AC1：vector-only/BM25-only/混合命中率可对比）
+CREATE TABLE IF NOT EXISTS retrieval_events (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts               TEXT NOT NULL,
+    query            TEXT NOT NULL,
+    query_sha        TEXT NOT NULL,
+    project          TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT 'main',
+    acl_scope        TEXT NOT NULL DEFAULT 'default',
+    kinds            TEXT NOT NULL DEFAULT '',     -- 逗号分隔的类型过滤
+    model_version    TEXT NOT NULL DEFAULT '',
+    fts_available    INTEGER NOT NULL DEFAULT 1,
+    vector_available INTEGER NOT NULL DEFAULT 1,
+    degraded         INTEGER NOT NULL DEFAULT 0,
+    fts_urns         TEXT NOT NULL DEFAULT '[]',
+    vector_urns      TEXT NOT NULL DEFAULT '[]',
+    fused_urns       TEXT NOT NULL DEFAULT '[]',
+    fts_latency_ms   INTEGER NOT NULL DEFAULT 0,
+    vector_latency_ms INTEGER NOT NULL DEFAULT 0,
+    raw_json         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_retrieval_events_ts ON retrieval_events(ts);
 
 -- 人审
 CREATE TABLE IF NOT EXISTS approvals (

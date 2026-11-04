@@ -32,6 +32,7 @@ class AdapterSet(BaseModel):
     logs: AdapterRef
     search: AdapterRef
     model: AdapterRef
+    vectors: AdapterRef  # S1.2：stub（无向量库，FTS-only）/ chroma
     queue: AdapterRef
     tracer: AdapterRef
 

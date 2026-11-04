@@ -51,6 +51,9 @@ adapters:
   model:
     type: recorded
     settings: {}
+  vectors:
+    type: stub                   # 离线 profile：不起 Chroma，检索保持 FTS-only
+    settings: {}
   queue:
     type: sqlite
     settings: {}

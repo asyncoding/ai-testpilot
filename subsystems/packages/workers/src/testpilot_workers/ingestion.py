@@ -11,17 +11,20 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from testpilot_core.chunking import RawChunk, chunk_markdown, chunk_swift
-from testpilot_core.models import Entity, EventEnvelope, KnowledgeChunk, Relation
+from testpilot_core.models import Entity, EventEnvelope, KnowledgeChunk, Relation, VectorItem
 from testpilot_core.quality import score_code_symbol, score_text
 from testpilot_core.urn import make_urn, parse_urn
 
 _SOURCE_SYSTEM = "fs-docs"
+# Ollama /api/embed 单批文本数：保守值，避免超长请求体与服务端批限制
+_EMBED_BATCH = 32
 
 
 def _sha256(text: str) -> str:
@@ -40,6 +43,9 @@ class IngestionReport:
     unchanged: int = 0
     failed: int = 0
     chunks_total: int = 0
+    embedded: int = 0
+    embed_failed: int = 0
+    vector_deleted_docs: int = 0
     details: list[dict[str, Any]] = field(default_factory=list)
     deleted_urns: list[str] = field(default_factory=list)
 
@@ -48,6 +54,8 @@ class IngestionReport:
             "seen": self.seen, "created": self.created, "updated": self.updated,
             "deleted": self.deleted, "unchanged": self.unchanged, "failed": self.failed,
             "chunks_total": self.chunks_total,
+            "embedded": self.embedded, "embed_failed": self.embed_failed,
+            "vector_deleted_docs": self.vector_deleted_docs,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -192,16 +200,32 @@ async def run_ingestion(container, *, trigger: str = "manual", full: bool = Fals
 
         store.start_ingestion_run(run_id, _SOURCE_SYSTEM, trigger)
 
-        # 1) 删除：发事件 → 级联删（发事件先于删，事件表独立保留删除事实）
+        vectors = container.get("vectors")  # 离线 profile 无向量适配器 → 整个阶段跳过
+        # 1) 删除：取旧切块 URN → 发事件 → 级联删 → 同步删向量
+        # （发事件先于删，事件表独立保留删除事实）
         for urn in to_delete:
             with tracer.span("ingest.delete", run_id=run_id, metadata={"urn": urn}):
+                old_chunk_ids = store.list_chunk_urns(urn) if vectors is not None else []
                 event = _event("DocumentDeleted", urn, project, None,
                                {"content_hash": known.get(urn, "")})
                 store.record_event_if_new(event)
                 store.delete_document_cascade(urn)
                 report.deleted_urns.append(urn)
+                if vectors is not None and old_chunk_ids:
+                    try:
+                        await vectors.delete(old_chunk_ids)
+                        report.vector_deleted_docs += 1
+                    except Exception as exc:  # noqa: BLE001 - 孤儿向量不阻断入库
+                        # 孤儿向量在检索时因 sqlite 侧 join 不到而自然失效；
+                        # 记死信，下轮可补偿（不静默吞）。
+                        error = f"{type(exc).__name__}: {exc}"
+                        store.add_dead_letter(
+                            "ingestion-vector-delete",
+                            {"doc_urn": urn, "chunk_ids": old_chunk_ids}, error,
+                        )
 
         # 2) 新增/变更：逐文档加工，单文档失败隔离
+        old_ids_by_doc: dict[str, list[str]] = {}
         for bucket_name, docs in (("created", created), ("updated", updated)):
             for doc in docs:
                 detail: dict[str, Any] = {
@@ -217,6 +241,9 @@ async def run_ingestion(container, *, trigger: str = "manual", full: bool = Fals
                                 else chunk_markdown(text))
                         chunks, symbol_urns = _build_chunks(doc, raws)
                         entities, relations = _build_entities_relations(doc, raws, symbol_urns)
+                        if vectors is not None:
+                            # replace 会清掉旧切块；先存旧 URN，嵌入成功后删向量孤儿
+                            old_ids_by_doc[doc.urn] = store.list_chunk_urns(doc.urn)
                         store.replace_document_index(
                             doc, chunks, entities, relations, run_id
                         )
@@ -248,10 +275,102 @@ async def run_ingestion(container, *, trigger: str = "manual", full: bool = Fals
                     report.failed += 1
                 report.details.append(detail)
 
-        report.status = "succeeded" if report.failed == 0 else "partial"
+        # 3) 向量嵌入：只在 model+vectors 适配器齐备时执行；
+        #    unchanged 且 embed_stage='embedded' 的文档不会出现在待嵌列表，
+        #    自然不调模型（幂等省钱，见 test_unchanged_docs_skip_embed）。
+        model_gw = container.get("model")
+        if vectors is not None and model_gw is not None:
+            await _embed_pending(
+                store, model_gw, vectors, run_id, report, tracer, old_ids_by_doc
+            )
+
+        report.status = (
+            "succeeded"
+            if report.failed == 0 and report.embed_failed == 0
+            else "partial"
+        )
         store.finish_ingestion_run(run_id, report.status, report.counts(), report.to_dict())
 
     return report
+
+
+async def _embed_pending(
+    store, model_gw, vectors, run_id, report, tracer, old_ids_by_doc
+) -> None:
+    """嵌入补偿阶段：所有内容已 indexed 但向量未就绪的文档。
+
+    覆盖三种来源：本轮新增/变更（ingestion_status 刚重置）、历史嵌入失败重试、
+    向量能力首次启用时的全量补偿（无需 --full）。单文档失败进死信、可重试。
+    """
+    model_version = getattr(model_gw, "embed_model", None) or getattr(
+        model_gw, "model_version", "unknown"
+    )
+    pending = store.list_docs_pending_embed(_SOURCE_SYSTEM)
+    for doc_urn in pending:
+        rows = store.list_doc_chunks_for_embed(doc_urn)
+        if not rows:
+            continue  # 竞态：文档已被对账删除
+        with tracer.span(
+            "ingest.embed",
+            run_id=run_id,
+            metadata={"urn": doc_urn, "chunks": len(rows), "model": str(model_version)},
+        ):
+            try:
+                texts = [r["text"] for r in rows]
+                t0 = time.monotonic()
+                embeddings: list[list[float]] = []
+                for i in range(0, len(texts), _EMBED_BATCH):
+                    embeddings.extend(await model_gw.embed(texts[i : i + _EMBED_BATCH]))
+                if len(embeddings) != len(rows) or not embeddings:
+                    raise RuntimeError(
+                        f"embed 条数不匹配：返回 {len(embeddings)}，切块 {len(rows)}"
+                    )
+                items = [
+                    VectorItem(
+                        id=r["urn"],
+                        embedding=embeddings[i],
+                        text=r["text"],
+                        metadata={
+                            "doc_urn": r["doc_urn"],
+                            "kind": r["kind"],
+                            "branch": r["branch"],
+                            "acl_scope": r["acl_scope"],
+                            "content_hash": r["content_hash"],
+                            "doc_content_hash": r["doc_content_hash"],
+                            "doc_uri": r["doc_uri"],
+                            "quality": float(r["quality_score"]),
+                        },
+                    )
+                    for i, r in enumerate(rows)
+                ]
+                await vectors.upsert(items)
+                # 更新文档消失的旧 anchor → 向量孤儿清理
+                orphans = sorted(set(old_ids_by_doc.get(doc_urn, [])) - {r["urn"] for r in rows})
+                if orphans:
+                    await vectors.delete(orphans)
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                store.mark_document_embedded(
+                    doc_urn, model=str(model_version),
+                    dim=len(embeddings[0]), latency_ms=latency_ms,
+                )
+                report.embedded += 1
+                report.details.append({
+                    "urn": doc_urn, "outcome": "embedded", "chunks": len(rows),
+                    "dim": len(embeddings[0]), "latency_ms": latency_ms,
+                    "model": str(model_version), "orphans_deleted": len(orphans),
+                })
+            except Exception as exc:  # noqa: BLE001 - 单文档嵌入失败隔离
+                error = f"{type(exc).__name__}: {exc}"
+                store.add_dead_letter(
+                    "ingestion-embed",
+                    {"urn": doc_urn, "run_id": run_id, "chunks": len(rows)},
+                    error,
+                )
+                store.mark_document_embed_failed(doc_urn, run_id, error)
+                report.embed_failed += 1
+                report.details.append(
+                    {"urn": doc_urn, "outcome": "embed_failed", "error": error}
+                )
 
 
 def _classify(scanned, known: dict[str, str], *, full: bool):

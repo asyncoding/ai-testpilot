@@ -35,11 +35,30 @@ class RecordedModelGateway:
         }
 
     async def structured(self, messages: list[dict[str, str]], schema: dict[str, Any], **options: Any) -> dict[str, Any]:
+        # 与 OllamaModelGateway.structured 同一信封（FR-CON-006 AC1：切模型只改配置）。
         key = options.get("key", "default")
         if key not in self._responses:
             raise AdapterUnavailableError(f"录制响应缺少 key: {key}")
-        return self._responses[key].get("structured", {})
+        resp = self._responses[key]
+        return {
+            "data": resp.get("structured"),
+            "text": resp.get("text", ""),
+            "model": self.model_version,
+            "tokens_in": resp.get("tokens_in", 0),
+            "tokens_out": resp.get("tokens_out", 0),
+            "latency_ms": 0,
+            "attempts": 1,
+            "degraded": resp.get("degraded", False),
+        }
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        # 离线演示用确定性伪向量（仅用于连通/形状测试，不用于真实相似度排序）
-        return [[float((len(t) + i) % 7) / 7.0 for i in range(8)] for t in texts]
+        # 优先读 fixture 里 "__embeddings__"（按文本录制的真向量形状）；
+        # 缺省退回确定性伪向量，仅用于离线连通/形状测试，不用于真实相似度排序。
+        recorded = self._responses.get("__embeddings__", {})
+        out: list[list[float]] = []
+        for t in texts:
+            if t in recorded:
+                out.append([float(x) for x in recorded[t]])
+            else:
+                out.append([float((len(t) + i) % 7) / 7.0 for i in range(8)])
+        return out

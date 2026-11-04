@@ -18,6 +18,9 @@ from testpilot_core.config_schema import ProfileConfig
 _ENV_OVERRIDES = {
     ("project", "repo_path"): "TESTPILOT_REPO_PATH",
     ("adapters", "tracer", "type"): "TESTPILOT_TRACER",
+    # 本机服务端口/远端地址不写死在 profile 里，多机协作时用环境变量覆盖
+    ("adapters", "model", "settings", "base_url"): "TESTPILOT_OLLAMA_URL",
+    ("adapters", "vectors", "settings", "base_url"): "TESTPILOT_CHROMA_URL",
 }
 
 
