@@ -30,6 +30,10 @@ from .models import (
 
 @runtime_checkable
 class CodeRepositoryPort(Protocol):
+    async def head_sha(self, repo: RepoRef) -> str:
+        """解析默认分支 HEAD 的完整 sha（ingestion 写 valid_from 用）。"""
+        ...
+
     async def get_change_set(self, repo: RepoRef, base: str, head: str) -> ChangeSet: ...
 
     async def get_symbol_at_commit(

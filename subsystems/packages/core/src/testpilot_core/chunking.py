@@ -13,6 +13,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+# ── 切块器版本位 ────────────────────────────────────────────────────────────
+# 写入 chunk metadata；live-verify 跨版本比对 hash 时先比对版本位：
+# 只要 RawChunk.text 的生成口径发生变化（哪怕一行），必须 bump 对应常量，
+# 否则旧索引的 content_hash 会被误判成"代码变了"（FR-QA-002 防误报）。
+SWIFT_CHUNKER_VERSION = "lexical-swift-1"
+MARKDOWN_CHUNKER_VERSION = "heading-md-1"
+
 # ── 通用产出契约 ───────────────────────────────────────────────────────────
 
 
@@ -36,6 +43,28 @@ class RawChunk:
     heading_path: tuple[str, ...] = ()
     has_doc_comment: bool = False
     relations: tuple[CallRelation, ...] = ()
+
+
+def select_chunk_by_anchor(chunks: list[RawChunk], anchor: str) -> RawChunk | None:
+    """按 anchor 在重切结果里取回同一个块（live-verify / git 快照共用口径）。
+
+    1) 精确命中（含 chunk_swift 的 `#L<行号>` 去歧 anchor）；
+    2) 退化为去 #L 身份匹配：多个同名声明时按 #L 行号就近选，否则取首个；
+    3) 都没有 → None（符号在目标版本不存在）。
+    行号在版本间漂移，所以 #L 只做同身份内的就近提示，绝不参与身份判定。
+    """
+    for c in chunks:
+        if c.anchor == anchor:
+            return c
+    base = anchor.split("#L", 1)[0]
+    candidates = [c for c in chunks if c.anchor.split("#L", 1)[0] == base]
+    if not candidates:
+        return None
+    line_marker = anchor.split("#L", 1)[1] if "#L" in anchor else ""
+    if line_marker.isdigit():
+        target_line = int(line_marker)
+        return min(candidates, key=lambda c: abs(c.start_line - target_line))
+    return candidates[0]
 
 
 # ── Markdown ───────────────────────────────────────────────────────────────

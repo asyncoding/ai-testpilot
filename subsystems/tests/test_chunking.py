@@ -1,6 +1,8 @@
 """切块纯函数测试（docs/08 FR-ING-002）。"""
 
-from testpilot_core.chunking import chunk_markdown, chunk_swift
+from testpilot_core.chunking import (
+    chunk_markdown, chunk_swift, select_chunk_by_anchor,
+)
 
 
 # ── Markdown ────────────────────────────────────────────────────────────────
@@ -153,3 +155,32 @@ def test_swift_protocol_bodyless_requirement_does_not_crash():
     kind_names = {c.anchor for c in chunks}
     assert "AlarmStore" in kind_names
     assert "AlarmStore.save(id:)" in kind_names
+
+
+# ── select_chunk_by_anchor：live-verify 重切取回口径 ─────────────────────────
+
+def _rc(anchor: str, line: int, text: str = "x\n"):
+    from testpilot_core.chunking import RawChunk
+    return RawChunk(
+        kind="code_symbol", anchor=anchor, title=anchor.split("#L", 1)[0],
+        text=text, start_line=line, end_line=line + 1,
+    )
+
+
+def test_select_chunk_exact_anchor_wins():
+    chunks = [_rc("C.foo()#L10", 10), _rc("C.foo()#L40", 40)]
+    got = select_chunk_by_anchor(chunks, "C.foo()#L40")
+    assert got is chunks[1]
+
+
+def test_select_chunk_drifted_line_picks_nearest():
+    chunks = [_rc("C.foo()#L12", 12), _rc("C.foo()#L40", 40)]
+    # 索引时 anchor 是 #L10，重切后行号漂移到 12/40：就近选 12，不报缺失
+    got = select_chunk_by_anchor(chunks, "C.foo()#L10")
+    assert got is chunks[0]
+    got = select_chunk_by_anchor(chunks, "C.foo()")
+    assert got is chunks[0]  # 无行号提示取首个
+
+
+def test_select_chunk_missing_returns_none():
+    assert select_chunk_by_anchor([_rc("C.foo()", 1)], "C.bar()") is None

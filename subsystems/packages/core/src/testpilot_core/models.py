@@ -226,6 +226,34 @@ class SymbolSnapshot(BaseModel):
     body_changed: bool
 
 
+class LiveVerifyResult(BaseModel):
+    """live-verify 一次校验的结构化结果（docs/08 FR-QA-002）。
+
+    端口 KnowledgeSearchPort.live_verify 仍以 dict（model_dump）返回，
+    保证工作流侧语言中立；每次校验（含失败/降级）都在 verification_events
+    持久化一行——FR-QA-002 AC2 要求代码类问题 100% 有 trace 可查的工具调用。
+    """
+
+    urn: str
+    kind: str = ""  # text | code_symbol；URN 解析失败等早降级时还不知道 kind
+    requested_commit: str = ""  # 调用方指定的 commit；空串表示 HEAD
+    head_commit: str = ""  # 实际校验时解析到的 commit
+    exists: bool | None = None  # 目标版本符号/锚点是否存在；git 不可达时为 None
+    verified: bool = False  # 索引证据在目标版本仍成立（存在且 hash 一致）
+    body_changed: bool | None = None  # True=stale-index；None=无法判定
+    reason: str = ""
+    degraded: bool = False  # git 不可达/路径越界/URN 不可解析等：结果不可信
+    error: str = ""
+    indexed_commit: str | None = None  # 索引切块 valid_from
+    indexed_chunker_version: str | None = None
+    current_chunker_version: str = ""
+    latency_ms: int = 0
+    # 留痕维度（verification_events 投影列）；raw 放排障细节（git 路径/anchor/异常类）
+    project: str = ""
+    branch: str = ""
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
 # ── 执行（语言中立契约，docs/08 FR-EX-001）────────────────────────────────
 
 class EnvironmentRequirements(BaseModel):

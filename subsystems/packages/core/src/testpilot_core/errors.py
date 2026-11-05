@@ -11,6 +11,13 @@ class AdapterUnavailableError(TestPilotError):
     """外部系统/适配器不可用（超时、连接失败、凭证失效）。"""
 
 
+class PathMissingAtCommitError(TestPilotError):
+    """仓库可达，但指定 commit 下不存在该路径（git show 退出 128 的可识别子类）。
+
+    live-verify 据此判 exists=False（证据在目标版本消失），而不是 degraded（仓库不可达）。
+    """
+
+
 class UnsupportedCapabilityError(TestPilotError):
     """环境不满足能力要求（如模拟器上请求真机后台/签名验证）。
 
