@@ -1,0 +1,11 @@
+{
+  "commits": {
+    "head": "0719b0756b39c6b429d672df2f195abb954b413d",
+    "root": "4a01f1fe4b442b0caa9a574ce51881e618564a7c"
+  },
+  "default_branch": "main",
+  "generated_by": "scripts/record_git_fixtures.py",
+  "head_sha": "0719b0756b39c6b429d672df2f195abb954b413d",
+  "note": "固定 author/date 内容寻址，sha 跨机器可复现；改演示仓后重新生成",
+  "project": "demo"
+}

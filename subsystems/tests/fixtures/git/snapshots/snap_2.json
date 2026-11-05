@@ -1,0 +1,17 @@
+{
+  "body_changed": false,
+  "exists": false,
+  "symbol": {
+    "body_hash": "",
+    "called_by": [],
+    "calls": [],
+    "commit": "4a01f1fe4b442b0caa9a574ce51881e618564a7c",
+    "file_path": "Sources/A.swift",
+    "language": "swift",
+    "line_end": null,
+    "line_start": null,
+    "signature": "",
+    "symbol_id": "C.ghost()",
+    "urn": "urn:testpilot:git:symbol:Sources/A.swift#C.ghost()"
+  }
+}

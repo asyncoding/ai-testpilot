@@ -1,0 +1,17 @@
+{
+  "body_changed": true,
+  "exists": true,
+  "symbol": {
+    "body_hash": "69dcc5e68703740515fca46acd0e6b10c9289f155c6b591ce7b46e3ea24a1402",
+    "called_by": [],
+    "calls": [],
+    "commit": "0719b0756b39c6b429d672df2f195abb954b413d",
+    "file_path": "Sources/B.swift",
+    "language": "swift",
+    "line_end": 5,
+    "line_start": 1,
+    "signature": "final class C",
+    "symbol_id": "C",
+    "urn": "urn:testpilot:git:symbol:Sources/B.swift#C"
+  }
+}

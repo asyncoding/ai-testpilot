@@ -1,0 +1,17 @@
+{
+  "body_changed": true,
+  "exists": true,
+  "symbol": {
+    "body_hash": "f72d675aa26717ce67bbe8cbfab64432e3afb656f0b3115979c37e47002d6a6a",
+    "called_by": [],
+    "calls": [],
+    "commit": "0719b0756b39c6b429d672df2f195abb954b413d",
+    "file_path": "Sources/B.swift",
+    "language": "swift",
+    "line_end": 4,
+    "line_start": 4,
+    "signature": "func fresh()",
+    "symbol_id": "C.fresh()",
+    "urn": "urn:testpilot:git:symbol:Sources/B.swift#C.fresh()"
+  }
+}

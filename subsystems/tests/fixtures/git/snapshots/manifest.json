@@ -1,0 +1,5 @@
+{
+  "0719b0756b39c6b429d672df2f195abb954b413d:Sources/B.swift#C": "snapshots/snap_1.json",
+  "0719b0756b39c6b429d672df2f195abb954b413d:Sources/B.swift#C.fresh()": "snapshots/snap_0.json",
+  "4a01f1fe4b442b0caa9a574ce51881e618564a7c:Sources/A.swift#C.ghost()": "snapshots/snap_2.json"
+}

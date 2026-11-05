@@ -1,0 +1,34 @@
+{
+  "base_commit": "4a01f1fe4b442b0caa9a574ce51881e618564a7c",
+  "changed_files": [
+    "Docs/guide.md",
+    "README.md",
+    "Sources/A.swift",
+    "Sources/B.swift"
+  ],
+  "diff_uri": null,
+  "head_commit": "0719b0756b39c6b429d672df2f195abb954b413d",
+  "merge_request": null,
+  "symbol_changes": [
+    {
+      "change_type": "removed",
+      "symbol_id": "C"
+    },
+    {
+      "change_type": "removed",
+      "symbol_id": "C.keep()"
+    },
+    {
+      "change_type": "added",
+      "symbol_id": "C"
+    },
+    {
+      "change_type": "added",
+      "symbol_id": "C.keep()"
+    },
+    {
+      "change_type": "added",
+      "symbol_id": "C.fresh()"
+    }
+  ]
+}

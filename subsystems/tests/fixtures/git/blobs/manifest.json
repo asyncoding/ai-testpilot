@@ -1,0 +1,18 @@
+{
+  "0719b0756b39c6b429d672df2f195abb954b413d:README.md": {
+    "file": "blobs/head_README.md"
+  },
+  "0719b0756b39c6b429d672df2f195abb954b413d:Sources/B.swift": {
+    "file": "blobs/head_B.swift"
+  },
+  "4a01f1fe4b442b0caa9a574ce51881e618564a7c:README.md": {
+    "file": "blobs/root_README.md"
+  },
+  "4a01f1fe4b442b0caa9a574ce51881e618564a7c:Sources/A.swift": {
+    "file": "blobs/root_A.swift"
+  },
+  "4a01f1fe4b442b0caa9a574ce51881e618564a7c:Sources/B.swift": {
+    "missing": true,
+    "reason": "recorded-missing-at-commit"
+  }
+}

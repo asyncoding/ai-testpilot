@@ -1,0 +1,23 @@
+[
+  {
+    "actor": "",
+    "event_id": "0719b0756b39c6b429d672df2f195abb954b413d",
+    "event_type": "CommitPushed",
+    "idempotency_key": "0719b0756b39c6b429d672df2f195abb954b413d",
+    "occurred_at": "2026-01-02T00:00:00+08:00",
+    "payload": {
+      "base": "4a01f1fe4b442b0caa9a574ce51881e618564a7c",
+      "files": [
+        "Docs/guide.md",
+        "README.md",
+        "Sources/A.swift",
+        "Sources/B.swift"
+      ]
+    },
+    "payload_uri": null,
+    "project": "demo",
+    "source_system": "git",
+    "subject_ref": "0719b0756b39c6b429d672df2f195abb954b413d",
+    "version": "1"
+  }
+]
