@@ -109,7 +109,10 @@ class Store:
                VALUES (?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(urn) DO UPDATE SET
                  version=excluded.version, content_hash=excluded.content_hash,
-                 mtime=excluded.mtime, raw_json=excluded.raw_json""",
+                 mtime=excluded.mtime, raw_json=excluded.raw_json,
+                 -- S1.3：branch 是可随装配/重灌变化的归属字段（旧库曾全为 main），
+                 -- 冲突时必须随新值覆盖，否则 live_verify 上下文取到陈旧分支名
+                 branch=excluded.branch""",
             (
                 doc.urn, doc.source_system, doc.uri, doc.title, doc.version, doc.content_hash,
                 str(doc.authority_level), doc.acl_scope, doc.branch,
@@ -284,6 +287,62 @@ class Store:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def get_verification_context(self, urn: str) -> dict[str, Any] | None:
+        """live-verify 取索引侧证据（S1.3 FR-QA-002）：chunk URN 或 symbol URN
+        都能命中（symbol_urn 列）；返回切块 content_hash/valid_from/chunker 版本
+        与所属文档的 file:// URI、分支。无命中返回 None（调用方按索引缺失降级）。"""
+        row = self.conn.execute(
+            """SELECT c.kind AS kind, c.content_hash AS content_hash,
+                      c.valid_from AS valid_from, c.branch AS branch,
+                      c.raw_json AS chunk_json, d.uri AS doc_uri
+               FROM chunks c JOIN source_documents d ON d.urn = c.doc_urn
+               WHERE c.urn = ? OR c.symbol_urn = ?
+               LIMIT 1""",
+            (urn, urn),
+        ).fetchone()
+        if row is None:
+            return None
+        chunk = json.loads(row["chunk_json"])
+        return {
+            "kind": row["kind"],
+            "content_hash": row["content_hash"],
+            "valid_from": row["valid_from"],
+            "branch": row["branch"],
+            "doc_uri": row["doc_uri"],
+            "chunker_version": (chunk.get("metadata") or {}).get("chunker_version"),
+        }
+
+    def record_verification_event(self, *, result: dict[str, Any]) -> int:
+        """live-verify 每次调用必写一行（含降级/失败），FR-QA-002 AC2 的 trace 可查。
+
+        result 为 LiveVerifyResult.model_dump()；exists/body_changed 可空（降级无事实）。
+        """
+        cur = self.conn.execute(
+            """INSERT INTO verification_events
+               (ts, urn, kind, project, branch, requested_commit, head_commit,
+                symbol_exists, verified, body_changed, degraded, reason, error,
+                indexed_commit, indexed_chunker_version, current_chunker_version,
+                latency_ms, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                _now_iso(), result.get("urn", ""), result.get("kind", ""),
+                result.get("project", ""), result.get("branch", ""),
+                result.get("requested_commit", ""), result.get("head_commit", ""),
+                None if result.get("exists") is None else int(bool(result["exists"])),
+                int(bool(result.get("verified"))),
+                None if result.get("body_changed") is None
+                else int(bool(result["body_changed"])),
+                int(bool(result.get("degraded"))), result.get("reason", ""),
+                result.get("error", ""),
+                result.get("indexed_commit"), result.get("indexed_chunker_version"),
+                result.get("current_chunker_version", ""),
+                int(result.get("latency_ms", 0) or 0),
+                json.dumps(result.get("raw") or {}, ensure_ascii=False),
+            ),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
     # ── 入库管线（schema v2，FR-ING-001）────────────────────────────────
     def list_documents(self, source_system: str) -> list[sqlite3.Row]:
         return self.conn.execute(
@@ -317,7 +376,9 @@ class Store:
                    ON CONFLICT(urn) DO UPDATE SET
                      version=excluded.version, content_hash=excluded.content_hash,
                      authority_level=excluded.authority_level,
-                     mtime=excluded.mtime, raw_json=excluded.raw_json""",
+                     mtime=excluded.mtime, raw_json=excluded.raw_json,
+                     -- S1.3：重灌/换分支时归属字段必须随新值覆盖（旧库曾全为 main）
+                     branch=excluded.branch""",
                 (
                     doc.urn, doc.source_system, doc.uri, doc.title, doc.version,
                     doc.content_hash, str(doc.authority_level), doc.acl_scope, doc.branch,
@@ -355,7 +416,8 @@ class Store:
                     """INSERT INTO entities(urn, kind, name, branch, doc_urn, raw_json)
                        VALUES (?,?,?,?,?,?)
                        ON CONFLICT(urn) DO UPDATE SET
-                         kind=excluded.kind, name=excluded.name, raw_json=excluded.raw_json""",
+                         kind=excluded.kind, name=excluded.name, raw_json=excluded.raw_json,
+                         branch=excluded.branch""",
                     (entity.urn, entity.kind, entity.name, entity.branch, doc.urn,
                      entity.model_dump_json(by_alias=True)),
                 )
@@ -443,6 +505,7 @@ class Store:
             """SELECT c.urn AS urn, c.doc_urn AS doc_urn, c.kind AS kind,
                       c.text AS text, c.quality_score AS quality_score,
                       c.branch AS branch, c.content_hash AS content_hash,
+                      c.valid_from AS valid_from,
                       d.acl_scope AS acl_scope, d.uri AS doc_uri,
                       d.content_hash AS doc_content_hash
                FROM chunks c JOIN source_documents d ON d.urn = c.doc_urn

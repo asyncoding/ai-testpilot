@@ -2,6 +2,7 @@
 检索留痕（docs/08 FR-KNO-001）。"""
 
 from testpilot_adapters.store import bootstrap_store
+from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import AuthorityLevel
 from testpilot_core.models import KnowledgeChunk, SourceDocument
 
@@ -57,7 +58,7 @@ def test_v2_unicode61_fts_is_migrated_and_rebuilt_from_chunks(tmp_path):
         # trigram 下自然语言三元串可命中（unicode61 下整段成词，必 0 命中）
         rows = store.search_fts_matches("物理键", [], limit=5)
         assert [r["urn"] for r in rows] == ["urn:testpilot:fs-docs:chunk:d1#c0"]
-        assert store.get_meta("schema_version") == "3"
+        assert store.get_meta("schema_version") == str(SCHEMA_VERSION)
     finally:
         store.close()
 
@@ -127,5 +128,30 @@ def test_record_retrieval_event_roundtrip(tmp_path):
         assert row["degraded"] == 1 and row["vector_available"] == 0
         assert row["fts_urns"] == '["u1"]'
         assert row["model_version"] == "dmeta-embedding-zh"
+    finally:
+        store.close()
+
+
+def test_v3_store_gains_verification_events_on_reopen(tmp_path):
+    # v4：verification_events 靠 CREATE IF NOT EXISTS 对老库幂等补建，无列迁移
+    store = bootstrap_store(tmp_path)
+    store.conn.execute("DROP TABLE verification_events")
+    store.conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'")
+    store.close()
+
+    store = bootstrap_store(tmp_path)
+    try:
+        assert store.get_meta("schema_version") == str(SCHEMA_VERSION)
+        # 表已补建，降级行（exists/body_changed 为 NULL）也能写、能读
+        rid = store.record_verification_event(result={
+            "urn": "urn:testpilot:fs-docs:chunk:x#f()", "kind": "code_symbol",
+            "project": "demo", "branch": "main", "reason": "unavailable",
+            "degraded": True, "latency_ms": 5,
+        })
+        row = store.conn.execute(
+            "SELECT * FROM verification_events WHERE id=?", (rid,)
+        ).fetchone()
+        assert row["degraded"] == 1 and row["verified"] == 0
+        assert row["symbol_exists"] is None and row["body_changed"] is None
     finally:
         store.close()

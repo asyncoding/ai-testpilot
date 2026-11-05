@@ -1,7 +1,9 @@
--- TestPilot schema（当前 schema_version = 3；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
+-- TestPilot schema（当前 schema_version = 4；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
 -- v1：S0 骨架；v2：入库批次/文档加工状态、entities/relations 挂 doc_urn（S1.1）
 -- v3：chunks_fts 换 trigram 分词（CJK 子串召回，S1.2；老库由 _migrate_fts_to_trigram
 --     DROP+回填）、retrieval_events 各检索阶段命中率留痕（FR-KNO-001 AC1）
+-- v4：verification_events live-verify 每次校验留痕（S1.3，FR-QA-002 AC2：代码类问题
+--     100% 有 trace 可查的校验调用，含降级；CREATE IF NOT EXISTS 对老库幂等，无列迁移）
 
 PRAGMA journal_mode = WAL;
 
@@ -132,6 +134,32 @@ CREATE TABLE IF NOT EXISTS retrieval_events (
     raw_json         TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_retrieval_events_ts ON retrieval_events(ts);
+
+-- live-verify 校验留痕（v4，FR-QA-002 AC2：代码类问题生成前 100% 实时复核；
+-- 含 verified/body_changed/exists 与降级原因；exists/body_changed 可空——
+-- 降级时没有事实结论，绝不拿 None 冒充 False）
+CREATE TABLE IF NOT EXISTS verification_events (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts               TEXT NOT NULL,
+    urn              TEXT NOT NULL,
+    kind             TEXT NOT NULL DEFAULT '',
+    project          TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    requested_commit TEXT NOT NULL DEFAULT '',
+    head_commit      TEXT NOT NULL DEFAULT '',
+    symbol_exists    INTEGER,  -- EXISTS 是 SQL 保留字，列名避开；语义=符号/锚点在目标版本是否存在
+    verified         INTEGER NOT NULL DEFAULT 0,
+    body_changed     INTEGER,
+    degraded         INTEGER NOT NULL DEFAULT 0,
+    reason           TEXT NOT NULL DEFAULT '',
+    error            TEXT NOT NULL DEFAULT '',
+    indexed_commit         TEXT,
+    indexed_chunker_version TEXT,
+    current_chunker_version TEXT NOT NULL DEFAULT '',
+    latency_ms       INTEGER NOT NULL DEFAULT 0,
+    raw_json         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_verification_events_ts ON verification_events(ts);
 
 -- 人审
 CREATE TABLE IF NOT EXISTS approvals (

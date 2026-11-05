@@ -71,6 +71,44 @@ def test_chunk_fts_index_and_search(tmp_path):
         store.close()
 
 
+def test_upsert_document_refreshes_branch_on_conflict(tmp_path):
+    # S1.3 回归：旧库 source_documents.branch 全为 main，--full 重灌到 alarmkit-spike
+    # 时 ON CONFLICT 必须覆盖 branch；否则 live_verify 上下文取到陈旧分支名。
+    store = bootstrap_store(tmp_path)
+    try:
+        doc = _doc()
+        store.upsert_document(doc.model_copy(update={"branch": "main"}))
+        store.upsert_document(doc.model_copy(update={
+            "branch": "alarmkit-spike", "version": "h2", "content_hash": "hash2"}))
+        row = store.conn.execute(
+            "SELECT branch, version FROM source_documents WHERE urn=?", (doc.urn,)
+        ).fetchone()
+        assert row["branch"] == "alarmkit-spike" and row["version"] == "h2"
+    finally:
+        store.close()
+
+
+def test_replace_document_index_refreshes_branch(tmp_path):
+    # 入库实际走 replace_document_index：旧库 main→重灌 alarmkit-spike 必须覆盖
+    store = bootstrap_store(tmp_path)
+    try:
+        doc = _doc()
+        chunk = _chunk(doc.urn, "schedulePrimary 30s")
+        store.replace_document_index(doc, [chunk], [], [], "run-1")
+        assert store.conn.execute(
+            "SELECT branch FROM source_documents WHERE urn=?", (doc.urn,)
+        ).fetchone()["branch"] == "main"  # 模型默认分支
+
+        doc2 = doc.model_copy(update={"branch": "alarmkit-spike", "version": "h2"})
+        store.replace_document_index(doc2, [chunk], [], [], "run-2")
+        row = store.conn.execute(
+            "SELECT branch FROM source_documents WHERE urn=?", (doc.urn,)
+        ).fetchone()
+        assert row["branch"] == "alarmkit-spike"
+    finally:
+        store.close()
+
+
 def test_event_dedup_and_dead_letter(tmp_path):
     store = bootstrap_store(tmp_path)
     try:
