@@ -13,9 +13,9 @@ subsystems/
 │   ├── orchestrator/  # testpilot-orchestrator：profile 装配 + FastAPI（S1+ 放 LangGraph）
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
 ├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml
-├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件 夹具（语言中立契约的证据）
+├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
-└── scripts/           # import_lint.py（核心层防腐门禁）、smoke_trace.py（S0 trace 门禁）
+└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify 探针
 ```
 
 ## 环境准备（venv 强制隔离，禁止污染系统 Python）
@@ -167,6 +167,70 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
 
 降级实测：Chroma 指向死端口时 hybrid 退化为 FTS-only（17 条 FTS 候选照常出答案），
 `retrieval_events.degraded=1`、`raw_json.vector_error="ConnectError: …"`。
+
+## Git 连接器与现场核验（S1.3）：ChangeSet + live-verify
+
+`scm` 端口双实现（FR-CFG-002 AC2）：`git` 走 **git CLI 子进程**（不引 GitPython，
+懒构造、超时 kill、`GIT_TERMINAL_PROMPT=0`），`recorded` 回放 `tests/fixtures/git/`
+下固定 author/date 的确定性演示仓（`scripts/record_git_fixtures.py` 重新录制）。
+ios profile 装配真实 git；offline-demo 用 recorded + `path_map`，**离线也能现场重切块
+核验**，不访问任何外部仓。
+
+能力（docs/08 FR-CON-001 / FR-QA-002 / NFR-006）：
+
+- **ChangeSet**：base/head 两个 commit → `changed_files`（全部类型文件）+ Swift 符号
+  增/删/改（身份键 = 去 `#L` 的 anchor + 声明序号，行号漂移不会误判成删+增）；
+  **不读 commit message**，空 message commit 同样有效；可按 commit 读文件；
+  仓库不可达 → `AdapterUnavailableError`（可识别错误：超时 / 不是 git 仓 / 目录不存在
+  / git 二进制缺失各自分类），调用方降级不抛穿。
+- **live-verify**：对已入库切块，从 `source_documents.uri`（绝对 `file://`）反推
+  git 路径（不从有歧义的 URN 相对路径猜；越界 → `path_outside_repo`），在目标 commit
+  （默认 HEAD）用**同一个 chunker** 重切 → anchor 选块 → `sha256` 精确比对：
+  - `reason=unchanged`：HEAD 与索引一致；`reason=body_changed`：**当场抓出索引旧于
+    代码，不需要重新入库**（FR-QA-002 AC1）；
+  - chunker 版本缺失/不一致 → `chunker_version_drift`、`body_changed=None`，
+    **绝不误报变更**；
+  - 仓可达但文件/符号在该 commit 不存在 → `exists=False`（事实判定，不是降级）；
+    git 不可达 / URN 不可解析 / 路径越界 / 索引缺失 → `degraded=true, exists=None`，
+    任何意外异常也兜底成降级结果，永不抛穿。
+  - **每次调用（含失败/降级）必写 `verification_events` 一行**：NoopTracer 的 span
+    不落盘，留痕不能靠 tracer（FR-QA-002 AC2）。"代码问题 100% 触发核验"的强制接线点
+    在 S1.4 答案图；本阶段交付能力层。
+- **入库版本标注**：每轮入库取一次 HEAD sha → `chunks.valid_from` 与 Chroma metadata
+  `indexed_commit`、chunker 版本写 metadata；unchanged 文档不刷值（无写放大）；
+  scm 不可达 → `valid_from=NULL` + 死信 + report 记 `head_unavailable`，入库照常成功。
+- **分支一致性**：文档/切块/实体/向量统一归属 `project.default_branch`
+  （ios profile 是 `alarmkit-spike`，不是 `main`）；`--full` 重灌同时覆盖 SQLite 与
+  Chroma（向量 id=URN 走 upsert，不删 collection，无残留旧分支元数据）。
+
+```bash
+# 真仓四项取证探针（非 CI 门禁：依赖本机真仓与已入库的 ios profile；
+# CI/离线等价覆盖在 tmp 真仓单测 + recorded 契约测试里）
+export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
+TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
+  .venv/bin/python scripts/live_verify_probe.py
+# ① 符号块验 HEAD → verified/unchanged  ② 同一 URN 验旧 commit → body_changed
+# ③ ChangeSet 含文件+符号 modified       ④ repo_path 指不存在目录 → 降级不抛穿且留痕
+```
+
+真仓实测（2026-11-04，HEAD `7936295`、base `09b473b`，探针 4/4、退出码 0）：
+`get_change_set` 得 **25 个变更文件、29 个 modified 符号**（含 `MissionCoordinator`）；
+该区间实际改动是 `killBackupInterval 90s→30s` 常量与注释（git diff 实证，
+`schedulePrimary` 方法体本身未变，探针因此选 `runSnooze` 切块做 ②）；故障注入在
+`verification_events` 新增 degraded 行，错误文案为"仓库目录不存在或不可访问"。
+
+约束与已知限制：
+
+- **正式取证前被测仓工作区应干净**：fs 入库读工作区、live-verify 读 git blob。
+  本次取证时真仓有 1 篇 `docs/*.md` 未提交改动（Swift 代码干净，探针只用 Swift 符号）；
+  该 md 会被索引，其切块在 HEAD 核验时会如实判 `body_changed`——这是正确行为，
+  但演示前应 `git status` 确认或先提交。
+- **空 message commit** 的 ChangeSet 能力由 tmp 确定性演示仓（单测 + recorded 契约）
+  覆盖；真仓这两个提交都带 message。
+- deferred（`.agent-handoff/` 已记账）：FTS SQL 暂不按 branch 过滤（offline 单分支
+  无碍，**S2 多分支前必须补**）；rename 仅按 R100 配对，R50/50% 阈值的误配风险待真实
+  rename 样本；类型块含全部成员文本，成员改动会让类型块级联 MODIFIED（如实保留的噪声）；
+  blame API、独立 commit 列表接口、push→自动 reindex 均未做（无 AC、无调用方）。
 
 ## 一键验收 S0（已闭合的 6 个自动门禁）
 
