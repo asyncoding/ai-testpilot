@@ -53,9 +53,11 @@ class FileSystemDocsAdapter:
         authority_overrides: Sequence[AuthorityRule | dict] = (),
         default_authority: AuthorityLevel = AuthorityLevel.L2_EXPERIENCE,
         code_authority: AuthorityLevel = AuthorityLevel.L1_AUTHORITATIVE,
+        branch: str = "main",
     ) -> None:
         self.roots = self._build_specs(roots, _MD_PATTERN)
         self.roots.extend(self._build_specs(code_roots, _SWIFT_PATTERN))
+        self.branch = branch
         self.excludes = list(excludes)
         self.rules = [
             r if isinstance(r, AuthorityRule)
@@ -123,6 +125,7 @@ class FileSystemDocsAdapter:
             version=_sha256(text)[:12],
             content_hash=_sha256(text),
             authority_level=self._authority_for(spec, rel, spec.pattern),
+            branch=self.branch,  # factory 注入 project.default_branch（S1.3 branch 一致性）
             mtime=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
             metadata_={
                 "relative_path": str(path),

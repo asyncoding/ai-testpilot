@@ -2,8 +2,8 @@
 
 换 profile = 换适配器实现，工作流代码零改动。
 支持的 type：stub / fs-docs / json / json-replay / recorded / localfs /
-sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/ chroma（vectors）；
-其余在 S2–S3 引入（git / xcode …）。
+sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/ chroma（vectors）/
+git 与 recorded（scm，S1.3）；其余在 S2–S3 引入（xcode …）。
 
 降级是运行期行为（向量通道故障→FTS-only），不是装配期选项：hybrid 必须配齐
 model+vectors，否则 build_container 直接 ValueError（防止静默退化为单路而不自知）。
@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from testpilot_core.config_schema import ProfileConfig
+from testpilot_core.models import RepoRef
 
 from testpilot_adapters.fs_docs import FileSystemDocsAdapter
 from testpilot_adapters.json_events import JsonReplayEventSource
@@ -54,6 +55,18 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     container.adapters["store"] = store
     container.adapters["queue"] = SqliteQueue(store.conn)
 
+    # ── 被测仓库引用（路径配置化，禁止写死机器绝对路径）──
+    repo_path = Path(config.project.repo_path).expanduser()
+    if not repo_path.is_absolute():
+        repo_path = (base_dir / repo_path).resolve()
+    repo_ref = RepoRef(
+        project=config.project.name,
+        repo_path=str(repo_path),
+        default_branch=config.project.default_branch,
+        tech_stack=config.project.tech_stack,
+    )
+    container.adapters["repo"] = repo_ref
+
     # ── 文档知识源 ──
     docs_settings = a.docs.settings
     docs_roots = docs_settings.get("roots", [])
@@ -66,9 +79,6 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             for r in docs_settings.get("authority_overrides", [])
         ]
         # repo 内代码根支持 ${REPO_PATH} 占位（路径配置化，不写死机器路径）
-        repo_path = Path(config.project.repo_path).expanduser()
-        if not repo_path.is_absolute():
-            repo_path = (base_dir / repo_path).resolve()
 
         def _resolve(root: str) -> Path:
             root = root.replace("${REPO_PATH}", str(repo_path))
@@ -79,6 +89,7 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             code_roots=[_resolve(r) for r in docs_settings.get("code_roots", [])],
             excludes=docs_settings.get("excludes", []),
             authority_overrides=overrides,
+            branch=config.project.default_branch,
         )
     elif a.docs.type != "stub":
         raise ValueError(f"未知 docs 适配器类型: {a.docs.type}")
@@ -169,9 +180,34 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     else:
         vector_store = None
 
+    # ── SCM（S1.3：git 真实 / recorded 离线 / stub 不装配；纯懒构造不起 git 进程）──
+    if a.scm.type == "git":
+        from testpilot_adapters.git_repo import GitCodeRepository
+
+        ss = a.scm.settings
+        container.adapters["scm"] = GitCodeRepository(
+            repo_ref,
+            git_path=ss.get("git_path", "git"),
+            timeout_s=float(ss.get("timeout_s", 15.0)),
+        )
+    elif a.scm.type == "recorded":
+        from testpilot_adapters.recorded_git import RecordedGitRepository
+
+        ss = a.scm.settings
+        git_fixtures = _p(fixtures_dir, ss.get("fixtures_dir", "git"))
+        container.adapters["scm"] = RecordedGitRepository(
+            repo_ref, git_fixtures, path_map=ss.get("path_map"),
+        )
+    elif a.scm.type != "stub":
+        raise ValueError(f"未知 scm 适配器类型: {a.scm.type}")
+    scm = container.get("scm")  # stub 时为 None：live-verify 以 degraded 返回并留痕
+
     # ── 检索（sqlite-fts 单路 / hybrid=FTS+向量 RRF 融合）──
     if a.search.type == "sqlite-fts":
-        container.adapters["search"] = FtsSearchAdapter(store)
+        container.adapters["search"] = FtsSearchAdapter(
+            store, project=config.project.name, scm=scm, repo=repo_ref,
+            tracer=tracer, default_branch=config.project.default_branch,
+        )
     elif a.search.type == "hybrid":
         from testpilot_adapters.hybrid_search import HybridSearchAdapter
 
@@ -197,12 +233,16 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
                 if ss.get("half_life_days") is not None
                 else None
             ),
+            scm=scm,
+            repo=repo_ref,
+            tracer=tracer,
+            default_branch=config.project.default_branch,
         )
     elif a.search.type != "stub":
         raise ValueError(f"未知 search 适配器类型: {a.search.type}")
 
-    # stub 位（S1+ 实现）：scm / cases / environment / logs
-    for name in ("scm", "cases", "environment", "logs"):
+    # stub 位（后续里程碑实现）：cases / environment / logs
+    for name in ("cases", "environment", "logs"):
         ref = getattr(a, name)
         if ref.type != "stub":
             raise ValueError(f"适配器 {name} 的类型 {ref.type} 将在后续里程碑实现")

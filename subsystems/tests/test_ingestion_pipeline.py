@@ -195,3 +195,89 @@ def test_inventory_export_and_authority_overrides(tmp_path):
     row = inventory[0]
     assert {"urn", "uri", "mtime", "content_hash", "authority_level", "kind"} <= set(row)
     assert row["authority_level"] == "L1_authoritative"
+
+
+# ── S1.3：HEAD sha 透传 valid_from / scm 不可达不拖垮入库 ─────────────────────
+
+from testpilot_core.chunking import MARKDOWN_CHUNKER_VERSION, SWIFT_CHUNKER_VERSION  # noqa: E402
+from testpilot_core.errors import AdapterUnavailableError  # noqa: E402
+from testpilot_core.models import RepoRef  # noqa: E402
+
+
+def _container_with_scm(tmp_path, scm):
+    container, store, _adapter, _docs_dir, _src_dir = _container(tmp_path)
+    old_get = container.get
+    docs = old_get("docs")
+    repo = RepoRef(project="demo", repo_path=str(tmp_path))
+
+    def get(name):
+        if name == "scm":
+            return scm
+        if name == "repo":
+            return repo
+        return {
+            "docs": docs, "store": store, "tracer": NoopTracer(),
+        }.get(name)
+
+    container.get = get
+    return container, store
+
+
+class _FakeScm:
+    def __init__(self, sha="abc123deadbeef" * 3 + "aa"):
+        self.sha = (sha[:40]).ljust(40, "0")
+
+    async def head_sha(self, repo):
+        return self.sha[:40]
+
+
+class _DeadScm:
+    async def head_sha(self, repo):
+        raise AdapterUnavailableError("git 不可达：超时")
+
+
+async def test_head_sha_threaded_into_valid_from_and_chunker_version(tmp_path):
+    scm = _FakeScm()
+    container, store = _container_with_scm(tmp_path, scm)
+    report = await run_ingestion(container)
+
+    assert report.head_commit == scm.sha[:40]
+    rows = store.conn.execute(
+        "SELECT kind, valid_from, raw_json FROM chunks"
+    ).fetchall()
+    assert rows and all(r["valid_from"] == scm.sha[:40] for r in rows)
+    import json
+    for r in rows:
+        version = json.loads(r["raw_json"])["metadata"]["chunker_version"]
+        expected = SWIFT_CHUNKER_VERSION if r["kind"] == "code_symbol" else MARKDOWN_CHUNKER_VERSION
+        assert version == expected
+
+
+async def test_unchanged_rerun_keeps_valid_from_but_head_moves(tmp_path):
+    scm = _FakeScm()
+    container, store = _container_with_scm(tmp_path, scm)
+    first = await run_ingestion(container)
+
+    # HEAD 前进但文件内容没变：unchanged 不重切，valid_from 保持首灌 sha（不写放大）
+    scm.sha = "f" * 40
+    report = await run_ingestion(container)
+    assert report.unchanged == 3 and report.created == 0
+    row = store.conn.execute("SELECT DISTINCT valid_from v FROM chunks").fetchall()
+    assert [r["v"] for r in row] == [first.head_commit]
+
+
+async def test_scm_unavailable_does_not_fail_run(tmp_path):
+    container, store = _container_with_scm(tmp_path, _DeadScm())
+    report = await run_ingestion(container)
+
+    assert report.status == "succeeded" and report.head_commit is None
+    assert report.created == 3  # 文档照常入库
+    assert any(d.get("outcome") == "head_unavailable" for d in report.details)
+    # 死信留痕
+    dead = store.conn.execute("SELECT count(*) n FROM dead_letters").fetchone()["n"]
+    assert dead == 1
+    # valid_from 留空（无版本可标），但不阻断
+    n_null = store.conn.execute(
+        "SELECT count(*) n FROM chunks WHERE valid_from IS NULL"
+    ).fetchone()["n"]
+    assert n_null > 0

@@ -17,7 +17,14 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from testpilot_core.chunking import RawChunk, chunk_markdown, chunk_swift
+from testpilot_core.chunking import (
+    MARKDOWN_CHUNKER_VERSION,
+    SWIFT_CHUNKER_VERSION,
+    RawChunk,
+    chunk_markdown,
+    chunk_swift,
+)
+from testpilot_core.errors import AdapterUnavailableError
 from testpilot_core.models import Entity, EventEnvelope, KnowledgeChunk, Relation, VectorItem
 from testpilot_core.quality import score_code_symbol, score_text
 from testpilot_core.urn import make_urn, parse_urn
@@ -46,6 +53,7 @@ class IngestionReport:
     embedded: int = 0
     embed_failed: int = 0
     vector_deleted_docs: int = 0
+    head_commit: str | None = None  # 本轮入库时的 HEAD sha（scm 不可达/未配置 → None）
     details: list[dict[str, Any]] = field(default_factory=list)
     deleted_urns: list[str] = field(default_factory=list)
 
@@ -60,8 +68,8 @@ class IngestionReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.counts(), "run_id": self.run_id, "trigger": self.trigger,
-                "status": self.status, "details": self.details,
-                "deleted_urns": self.deleted_urns}
+                "status": self.status, "head_commit": self.head_commit,
+                "details": self.details, "deleted_urns": self.deleted_urns}
 
 
 def _kind_of(doc) -> str:
@@ -82,8 +90,14 @@ def _event(event_type: str, urn: str, project: str, mtime, extra: dict) -> Event
     )
 
 
-def _build_chunks(doc, raws: list[RawChunk]) -> tuple[list[KnowledgeChunk], dict[str, str]]:
-    """RawChunk → KnowledgeChunk + 符号名→symbol URN 映射。"""
+def _build_chunks(
+    doc, raws: list[RawChunk], valid_from: str | None
+) -> tuple[list[KnowledgeChunk], dict[str, str]]:
+    """RawChunk → KnowledgeChunk + 符号名→symbol URN 映射。
+
+    valid_from 写本轮 HEAD sha（证据被索引时的版本下界，FR-QA-002 live-verify 读它）；
+    调用方只对 created/updated 文档调本函数，unchanged 文档根本不进这里（不刷版本位）。
+    """
     _, _, external_id, _ = parse_urn(doc.urn)
     chunks: list[KnowledgeChunk] = []
     symbol_urns: dict[str, str] = {}
@@ -114,6 +128,7 @@ def _build_chunks(doc, raws: list[RawChunk]) -> tuple[list[KnowledgeChunk], dict
             quality_score=q.score,
             branch=doc.branch,
             stale="fresh",
+            valid_from=valid_from,
             content_hash=_sha256(raw.text),
             metadata_={
                 "title": raw.title,
@@ -123,6 +138,12 @@ def _build_chunks(doc, raws: list[RawChunk]) -> tuple[list[KnowledgeChunk], dict
                 "heading_path": list(raw.heading_path),
                 "quality_components": q.components,
                 "quality_reasons": q.reasons,
+                # 切块口径版本位：live-verify 跨版本比 hash 前先比对，
+                # 缺/漂移 → body_changed=None（绝不把口径差异误报成代码变更）
+                "chunker_version": (
+                    SWIFT_CHUNKER_VERSION if raw.kind == "code_symbol"
+                    else MARKDOWN_CHUNKER_VERSION
+                ),
             },
         ))
     return chunks, symbol_urns
@@ -172,6 +193,20 @@ async def run_ingestion(container, *, trigger: str = "manual", full: bool = Fals
     project = container.config.project.name
     run_id = f"ing-{uuid4().hex[:12]}"
     report = IngestionReport(run_id=run_id, trigger=trigger)
+    # store/tracer 先取，HEAD 解析发生在 span 外（不影响降级语义）。
+
+    # 本轮 HEAD sha：只取一次，作为 created/updated 切块的 valid_from。
+    # scm 未配置（offline/录制场景）或不可达 → None + 死信留痕，不拖垮入库；
+    # 此时切块 valid_from=NULL，live-verify 仍可判 hash，只是不展示索引版本。
+    scm = container.get("scm")
+    repo = container.get("repo")
+    if scm is not None and repo is not None:
+        try:
+            report.head_commit = await scm.head_sha(repo)
+        except AdapterUnavailableError as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            store.add_dead_letter("ingestion-head", {"trigger": trigger}, error)
+            report.details.append({"outcome": "head_unavailable", "error": error})
 
     with tracer.span("ingest.run", run_id=run_id, metadata={"trigger": trigger, "full": full}):
         # 扫描期坏文件（编码错误/IO 错误）同样隔离：进死信 + 状态 failed，不拖垮整批
@@ -239,7 +274,7 @@ async def run_ingestion(container, *, trigger: str = "manual", full: bool = Fals
                         text = docs_adapter.read_content(doc.urn)
                         raws = (chunk_swift(text) if detail["kind"] == "swift"
                                 else chunk_markdown(text))
-                        chunks, symbol_urns = _build_chunks(doc, raws)
+                        chunks, symbol_urns = _build_chunks(doc, raws, report.head_commit)
                         entities, relations = _build_entities_relations(doc, raws, symbol_urns)
                         if vectors is not None:
                             # replace 会清掉旧切块；先存旧 URN，嵌入成功后删向量孤儿
@@ -339,6 +374,8 @@ async def _embed_pending(
                             "doc_content_hash": r["doc_content_hash"],
                             "doc_uri": r["doc_uri"],
                             "quality": float(r["quality_score"]),
+                            # 索引时 HEAD sha：S1.4 答案层版本标注/证词比对用
+                            "indexed_commit": r["valid_from"] or "",
                         },
                     )
                     for i, r in enumerate(rows)

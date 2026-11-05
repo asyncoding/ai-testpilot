@@ -4,7 +4,9 @@ profile: offline-demo
 
 project:
   name: AlarmKitSpike-demo
-  repo_path: ../app-calendar-alarm/AlarmKitSpike  # 可被 TESTPILOT_REPO_PATH 覆盖；离线模式不实际访问
+  # 离线模式的"仓库"就是夹具目录本身：fixtures/docs 下的文档能经录制 scm
+  # 真实重切块做 live-verify（path_map 映射），无需外部仓存在。
+  repo_path: tests/fixtures
   default_branch: alarmkit-spike
   tech_stack: ios
   ios:
@@ -25,7 +27,16 @@ limits:
   request_timeout_s: 60
 
 adapters:
-  scm:        {type: stub}          # S1: git
+  # S1.3：录制型 git（tests/fixtures/git，固定 author/date 的确定性演示仓）。
+  # path_map 把 live-verify 反推出的 git 相对路径映射到当前夹具文档
+  # （相对 tests/fixtures/git 解析，../ 出到 tests/fixtures/docs）。
+  scm:
+    type: recorded
+    settings:
+      fixtures_dir: git
+      path_map:
+        docs/kill-backup.md: ../docs/kill-backup.md
+        docs/sidebar-fallback.md: ../docs/sidebar-fallback.md
   docs:
     type: fs-docs
     settings:

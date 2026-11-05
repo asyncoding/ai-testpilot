@@ -84,9 +84,11 @@ def _short(urn: str) -> str:
 async def _channels(adapter: HybridSearchAdapter, query: str, k: int) -> dict:
     """同一题面跑三通道；返回 {channel: [urn,...]/None(通道不可用)}。"""
     match_expr, like_terms = shape_trigram_query(query)
+    # 分支跟随装配（project.default_branch；S1.3 起不再写死 main）
+    branch = getattr(adapter, "default_branch", "main")
     fts_rank, vec_rank, hybrid = await asyncio.gather(
-        adapter._fts_recall(match_expr, like_terms, "main", "default", ()),  # noqa: SLF001
-        adapter._vector_recall(query, "main", "default", ()),  # noqa: SLF001
+        adapter._fts_recall(match_expr, like_terms, branch, "default", ()),  # noqa: SLF001
+        adapter._vector_recall(query, branch, "default", ()),  # noqa: SLF001
         adapter.search(query, limit=k),
     )
     return {

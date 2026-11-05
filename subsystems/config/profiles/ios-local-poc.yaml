@@ -22,7 +22,12 @@ paths:
 external_write_enabled: false
 
 adapters:
-  scm:        {type: stub}
+  # S1.3：真实 git CLI 适配器（ChangeSet/HEAD live-verify）。纯懒构造，
+  # 装配不起 git 进程；超时/坏仓 → AdapterUnavailableError，调用侧降级不抛穿。
+  scm:
+    type: git
+    settings:
+      timeout_s: 15
   docs:
     type: fs-docs
     settings:

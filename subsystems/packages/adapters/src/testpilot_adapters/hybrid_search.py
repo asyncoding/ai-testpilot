@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from testpilot_core.models import KnowledgeChunk
+from testpilot_core.models import KnowledgeChunk, RepoRef
 from testpilot_core.retrieval import (
     FTS,
     VECTOR,
@@ -28,6 +28,8 @@ from testpilot_core.retrieval import (
     fuse_and_rank,
     shape_trigram_query,
 )
+
+from .live_verify import LiveVerifier
 
 
 class HybridSearchAdapter:
@@ -42,6 +44,10 @@ class HybridSearchAdapter:
         rrf_k: int = 60,
         quality_power: float = 1.0,
         half_life_days: float | None = None,
+        scm=None,  # CodeRepositoryPort：live-verify 用（S1.3 FR-QA-002）
+        repo: RepoRef | None = None,
+        tracer=None,
+        default_branch: str = "main",
     ) -> None:
         self.store = store
         self.model = model_gateway
@@ -51,18 +57,25 @@ class HybridSearchAdapter:
         self.rrf_k = rrf_k
         self.quality_power = quality_power
         self.half_life_days = half_life_days
+        self.default_branch = default_branch
+        # repo 缺省时给空路径占位：未配 scm 的校验也走统一通道（degraded + 留痕）
+        self._verifier = LiveVerifier(
+            scm, store, repo or RepoRef(project=project, repo_path=""),
+            tracer=tracer, project=project,
+        )
 
     async def search(
         self,
         query: str,
         *,
         project: str | None = None,
-        branch: str = "main",
+        branch: str | None = None,
         acl_scope: str = "default",
         kinds: tuple[str, ...] = (),
         limit: int = 8,
     ) -> HybridResult:
         project = project if project is not None else self.project
+        branch = branch or self.default_branch
         match_expr, like_terms = shape_trigram_query(query)
 
         # 两通道并发（sqlite 调用放线程池，避免阻塞事件循环）
@@ -188,9 +201,10 @@ class HybridSearchAdapter:
                 error=f"{type(exc).__name__}: {exc}"[:300],
             )
 
-    async def live_verify(self, urn: str, commit: str) -> dict[str, Any]:
-        # S1.3 接 CodeRepositoryPort；与 FtsSearchAdapter 保持同一占位
-        return {"verified": False, "reason": "live-verify 在 S1.3 接入 git 适配器后启用", "urn": urn}
+    async def live_verify(self, urn: str, commit: str = "") -> dict[str, Any]:
+        # FR-QA-002：每次校验（含降级）由 LiveVerifier 在 verification_events 留痕
+        result = await self._verifier.verify(urn, commit)
+        return result.model_dump()
 
 
 def _chroma_where(
