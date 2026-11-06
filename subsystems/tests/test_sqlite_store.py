@@ -71,6 +71,42 @@ def test_chunk_fts_index_and_search(tmp_path):
         store.close()
 
 
+def test_upsert_chunk_replaces_full_row_on_conflict(tmp_path):
+    # S1.4 回归：同 URN 重灌（陈旧索引刷新到 HEAD）必须整行替换。旧 ON CONFLICT
+    # 只刷 text/stale/hash，raw_json 与 valid_from 残留旧值；FtsSearchAdapter 靠
+    # raw_json 重建 KnowledgeChunk，会取回与 FTS 新文本矛盾的旧证据。
+    import json
+
+    store = bootstrap_store(tmp_path)
+    try:
+        store.upsert_document(_doc())
+        old = _chunk(_doc().urn, "func keep() { print(interval) }")
+        old.valid_from = "rootsha"
+        store.upsert_chunk(old)
+
+        new = old.model_copy(update={
+            "text": "func keep() { print(\"changed\", interval) }",
+            "content_hash": "c2", "valid_from": "headsha",
+            "kind": "code_symbol", "branch": "alarmkit-spike",
+        })
+        store.upsert_chunk(new)
+
+        row = store.conn.execute(
+            "SELECT raw_json, valid_from, branch, kind FROM chunks WHERE urn=?", (old.urn,)
+        ).fetchone()
+        assert row["valid_from"] == "headsha" and row["branch"] == "alarmkit-spike"
+        assert row["kind"] == "code_symbol"
+        # 适配器的实际水合路径：raw_json 必须是新块而不是旧块
+        hydrated = KnowledgeChunk.model_validate(json.loads(row["raw_json"]))
+        assert hydrated.text == new.text and hydrated.content_hash == "c2"
+        assert hydrated.valid_from == "headsha"
+        # FTS 索引同步指向新文本，无重复行
+        hits = store.search_fts("changed")
+        assert len(hits) == 1 and hits[0]["urn"] == old.urn
+    finally:
+        store.close()
+
+
 def test_upsert_document_refreshes_branch_on_conflict(tmp_path):
     # S1.3 回归：旧库 source_documents.branch 全为 main，--full 重灌到 alarmkit-spike
     # 时 ON CONFLICT 必须覆盖 branch；否则 live_verify 上下文取到陈旧分支名。

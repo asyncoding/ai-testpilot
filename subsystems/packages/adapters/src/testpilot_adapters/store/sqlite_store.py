@@ -130,7 +130,17 @@ class Store:
                 branch, valid_from, valid_to, stale, content_hash, raw_json)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(urn) DO UPDATE SET
-                 text=excluded.text, stale=excluded.stale, content_hash=excluded.content_hash""",
+                 doc_urn=excluded.doc_urn, idx=excluded.idx, kind=excluded.kind,
+                 text=excluded.text, symbol_urn=excluded.symbol_urn,
+                 quality_score=excluded.quality_score, branch=excluded.branch,
+                 valid_from=excluded.valid_from, valid_to=excluded.valid_to,
+                 stale=excluded.stale, content_hash=excluded.content_hash,
+                 raw_json=excluded.raw_json""",
+            # S1.4：同 URN 重灌必须整行替换。旧子句只刷 text/stale/hash，
+            # 而 FtsSearchAdapter 命中后靠 raw_json 重建 KnowledgeChunk——
+            # FTS 表已是新文本、raw_json 还是旧块，检索到的证据与库内文本
+            # 自相矛盾（stale-index E2E 对照实验变红复现）。valid_from/branch
+            # 等归属位同理，与 S1.3 upsert_document 的分支覆盖修复同一口径。
             (
                 chunk.urn, chunk.doc_urn, chunk.index, chunk.kind, chunk.text, chunk.symbol_urn,
                 chunk.quality_score, chunk.branch, chunk.valid_from, chunk.valid_to,
@@ -705,6 +715,76 @@ class Store:
         )
         self.conn.commit()
         return int(cur.lastrowid or 0)
+
+    # ── 问答运行（schema v5，FR-QA-001～004）──────────────────────────
+    def insert_qa_run(self, *, record: dict[str, Any]) -> int:
+        """qa_runs 落一行。record 是图 state 投影出的全原语 dict（见 QaService）；
+        run_id UNIQUE，重复写入直接抛 IntegrityError——服务层承诺一次 run 一行，
+        双写是接线 bug，不能静默覆盖。
+        """
+        cur = self.conn.execute(
+            """INSERT INTO qa_runs
+               (run_id, ts, project, branch, acl_scope, question, intent, status,
+                answer_payload, citations, evidence, verify_results, retrieval_event_id,
+                unknown_reason, degraded, attempts, regens, model_version, prompt_version,
+                params_version, data_version, tokens_in, tokens_out, latency_ms,
+                thread_id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                record["run_id"], record.get("ts", _now_iso()),
+                record.get("project", ""), record.get("branch", "main"),
+                record.get("acl_scope", "default"), record["question"],
+                record.get("intent", ""), record["status"],
+                json.dumps(record.get("answer_payload") or {}, ensure_ascii=False),
+                json.dumps(record.get("citations") or [], ensure_ascii=False),
+                json.dumps(record.get("evidence") or [], ensure_ascii=False),
+                json.dumps(record.get("verify_results") or [], ensure_ascii=False),
+                record.get("retrieval_event_id"),
+                record.get("unknown_reason", ""),
+                json.dumps(record.get("degraded") or [], ensure_ascii=False),
+                int(record.get("attempts", 0)), int(record.get("regens", 0)),
+                record.get("model_version", ""), record.get("prompt_version", ""),
+                record.get("params_version", ""), record.get("data_version", ""),
+                int(record.get("tokens_in", 0)), int(record.get("tokens_out", 0)),
+                int(record.get("latency_ms", 0)), record.get("thread_id", ""),
+                _now_iso(),
+            ),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    @staticmethod
+    def _qa_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        d = dict(row)
+        for key in ("answer_payload", "citations", "evidence", "verify_results", "degraded"):
+            d[key] = json.loads(d[key])
+        return d
+
+    def get_qa_run(self, run_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM qa_runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+        return self._qa_row_to_dict(row) if row else None
+
+    def list_qa_runs(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        if status:
+            rows = self.conn.execute(
+                "SELECT * FROM qa_runs WHERE status=? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM qa_runs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [self._qa_row_to_dict(r) for r in rows]
+
+    def feedback_summary(self) -> list[dict[str, Any]]:
+        """FR-QA-004 AC2 看板备料：按 kind/reason 聚合计数（端点留 S1.5）。"""
+        rows = self.conn.execute(
+            """SELECT kind, COALESCE(reason, '') AS reason, COUNT(*) AS n
+               FROM feedback GROUP BY kind, reason ORDER BY kind, n DESC"""
+        ).fetchall()
+        return [{"kind": r["kind"], "reason": r["reason"], "n": r["n"]} for r in rows]
 
     def add_eval_run(self, run: EvalRun) -> None:
         self.conn.execute(

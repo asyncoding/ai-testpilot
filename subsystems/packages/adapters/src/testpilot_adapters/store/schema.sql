@@ -204,6 +204,42 @@ CREATE TABLE IF NOT EXISTS feedback (
     model_version TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL
 );
+-- S1.4：bad case 池 = feedback join qa_runs，run_id 走索引
+CREATE INDEX IF NOT EXISTS idx_feedback_run_id ON feedback(run_id);
+
+-- 问答运行记录（S1.4 FR-QA-001～004）：一次 ask 一行，节点无副作用，
+-- 由 QaService 在图执行后统一落库；四元组列与 eval_runs 对齐，S1.6 可直接 join。
+CREATE TABLE IF NOT EXISTS qa_runs (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id             TEXT NOT NULL UNIQUE,
+    ts                 TEXT NOT NULL,
+    project            TEXT NOT NULL DEFAULT '',
+    branch             TEXT NOT NULL DEFAULT 'main',
+    acl_scope          TEXT NOT NULL DEFAULT 'default',
+    question           TEXT NOT NULL,
+    intent             TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL,
+    answer_payload     TEXT NOT NULL DEFAULT '{}',
+    citations          TEXT NOT NULL DEFAULT '[]',
+    evidence           TEXT NOT NULL DEFAULT '[]',
+    verify_results     TEXT NOT NULL DEFAULT '[]',
+    retrieval_event_id INTEGER,
+    unknown_reason     TEXT NOT NULL DEFAULT '',
+    degraded           TEXT NOT NULL DEFAULT '[]',
+    attempts           INTEGER NOT NULL DEFAULT 0,
+    regens             INTEGER NOT NULL DEFAULT 0,
+    model_version      TEXT NOT NULL DEFAULT '',
+    prompt_version     TEXT NOT NULL DEFAULT '',
+    params_version     TEXT NOT NULL DEFAULT '',
+    data_version       TEXT NOT NULL DEFAULT '',
+    tokens_in          INTEGER NOT NULL DEFAULT 0,
+    tokens_out         INTEGER NOT NULL DEFAULT 0,
+    latency_ms         INTEGER NOT NULL DEFAULT 0,
+    thread_id          TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qa_runs_ts ON qa_runs(ts);
+CREATE INDEX IF NOT EXISTS idx_qa_runs_status ON qa_runs(status);
 
 -- 评测
 CREATE TABLE IF NOT EXISTS eval_cases (
