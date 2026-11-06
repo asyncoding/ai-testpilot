@@ -136,8 +136,120 @@ class QaService:
     async def feedback_summary(self) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._store.feedback_summary)
 
-    async def aclose(self) -> None:
-        """C5 无自有资源（InMemorySaver 无需关闭）；C6 接 sqlite saver 后在此收口。"""
+    async def list_runs(self, *, status: str | None = None,
+                        limit: int = 50) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._store.list_qa_runs, status=status, limit=limit)
+
+    # ── S1.5：原文代理与 trace 时间线（router 的薄数据面）──────────────────────
+
+    async def get_run_source(self, run_id: str, urn: str) -> dict[str, Any]:
+        """取某次 run 证据白名单内的原文（FR-UI-001：引用可点开原文与 hash）。
+
+        白名单 = 该 run 证据块 URN ∪ 证据所属文档 URN ∪ 模型实际引用 URN。
+        白名单外（含路径穿越形态、他库文档 URN）一律 NotFoundError——本方法
+        不接收任何文件路径参数，文档级请求只经 URN 反查 store，无穿越面。
+        """
+        run = await self.get_run(run_id)
+        if run is None:
+            raise NotFoundError(f"qa_run 不存在: {run_id}")
+        evidence: list[dict[str, Any]] = run.get("evidence") or []
+        citations = (run.get("answer_payload") or {}).get("citations") or []
+        whitelist = {e["urn"] for e in evidence}
+        whitelist.update(e.get("doc_urn") for e in evidence if e.get("doc_urn"))
+        whitelist.update(c.get("urn") for c in citations if c.get("urn"))
+        if urn not in whitelist:
+            # 与 run 不存在同形态 404：不向调用方透露白名单边界外的资源存在性
+            raise NotFoundError(f"URN 不在该 run 的证据白名单内: {urn}")
+
+        chunk = next((e for e in evidence if e["urn"] == urn), None)
+        if chunk is not None:
+            return {
+                "urn": urn,
+                "kind": chunk.get("kind", ""),
+                "text": chunk.get("text", ""),
+                "content_hash": chunk.get("content_hash", ""),
+                "source_uri": chunk.get("source_uri", ""),
+                "doc_urn": chunk.get("doc_urn", ""),
+                "authority_level": chunk.get("authority_level", ""),
+                "branch": chunk.get("branch", ""),
+                "stale": chunk.get("stale", ""),
+            }
+
+        # 文档级 URN：聚合该文档当前索引的全部切块（白名单已证明文档属于本 run）
+        def _load_document() -> dict[str, Any]:
+            doc = self._store.get_document(urn)
+            if doc is None:
+                raise NotFoundError(f"白名单文档在索引中已不存在: {urn}")
+            chunk_urns = self._store.list_chunk_urns(urn)
+            rows = self._store.load_retrieval_chunks(chunk_urns)
+            return {
+                "urn": urn,
+                "kind": "document",
+                "text": "\n\n".join(str(r.get("text") or "") for r in rows),
+                "content_hash": doc.content_hash,
+                "source_uri": doc.uri,
+                "doc_urn": urn,
+                "authority_level": doc.authority_level.value
+                if hasattr(doc.authority_level, "value") else str(doc.authority_level),
+                "branch": "",
+                "stale": "",
+            }
+
+        return await asyncio.to_thread(_load_document)
+
+    async def get_run_trace(self, run_id: str) -> dict[str, Any]:
+        """组装本地可观测时间线（FR-EV-004 AC1：UI 可反查一次问答的完整链路）。
+
+        verification_events 表无 run_id 列无法 join，时间线直接用 qa_runs 里
+        图落盘的 verify_results/evidence 投影；Langfuse 深链由 router 按 profile
+        注入，服务层不读配置。FTS 通道 retrieval_event_id 为 null 时如实呈现。
+        """
+        run = await self.get_run(run_id)
+        if run is None:
+            raise NotFoundError(f"qa_run 不存在: {run_id}")
+        evidence = [
+            {
+                "urn": e.get("urn", ""),
+                "doc_urn": e.get("doc_urn", ""),
+                "kind": e.get("kind", ""),
+                "score": e.get("score", 0.0),
+                "authority_level": e.get("authority_level", ""),
+            }
+            for e in (run.get("evidence") or [])
+        ]
+        citations = [
+            {
+                "urn": c.get("urn", ""),
+                "version_state": c.get("version_state", ""),
+                "version_ref": c.get("version_ref", ""),
+            }
+            for c in (run.get("citations") or [])
+        ]
+        return {
+            "run_id": run["run_id"],
+            "question": run.get("question", ""),
+            "intent": run.get("intent", ""),
+            "status": run.get("status", ""),
+            "unknown_reason": run.get("unknown_reason", ""),
+            "attempts": run.get("attempts", 0),
+            "regens": run.get("regens", 0),
+            "tokens": {"in": run.get("tokens_in", 0), "out": run.get("tokens_out", 0)},
+            "latency_ms": run.get("latency_ms", 0),
+            "degraded": run.get("degraded") or [],
+            "retrieval_event_id": run.get("retrieval_event_id"),
+            "evidence": evidence,
+            "verify_results": run.get("verify_results") or [],
+            "citations": citations,
+            "versions": {
+                "model": run.get("model_version", ""),
+                "prompt": run.get("prompt_version", ""),
+                "params": run.get("params_version", ""),
+                "data": run.get("data_version", ""),
+            },
+            "thread_id": run.get("thread_id", ""),
+            "created_at": run.get("created_at", ""),
+        }
 
     # ── 内部映射 ────────────────────────────────────────────────────────────
 

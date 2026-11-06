@@ -14,6 +14,7 @@ from qa_fakes import FakeHybridSearch, FakeModel, make_chunk, structured_envelop
 from testpilot_adapters.store import bootstrap_store
 from testpilot_core.answering import qa_run_urn
 from testpilot_core.enums import (
+    AuthorityLevel,
     FeedbackKind,
     FeedbackReason,
     QaIntent,
@@ -21,13 +22,15 @@ from testpilot_core.enums import (
     VersionState,
 )
 from testpilot_core.errors import NotFoundError
-from testpilot_core.models import AskRequest
+from testpilot_core.models import AskRequest, KnowledgeChunk, SourceDocument
 from testpilot_orchestrator.qa_graph.graph import recursion_limit
 from testpilot_orchestrator.qa_graph.nodes import QaDeps
 from testpilot_orchestrator.qa_graph.service import QaService
 
 DOC1 = "urn:testpilot:fs-docs:document:docs/runbook.md"
+DOC2 = "urn:testpilot:fs-docs:document:docs/other.md"
 CHUNK1 = "urn:testpilot:fs-docs:chunk:docs/runbook.md#section-one"
+CHUNK2 = "urn:testpilot:fs-docs:chunk:docs/other.md#section-one"
 SYM1 = "urn:testpilot:fs-docs:symbol:Sources/Alarm.swift#Alarm.ring"
 SYM_DOC = "urn:testpilot:fs-docs:document:Sources/Alarm.swift"
 
@@ -189,3 +192,107 @@ async def test_service_uses_mapped_step_limit(tmp_path):
     deps = QaDeps(model=FakeModel({}), search=FakeHybridSearch([]), store=store)
     service = QaService(deps, store)
     assert service._step_limit == recursion_limit() == 12
+
+
+# ── S1.5：原文代理白名单与 trace 时间线 ──────────────────────────────────────
+
+def _doc(urn: str, *, authority=AuthorityLevel.L2_EXPERIENCE) -> SourceDocument:
+    return SourceDocument(
+        urn=urn, source_system="fs-docs",
+        uri=f"file:///repo/{urn.split(':', 4)[-1]}",
+        title=urn.rsplit(":", 1)[-1], version="h1", content_hash=f"doc-hash-{urn[-4:]}",
+        authority_level=authority, acl_scope="default",
+    )
+
+
+def _howto_service(store, chunks):
+    # 复用调用方预灌过文档的同一 store 连接，不另起 bootstrap
+    model = FakeModel({
+        "qa_intent_t1": structured_envelope({"intent": "howto"}),
+        "qa_answer_t1": _answer_env(CHUNK1, "证据原文"),
+    })
+    deps = QaDeps(model=model, search=FakeHybridSearch(chunks), store=store)
+    return QaService(deps, store)
+
+
+async def test_get_run_source_chunk_and_document_envelopes(tmp_path):
+    store = bootstrap_store(tmp_path / "data")
+    store.upsert_document(_doc(DOC1))
+    store.upsert_chunk(KnowledgeChunk(
+        urn=CHUNK1, doc_urn=DOC1, index=0, kind="text",
+        text="证据原文", branch="main", content_hash="ch-hash-1",
+    ))
+    # 对照文档：同库真实存在但不在本 run 白名单内，必须同样 404
+    store.upsert_document(_doc(DOC2))
+    store.upsert_chunk(KnowledgeChunk(
+        urn=CHUNK2, doc_urn=DOC2, index=0, kind="text",
+        text="另一篇的原文", branch="main", content_hash="ch-hash-2",
+    ))
+    chunk = make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文",
+                       content_hash="ch-hash-1")
+    service = _howto_service(store, [chunk])
+    await service.ask(_request("如何配置备份？"), case_key="t1", run_id="run-src-1")
+
+    # chunk 级：字段直接来自 run 证据，整句等值防子串假绿
+    src = await service.get_run_source("run-src-1", CHUNK1)
+    assert src["urn"] == CHUNK1 and src["kind"] == "text"
+    assert src["text"] == "证据原文" and src["content_hash"] == "ch-hash-1"
+    assert src["doc_urn"] == DOC1 and src["branch"] == "main"
+
+    # 文档级：白名单含 doc_urn，经 store 聚合当前索引切块
+    doc_src = await service.get_run_source("run-src-1", DOC1)
+    assert doc_src["kind"] == "document" and doc_src["doc_urn"] == DOC1
+    assert doc_src["text"] == "证据原文"
+    assert doc_src["content_hash"] == f"doc-hash-{DOC1[-4:]}"
+    assert doc_src["authority_level"] == AuthorityLevel.L2_EXPERIENCE.value
+
+    # 白名单外的他库文档（证明不是「所有 urn 都 404」的假绿）
+    with pytest.raises(NotFoundError, match="白名单"):
+        await service.get_run_source("run-src-1", DOC2)
+    # 路径穿越形态：urn 不接收文件路径，天然不可达，同样 404
+    with pytest.raises(NotFoundError):
+        await service.get_run_source("run-src-1", "../../etc/passwd")
+    with pytest.raises(NotFoundError):
+        await service.get_run_source("run-ghost", CHUNK1)
+
+
+async def test_get_run_trace_assembles_timeline_without_inventing_links(tmp_path):
+    store = bootstrap_store(tmp_path / "data")
+    chunk = make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文")
+    service = _howto_service(store, [chunk])
+    await service.ask(_request("如何配置备份？"), case_key="t1", run_id="run-tr-1")
+
+    trace = await service.get_run_trace("run-tr-1")
+    assert trace["run_id"] == "run-tr-1"
+    assert trace["status"] == "answered" and trace["intent"] == "howto"
+    assert trace["attempts"] == 1 and trace["regens"] == 0
+    assert trace["tokens"] == {"in": 200, "out": 60}
+    assert trace["evidence"][0]["urn"] == CHUNK1
+    assert set(trace["evidence"][0]) == {
+        "urn", "doc_urn", "kind", "score", "authority_level"}
+    assert trace["versions"]["model"] == "fake-model-1"
+    assert trace["retrieval_event_id"] == 11  # FakeHybridSearch 默认 event_id
+    # 服务层不读 profile 配置：Langfuse 深链由 router 注入，这里绝不能自造字段
+    assert "langfuse" not in trace
+    with pytest.raises(NotFoundError):
+        await service.get_run_trace("run-ghost")
+
+
+async def test_list_runs_filters_by_status_and_retains_limit(tmp_path):
+    store = bootstrap_store(tmp_path / "data")
+    answered = _howto_service(
+        store, [make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文")])
+    await answered.ask(_request("如何配置备份？"), case_key="t1", run_id="run-ok")
+
+    # 空检索服务复用同一 store：跑一条 unknown 做状态过滤对照
+    empty_model = FakeModel({"qa_intent_t1": structured_envelope({"intent": "code"})})
+    empty_svc = QaService(
+        QaDeps(model=empty_model, search=FakeHybridSearch([]), store=store), store)
+    await empty_svc.ask(_request(), case_key="t1", run_id="run-bad")
+
+    all_runs = await answered.list_runs()
+    assert {r["run_id"] for r in all_runs} == {"run-ok", "run-bad"}
+    unknowns = await answered.list_runs(status="unknown")
+    assert [r["run_id"] for r in unknowns] == ["run-bad"]
+    limited = await answered.list_runs(limit=1)
+    assert len(limited) == 1

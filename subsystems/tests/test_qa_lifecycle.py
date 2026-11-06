@@ -132,6 +132,27 @@ async def test_build_qa_service_wires_real_offline_container(tmp_path):
         container.get("store").close()
 
 
+async def test_aclose_really_releases_sqlite_saver_ctx(tmp_path):
+    """回归：QaService.aclose 曾被同类后定义的 no-op 覆盖，sqlite saver 连接
+    实际从不关闭（_saver_ctx 残留），FastAPI lifespan 反复启停会泄漏连接。
+    守卫：收口后上下文句柄必须清空，且二次收口幂等、库文件保留。"""
+    deps, store, _ = _deps(tmp_path)
+    service = QaService(deps, store, data_dir=tmp_path)
+    await service.astart()
+    assert service._saver_ctx is not None  # 前置：启动确实持有 saver 上下文
+    await service.ask(
+        AskRequest(question="Alarm.ring 的逻辑？", project="demo", branch="main"),
+        case_key="t1", run_id="run-close-1",
+    )
+
+    await service.aclose()
+    assert service._saver_ctx is None  # no-op aclose 下这里变红
+    db = tmp_path / CHECKPOINT_REL
+    assert db.exists()  # 只关连接不删库
+    await service.aclose()  # 幂等：已收口再调不报错
+    store.close()
+
+
 async def test_sqlite_astart_is_idempotent_and_checkpoint_dir_is_fixed(tmp_path):
     deps, store, _ = _deps(tmp_path)
     service = QaService(deps, store, data_dir=tmp_path)
