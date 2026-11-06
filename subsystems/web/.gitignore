@@ -1,0 +1,4 @@
+# 依赖与构建产物均不入库（根 .gitignore 也有同名锚定规则，双保险）
+node_modules/
+.next/
+out/

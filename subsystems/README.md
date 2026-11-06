@@ -14,8 +14,9 @@ subsystems/
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
 ├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml
 ├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
+├── web/               # S1.5 对话页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
-└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify/qa_probe 探针
+└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify/qa_probe 探针、build_web
 ```
 
 ## 环境准备（venv 强制隔离，禁止污染系统 Python）
@@ -39,18 +40,19 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（312 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（328 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
-# S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E；
+# S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
 # 核心层防腐门禁（core 禁止 import fastapi/sqlite/yaml/各兄弟包等）
 .venv/bin/python scripts/import_lint.py
 
-# API（默认 offline-demo profile）
-.venv/bin/python -m uvicorn testpilot_orchestrator.app:app --port 8000
-curl -s http://127.0.0.1:8000/health | jq .
+# API（默认 offline-demo profile；8765 是门禁/演示约定端口，可自行更换）
+.venv/bin/python -m uvicorn testpilot_orchestrator.app:app --port 8765
+curl -s http://127.0.0.1:8765/health | jq .
+curl -s http://127.0.0.1:8765/api/config | jq .   # S1.5：录制夹具横幅等前端装配数据
 
 # 三个 worker 的装配自检（独立进程能装起整套容器即 S0 达标）
 .venv/bin/testpilot-ingest
@@ -291,19 +293,99 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   L2 素材，覆盖薄；留 S2。
 - FTS 检索的 **kinds 过滤仍不支持**（检索节点降级跳过并打 `kinds_filter_unsupported`
   降级标记）；branch/acl 过滤本轮已补到 SQL 并有用例（S1.3 记的 deferred 已核销）。
-- HTTP 端点与前端不在本切片：`AskRequest/AskResponse` 模型已就位，S1.5 的 router 只做
-  薄包装与 HTTP 异常映射；阈值标定在 S1.6（本轮机制 + 保守默认 + `PARAMS_VERSION`）。
+- ~~HTTP 端点与前端不在本切片~~：HTTP 端点已在 S1.5 落地（见下节，router 薄包装 +
+  异常映射，core 模型零改动）；阈值标定仍在 S1.6（机制 + 保守默认 + `PARAMS_VERSION`）。
 
-## 一键验收（7 个自动门禁）
+## 问答 HTTP API（S1.5）：FastAPI 薄包装与静态前端同端口托管
+
+落地 docs/08 **FR-UI-001 后端面**、FR-QA-004 AC2（反馈聚合）、FR-EV-004 AC1（UI→trace
+反查）。fastapi 仍只出现在 orchestrator（`qa_api/` 包），core 零 web 依赖，import-lint
+继续守门；router 无业务逻辑，全部能力是 `QaService` 的薄包装。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/qa/ask` | 入参 `{question, project?, branch?, acl_scope?, case_key?}`；`case_key` 是编排层字段，core `AskRequest` 冻结不改 |
+| GET | `/api/qa/runs?status&limit` | 历史 run 列表（limit 1–200） |
+| GET | `/api/qa/runs/{id}` | run 详情（JSON 列已反序列化） |
+| GET | `/api/qa/runs/{id}/sources/{urn:path}` | 证据原文代理；URN 需百分号编码（`#` 否则被当 fragment） |
+| GET | `/api/qa/runs/{id}/trace` | 本地时间线；langfuse 字段在 noop tracer 下如实为 `null` |
+| POST | `/api/qa/runs/{id}/feedback` | 👍/👎（四原因枚举）；幽灵 run → 404 且零留痕 |
+| GET | `/api/qa/feedback/summary` | 按 kind/reason 聚合（FR-QA-004 AC2） |
+| GET | `/api/config` | profile/适配器形态/`recorded`/写开关，前端横幅数据源 |
+
+异常映射（统一错误体 `{"error":{"type","message"}}`）：NotFound 404 / PolicyDenied 403 /
+AdapterUnavailable 503 / UnsupportedCapability 501 / SchemaValidation 502 /
+EvidenceInsufficient 422 / TestPilotError 兜底 500；请求体校验走 pydantic 原生 422。
+
+安全与诚实性守卫（均有反假绿测试）：
+
+- **原文代理无路径穿越面**：端点只收 URN 不收文件路径；白名单 = 该 run 证据块 URN ∪
+  证据所属文档 URN ∪ 模型实际引用 URN，白名单外（含同库真实存在的他文档）一律 404——
+  测试用「同库对照文档」证明不是「所有 URN 都 404」的假绿。
+- **录制 profile 的自由提问确定性走未知降级**：录制模型按 `qa_<kind>_<case_key>` 取响应，
+  无 `case_key` 时缺键 → `AdapterUnavailableError` → 未知/`model_unavailable`，不是 bug；
+  四个确定性演示故事 `stale_code / kill_backup / unanswerable / chitchat` 与 qa_probe 同款。
+- **trace 不造数**：FTS 通道 `retrieval_event_id` 允许为 `null`；Langfuse 深链仅在
+  tracer=langfuse 时按 `LANGFUSE_HOST` 生成（`session_id=run_id`），noop 给 `null`。
+- **静态挂载守卫**：`web/out` 不存在时只记 warning，`/health` 与 `/api/*` 照常服务，
+  CI/无 node 环境不受影响；A8 门禁不依赖 npm。
+
+生命周期：`QaService`（含 AsyncSqliteSaver）在 lifespan 内异步启动，关停顺序固定
+`aclose()` → `store.close()`；测试经 `create_app(container=..., web_dist=...)` 注入
+tmp 容器，TestClient 真实跑 lifespan 但不起端口。
+
+## Web 对话页（S1.5）：Next.js 静态导出，单进程演示
+
+`web/` 是独立于 uv workspace（`members=packages/*`）的 Next.js 15 App Router 工程，
+`output: "export"` 纯静态导出到 `web/out/`，由 FastAPI `StaticFiles` 同端口托管——
+演示时只有一个进程、一个端口（http://127.0.0.1:8765/），无 CORS；node 缺失/未构建时
+后端只打 warning，API 与门禁不受影响。
+
+```bash
+# 1) 构建静态产物（不入自动门禁；国内网络用镜像）
+bash scripts/build_web.sh
+#   registry 受限时：NPM_REGISTRY=https://registry.npmmirror.com bash scripts/build_web.sh
+
+# 2) 先入库（qa_probe 会顺带完成 full 入库 + 自检），再起单进程服务
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml .venv/bin/python scripts/qa_probe.py
+.venv/bin/python -m uvicorn testpilot_orchestrator.app:app --port 8765
+# 浏览器开 http://127.0.0.1:8765/
+
+# 前端开发态（热更）：next dev 经 next.config.ts rewrites 把 /api 代理到 8765
+cd web && npm run dev        # http://localhost:3000，后端仍需单独起在 8765
+```
+
+FR-UI-001 AC 对照（均有后端测试或构建期 TypeScript 检查守着）：
+
+| AC | 实现位置 |
+|---|---|
+| 问答对话 | `QuestionComposer` + `POST /api/qa/ask`；四个预设故事携带 `case_key` |
+| 引用可点开原文与 hash | `CitationList` → source 白名单代理，抽屉展示 text/hash/uri/权威等级 |
+| 三态版本标注 | `consistent` 绿 / `verified_at@sha` 黄 / `unknown` 灰徽章 |
+| 负例「未知」样式 | `AnswerCard` 红色未知卡 + unknown_reason 中文文案 + degraded 标签 |
+| 👍/👎 反馈（四原因） | `FeedbackBar` → feedback 端点；幽灵 run 404 且零留痕 |
+| trace 入口 | `TraceDrawer`：时间线/证据/三态/版本四元组/langfuse 深链（noop 时如实提示 null） |
+| 「证据来自录制夹具」标注 | `Banner`（FR-OPS-002），并说明自由提问确定性降级的原因 |
+| 事故双段历史证词 | `AnswerCard` react-markdown 渲染双段 markdown + `HistorySection` 逐字 blockquote |
+
+工程约束：前端只经同源 `/api` 通信，URN 全量 `encodeURIComponent`（`#` 否则被当
+fragment）；不引 openapi 生成与 UI 框架，类型手写镜像后端契约；`node_modules/.next/out`
+均不入库。已知缺口：仅对话页一页（其余四个控制台页在 S2–S5）、无 SSE（ask 同步）、
+无 HTTP 认证/多用户（POC 单用户，acl_scope 走请求体）。
+
+## 一键验收（8 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 7 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 8 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、312 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、328 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
-（FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）。
+（FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
+（真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）。
+A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。
 
 ## 基础设施（Docker）
 
@@ -366,7 +448,7 @@ web 只把 OTel 事件写 S3+入队，读 S3→写 ClickHouse 的消费者是 wo
 OTLP 不报错（或 500）但 trace 永不入库、`bull:otel-ingestion-queue:wait` 只增不减。
 已实测：补齐 worker 后积压任务立即被消费，3 条 smoke trace 入库。
 
-## 手动门禁：空链路 trace 出现在 Langfuse（约 2 分钟，独立于 7 个自动门禁）
+## 手动门禁：空链路 trace 出现在 Langfuse（约 2 分钟，独立于 8 个自动门禁）
 
 前置：上面的 observability 栈 `health=OK`。
 
