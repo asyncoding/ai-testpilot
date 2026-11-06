@@ -106,3 +106,31 @@ class StaleStatus(StrEnum):
     STALE = "stale"
     REINDEXED = "reindexed"
     SUPERSEDED = "superseded"
+
+
+# ── S1.4 问答工作流（docs/08 FR-QA-001～004）────────────────────────────────
+
+
+class QaIntent(StrEnum):
+    """问答意图分类。误判代价不对称：拿不准时兜底归 code，宁多验不漏验。"""
+
+    CODE = "code"  # 代码/符号/实现行为类：强制 live-verify
+    INCIDENT = "incident"  # 事故/复盘/历史变迁：历史证词逐字并列
+    HOWTO = "howto"  # 操作/配置/步骤类
+    CONCEPT = "concept"  # 概念/术语类
+    OUT_OF_SCOPE = "out_of_scope"  # 闲聊/通用问答：本产品不做，直接收口
+
+
+class QaStatus(StrEnum):
+    ANSWERED = "answered"
+    UNKNOWN = "unknown"  # 证据不足/引用校验耗尽/模型不可用：显式未知，不编造
+    DENIED = "denied"  # 权限策略拒绝
+    ERROR = "error"  # 预算耗尽等基础设施级异常
+
+
+class VersionState(StrEnum):
+    """引用三态（docs/08 FR-QA-002 AC3），全系统只允许这三个合法字面量。"""
+
+    CONSISTENT = "consistent"  # 与当前版本一致（verify unchanged / 非代码新鲜块）
+    VERIFIED_AT = "verified_at"  # 索引已陈旧，当场读 HEAD 刷新后验证于新版本
+    UNKNOWN = "unknown"  # 校验降级/证据消失：不得当成一致输出

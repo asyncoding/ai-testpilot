@@ -35,3 +35,11 @@ class SchemaValidationError(TestPilotError):
 
 class EvidenceInsufficientError(TestPilotError):
     """证据不足以支撑结论；工作流应降级为 NEEDS_HUMAN/“未知”，不得硬归因。"""
+
+
+class NotFoundError(TestPilotError):
+    """引用的资源不存在（如对不存在的 qa_run 写反馈）。
+
+    S1.4 用于拒绝孤儿 feedback 行（feedback.target_urn NOT NULL 且无 DB FK，
+    服务层是唯一守卫）；S1.5 HTTP 层直接映射 404。
+    """

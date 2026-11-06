@@ -24,8 +24,11 @@ from .enums import (
     FeedbackReason,
     OracleType,
     OutboxStatus,
+    QaIntent,
+    QaStatus,
     RunStatus,
     StaleStatus,
+    VersionState,
 )
 
 
@@ -418,6 +421,91 @@ class Feedback(BaseModel):
     detail: str = ""
     model_version: str = ""
     created_at: datetime = Field(default_factory=utcnow)
+
+
+# ── 问答工作流（docs/08 FR-QA-001～004，S1.4）──────────────────────────────
+
+class AskRequest(BaseModel):
+    """一次问答的入参；S1.5 的 HTTP router 只做本模型的薄包装。"""
+
+    question: str
+    project: str = ""
+    branch: str = "main"
+    acl_scope: str = "default"
+
+
+class DraftCitation(BaseModel):
+    """模型生成草稿中的引用：只能引用白名单 URN，quote 必须是证据原文子串。"""
+
+    urn: str
+    quote: str = ""
+
+
+class AnswerDraft(BaseModel):
+    """structured(schema=AnswerDraft) 的输出契约；citations 受 URN 白名单约束。"""
+
+    summary: str
+    sections: list[str] = Field(default_factory=list)
+    citations: list[DraftCitation] = Field(default_factory=list)
+
+
+class QaCitation(BaseModel):
+    """装配后的最终引用：补齐可点击 URI、hash 与三态版本标注（FR-QA-001 AC1）。"""
+
+    urn: str
+    uri: str = ""
+    quote: str = ""
+    version_state: VersionState
+    content_hash: str = ""
+    version_ref: str = ""  # verified_at 时记录 HEAD 短 sha，其余为空
+
+
+class HistoryTestimony(BaseModel):
+    """历史证词（FR-QA-003）：text 为语料逐字原文，模型全程不接触、不改写。"""
+
+    text: str
+    doc_urn: str
+    source_uri: str = ""
+    date: str = ""
+    version: str = ""
+
+
+class AssembledAnswer(BaseModel):
+    markdown: str
+    sections: list[str] = Field(default_factory=list)
+    citations: list[QaCitation] = Field(default_factory=list)
+    history: list[HistoryTestimony] = Field(default_factory=list)
+
+
+class SufficiencyVerdict(BaseModel):
+    sufficient: bool
+    reason: str = ""  # empty_retrieval / weak_retrieval / ""
+    score: float = 0.0
+
+
+class CitationVerdict(BaseModel):
+    ok: bool
+    errors: list[str] = Field(default_factory=list)
+
+
+class AclVerdict(BaseModel):
+    outcome: Literal["allow", "deny", "out_of_scope"]
+    reason: str = ""
+
+
+class AskResponse(BaseModel):
+    """QaService.ask 的返回；qa_runs 落库 payload 与本模型同构。"""
+
+    run_id: str
+    status: QaStatus
+    answer: AssembledAnswer | None = None
+    unknown_reason: str = ""
+    degraded: list[str] = Field(default_factory=list)
+    intent: QaIntent | None = None
+    model_version: str = ""
+    prompt_version: str = ""
+    params_version: str = ""
+    data_version: str = ""
 
 
 # ── 评测 ──────────────────────────────────────────────────────────────────
