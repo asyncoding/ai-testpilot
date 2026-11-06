@@ -12,7 +12,7 @@
     "degraded": false,
     "structured": {
       "answer": "四层兜底：系统停钟/接管页/kill-backup/状态对账",
-      "citations": ["urn:testpilot:fs-docs:document:tests/fixtures/docs/kill-backup.md"]
+      "citations": ["urn:testpilot:fs-docs:document:docs/kill-backup.md"]
     }
   },
   "qa_unanswerable": {
@@ -20,5 +20,171 @@
     "tokens_in": 120,
     "tokens_out": 24,
     "degraded": true
+  },
+
+  "qa_intent_stale_code": {
+    "text": "",
+    "tokens_in": 60,
+    "tokens_out": 12,
+    "degraded": false,
+    "structured": {"intent": "code"}
+  },
+  "qa_answer_stale_code": {
+    "text": "C.keep() 在 HEAD 已改为打印 changed 与 interval。",
+    "tokens_in": 420,
+    "tokens_out": 48,
+    "degraded": false,
+    "structured": {
+      "summary": "HEAD 版本的 C.keep() 会打印 changed 与当前 interval。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:chunk:Sources/B.swift#C.keep()",
+          "quote": "func keep() { print(\"changed\", interval) }"
+        }
+      ]
+    }
+  },
+  "qa_answer_retry_stale_code": {
+    "text": "重生成仍引用离线语料中不存在的代码块（探针专用：确定性耗尽重生成预算）。",
+    "tokens_in": 430,
+    "tokens_out": 50,
+    "degraded": false,
+    "structured": {
+      "summary": "重试后证据白名单仍不含该代码块，拒绝给出无引用结论。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:chunk:Sources/B.swift#C.keep()",
+          "quote": "func keep() { print(\"changed\", interval) }"
+        }
+      ]
+    }
+  },
+
+  "qa_intent_kill_backup": {
+    "text": "",
+    "tokens_in": 64,
+    "tokens_out": 10,
+    "degraded": false,
+    "structured": {"intent": "incident"}
+  },
+  "qa_answer_kill_backup": {
+    "text": "当前规范是 30 秒兜底；历史 90 秒版本属于事故复盘证词。",
+    "tokens_in": 760,
+    "tokens_out": 55,
+    "degraded": false,
+    "structured": {
+      "summary": "当前规范：kill-backup 机制在 30 秒后兜底；历史 90 秒版本仅作逐字证词并列。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:document:docs/kill-backup.md",
+          "quote": "项目通过 kill-backup 机制在 30 秒后兜底。"
+        }
+      ]
+    }
+  },
+
+  "qa_intent_unanswerable": {
+    "text": "",
+    "tokens_in": 58,
+    "tokens_out": 9,
+    "degraded": false,
+    "structured": {"intent": "howto"}
+  },
+  "qa_answer_unanswerable": {
+    "text": "未知：证据不足，拒绝生成无引用结论。",
+    "tokens_in": 130,
+    "tokens_out": 20,
+    "degraded": true
+  },
+
+  "qa_intent_chitchat": {
+    "text": "",
+    "tokens_in": 40,
+    "tokens_out": 8,
+    "degraded": false,
+    "structured": {"intent": "out_of_scope"}
+  },
+
+  "qa_intent_forged": {
+    "text": "",
+    "tokens_in": 55,
+    "tokens_out": 10,
+    "degraded": false,
+    "structured": {"intent": "howto"}
+  },
+  "qa_answer_forged": {
+    "text": "伪造引用稿（首次）。",
+    "tokens_in": 300,
+    "tokens_out": 40,
+    "degraded": false,
+    "structured": {
+      "summary": "模型编造了不在证据白名单内的引用。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:document:docs/never-retrieved.md",
+          "quote": "不存在于任何证据块中的句子"
+        }
+      ]
+    }
+  },
+  "qa_answer_retry_forged": {
+    "text": "伪造引用稿（重试仍伪造）。",
+    "tokens_in": 310,
+    "tokens_out": 42,
+    "degraded": false,
+    "structured": {
+      "summary": "重生成仍编造白名单外引用，预算耗尽。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:document:docs/never-retrieved.md",
+          "quote": "不存在于任何证据块中的句子"
+        }
+      ]
+    }
+  },
+
+  "qa_intent_retry_ok": {
+    "text": "",
+    "tokens_in": 57,
+    "tokens_out": 11,
+    "degraded": false,
+    "structured": {"intent": "howto"}
+  },
+  "qa_answer_retry_ok": {
+    "text": "首稿伪造引用。",
+    "tokens_in": 290,
+    "tokens_out": 38,
+    "degraded": false,
+    "structured": {
+      "summary": "首稿引用了未检索到的文档。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:document:docs/never-retrieved.md",
+          "quote": "不存在于任何证据块中的句子"
+        }
+      ]
+    }
+  },
+  "qa_answer_retry_retry_ok": {
+    "text": "重试稿改用白名单内逐字引用。",
+    "tokens_in": 320,
+    "tokens_out": 44,
+    "degraded": false,
+    "structured": {
+      "summary": "重试后只引用实际检索到的证据。",
+      "sections": [],
+      "citations": [
+        {
+          "urn": "urn:testpilot:fs-docs:chunk:docs/runbook.md#section-one",
+          "quote": "证据原文"
+        }
+      ]
+    }
   }
 }
