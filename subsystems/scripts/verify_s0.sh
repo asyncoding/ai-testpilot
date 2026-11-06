@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# S0 已闭合门禁一键验收（docs/07 §10）。Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
+# 自动门禁一键验收（docs/07 §10）：A1–A6 为 S0 骨架门禁，A7 为 S1.4 离线问答探针。
+# Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
 cd "$(dirname "$0")/.."
@@ -43,7 +44,16 @@ echo "=== A6. trace 调用面（noop 空链路，期望 verified=true, exit=0）
 $PY scripts/smoke_trace.py > /tmp/tp_smoke.log 2>&1 && grep -q '"verified": true' /tmp/tp_smoke.log \
   && { echo "PASS  $(cat /tmp/tp_smoke.log)"; pass_n=$((pass_n+1)); } || { echo "FAIL  见 /tmp/tp_smoke.log"; fail_n=$((fail_n+1)); }
 
+echo "=== A7. 离线问答端到端探针（FR-QA-001～004，四类问题+行数对账，期望 exit 0） ==="
+# 显式钉死 profile：探针内部 full=True 重切块，重复执行幂等；账本行数按差值断言，
+# 不依赖库的初始行数。生成物落 store/offline-demo 与 checkpoints/，均已 gitignore。
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  $PY scripts/qa_probe.py > /tmp/tp_qa_probe.log 2>&1 \
+  && grep -q '✅ qa_probe 全部通过' /tmp/tp_qa_probe.log \
+  && { echo "PASS  $(grep '✅' /tmp/tp_qa_probe.log)"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_qa_probe.log"; fail_n=$((fail_n+1)); }
+
 echo
 echo "S0 自动门禁结果：$pass_n PASS / $fail_n FAIL"
 [ $fail_n = 0 ] || exit 1
-echo "剩余唯一门禁（Langfuse 服务端可见 trace）按 subsystems/README.md「S0 门禁」节手动执行。"
+echo "剩余手动门禁（Langfuse 服务端可见 trace）按 subsystems/README.md「手动门禁」节执行。"

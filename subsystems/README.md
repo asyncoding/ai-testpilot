@@ -10,12 +10,12 @@ subsystems/
 ├── packages/
 │   ├── core/          # testpilot-core：统一领域模型 + 端口 Protocol + 策略（零 IO/零 SDK）
 │   ├── adapters/      # testpilot-adapters：文件/JSON/SQLite-FTS/录制型 等适配器
-│   ├── orchestrator/  # testpilot-orchestrator：profile 装配 + FastAPI（S1+ 放 LangGraph）
+│   ├── orchestrator/  # testpilot-orchestrator：profile 装配 + FastAPI + qa_graph（S1.4 LangGraph 答案图）
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
 ├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml
 ├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
-└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify 探针
+└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify/qa_probe 探针
 ```
 
 ## 环境准备（venv 强制隔离，禁止污染系统 Python）
@@ -39,8 +39,9 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（110+ 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
-# 核心防腐、S1.1 切块/质量分/入库管线、S1.2 Ollama/Chroma 契约与三通道融合；
+# 全量契约测试（312 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
+# S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -62,7 +63,7 @@ TESTPILOT_REPO_PATH=/path/to/repo .venv/bin/python -m pytest   # 覆盖被测仓
 ```
 
 > 环境隔离说明：`source .venv/bin/activate` 与直接用 `.venv/bin/python` 是同一个解释器，
-> 二者**都原样继承当前 shell 的环境变量**。跑第 7 门禁时若 `export TESTPILOT_TRACER=langfuse`，
+> 二者**都原样继承当前 shell 的环境变量**。跑 Langfuse 手动门禁时若 `export TESTPILOT_TRACER=langfuse`，
 > 残留变量会让手工启动的 uvicorn/worker/smoke 切到 Langfuse（开新终端或 `unset TESTPILOT_TRACER`
 > 即恢复）。pytest 用例会自动清掉 `TESTPILOT_*` 覆盖（`tests/conftest.py`），
 > `verify_s0.sh` 开头也会统一 unset，二者不受 shell 残留影响。
@@ -227,20 +228,82 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
   但演示前应 `git status` 确认或先提交。
 - **空 message commit** 的 ChangeSet 能力由 tmp 确定性演示仓（单测 + recorded 契约）
   覆盖；真仓这两个提交都带 message。
-- deferred（`.agent-handoff/` 已记账）：FTS SQL 暂不按 branch 过滤（offline 单分支
-  无碍，**S2 多分支前必须补**）；rename 仅按 R100 配对，R50/50% 阈值的误配风险待真实
+- deferred（`.agent-handoff/` 已记账）：~~FTS SQL 暂不按 branch 过滤~~（S1.4 已补：
+  branch/acl 下推到 SQL 并有 `test_fts_search_adapter` 守卫；剩余 kinds 过滤不支持，
+  检索节点降级跳过）；rename 仅按 R100 配对，R50/50% 阈值的误配风险待真实
   rename 样本；类型块含全部成员文本，成员改动会让类型块级联 MODIFIED（如实保留的噪声）；
   blame API、独立 commit 列表接口、push→自动 reindex 均未做（无 AC、无调用方）。
 
-## 一键验收 S0（已闭合的 6 个自动门禁）
+## 问答工作流（S1.4）：LangGraph 答案图、引用强制与三态版本标注
+
+落地 docs/08 **FR-QA-001～004**：知识问答必须带可溯源引用、代码问题强制现场核验、
+事故历史证词逐字并列、回答级反馈采集。编排用 LangGraph（docs/07 §11 指定），
+但 `import langgraph` 全仓只出现在 `qa_graph/graph.py` 一个薄装配文件里——节点函数
+全部是框架无关的 `async f(state, deps)`，备选手写状态机可零改动接管。
+
+```bash
+# 离线端到端探针（生产装配路径：bootstrap → 真实入库 → AsyncSqliteSaver 答案图）
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python scripts/qa_probe.py     # 四类问题 + 行数对账，全过 exit 0
+```
+
+语义与守卫（每条都有单测/探针守着，开发期均做过回退变红自证）：
+
+- **无引用结论率 = 0（FR-QA-001）**：模型产出的是 `AnswerDraft`，引用必须落在检索证据的
+  chunk/document URN 白名单内、quote 归一化后是证据文本子串、两级 hash 对账；任一不过
+  最多带修复指令**重生成 1 次**，仍失败 → 显式「未知 / citation_failed_exhausted」，
+  绝不放无引用答案出门。闲聊在 ACL 节点收口（`out_of_scope`），零模型生成、零检索。
+- **代码问题 100% live-verify + 三态标注（FR-QA-002）**：code 意图对每个代码证据块调
+  live-verify（调用数靠 `verification_events` 行数差断言，非 code 意图反向断言零调用）；
+  引用版本态三选一：`consistent`（HEAD 与索引一致）/ `verified_at:<短sha>`（索引陈旧，
+  head_refresh 节点当场读 HEAD 同 chunker 重切重锚、替换证据块）/ `unknown`（scm 降级，
+  None 不冒充 False）。`recursion_limit` 从 `Limits.max_agent_steps=12` 显式映射
+  （默认值 10007 等于没预算守卫），超限被 service 兜底落 `status=error` 的 qa_runs。
+- **事故双段、模型不碰历史原文（FR-QA-003）**：incident 意图把 `L2_experience` 文档的
+  证据块作为**历史证词**逐字引用（blockquote + 出处行由装配层拼，不经过模型），与模型
+  生成的「当前结论」物理分节；两节 URN 硬隔离，模型越界引用历史文档时装配层抛
+  ValueError 硬停（chunk/document 两种引用粒度都守），不静默出被污染的答案。
+- **反馈采集（FR-QA-004）**：回答级 👍/👎（四原因枚举）落 `feedback` 表，写前先校验
+  run 存在，幽灵 run_id 被 `NotFoundError` 拒且不留行；S1.6 的 bad case 池可直接
+  经 `idx_feedback_run_id` join `qa_runs`。
+- **可复现与可对账**：state 是全 JSON 原语 TypedDict（pydantic/datetime 不进
+  checkpoint，有 json 往返测试锁死）；qa_runs 与 eval_runs 对齐 model/prompt/params/
+  data 四元组。QaService 的 saver 是**异步生命周期边界**：同步 `build_container` 不感知
+  LangGraph；`astart()` 显式 `await saver.setup()`（实测 enter 不建表、首写才懒建，
+  setup 幂等），checkpoint 落 `data_dir/checkpoints/qa.sqlite`，`aclose()` 幂等收口，
+  重开服务可经 thread_id 恢复历史 run 状态。
+
+本轮在真实装配路径上照出并修复的四个缺陷（均有红→绿证据，细节见 `.agent-handoff/`）：
+
+1. 原始问题直塞 FTS5 MATCH，`. : " * ( )` 语法字符抛 OperationalError 炸断检索链
+   → 两通道统一走 core `shape_trigram_query` 整形 + LIKE 兜底；
+2. `upsert_chunk` 冲突时只刷 text/stale/hash，FTS 新文本与 raw_json 旧载荷自相矛盾
+   → 改全行替换（与 S1.3 文档分支覆盖同口径）；
+3. 事故交叉守卫只认 chunk 级 URN，文档级引用历史文档可穿透 → 双粒度守卫；
+4. **FTS-only 通道水合只取 raw_json，丢掉 doc_authority/doc_uri/hash，离线 profile 上
+   FR-QA-003 历史证词识别整链静默失效** → 与 hybrid 通道共用 `load_retrieval_chunks`
+   折叠文档元数据（`tests/test_fts_search_adapter.py` 守卫）。
+
+已知缺口（如实记账，留后续阶段）：
+
+- chunk 级 `kind="incident"` 未做（要动入库全链路）：事故意图当前靠文档
+  `authority_level=L2_experience` + 标题关键词识别，离线语料仅 sidebar-fallback 一份
+  L2 素材，覆盖薄；留 S2。
+- FTS 检索的 **kinds 过滤仍不支持**（检索节点降级跳过并打 `kinds_filter_unsupported`
+  降级标记）；branch/acl 过滤本轮已补到 SQL 并有用例（S1.3 记的 deferred 已核销）。
+- HTTP 端点与前端不在本切片：`AskRequest/AskResponse` 模型已就位，S1.5 的 router 只做
+  薄包装与 HTTP 异常映射；阈值标定在 S1.6（本轮机制 + 保守默认 + `PARAMS_VERSION`）。
+
+## 一键验收（7 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 6 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 7 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、28 个契约测试、core 防腐 import-lint、`/health` 真实 200、
-三个 worker 独立进程 ready、noop 空链路 trace 调用面。
+覆盖：venv 四包可 import、312 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
+（FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）。
 
 ## 基础设施（Docker）
 
@@ -303,7 +366,7 @@ web 只把 OTel 事件写 S3+入队，读 S3→写 ClickHouse 的消费者是 wo
 OTLP 不报错（或 500）但 trace 永不入库、`bull:otel-ingestion-queue:wait` 只增不减。
 已实测：补齐 worker 后积压任务立即被消费，3 条 smoke trace 入库。
 
-## S0 第 7 个门禁：空链路 trace 出现在 Langfuse（手动，约 2 分钟）
+## 手动门禁：空链路 trace 出现在 Langfuse（约 2 分钟，独立于 7 个自动门禁）
 
 前置：上面的 observability 栈 `health=OK`。
 

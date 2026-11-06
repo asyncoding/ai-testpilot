@@ -41,6 +41,12 @@ adapters:
     type: fs-docs
     settings:
       roots: [tests/fixtures/docs]
+      # S1.4：fs-docs 默认把 markdown 标 L2_experience；事故双段装配要求「历史证词
+      # 文档」与「模型当前引用文档」不交叉。kill-backup.md 是当前规范（L1），
+      # sidebar-fallback.md 保留默认 L2 作历史证词，glob 命中 alias/rel 形态。
+      authority_overrides:
+        - glob: "docs/kill-backup.md"
+          level: L1_authoritative
   cases:      {type: stub}          # S2: markdown
   tickets:
     type: json
