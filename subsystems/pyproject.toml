@@ -23,6 +23,8 @@ testpilot-workers = { workspace = true }
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    # S1.5：starlette TestClient 基于 httpx；此前只是 adapters 的传递依赖，显式声明
+    "httpx>=0.28",
 ]
 
 [tool.pytest.ini_options]

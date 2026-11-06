@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 自动门禁一键验收（docs/07 §10）：A1–A6 为 S0 骨架门禁，A7 为 S1.4 离线问答探针。
+# 自动门禁一键验收（docs/07 §10）：A1–A6 为 S0 骨架门禁，A7 为 S1.4 离线问答探针，
+# A8 为 S1.5 问答 HTTP API 冒烟（真实 uvicorn + curl）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -26,11 +27,18 @@ $PY scripts/import_lint.py > /tmp/tp_lint.log 2>&1 && { echo "PASS  $(cat /tmp/t
 echo "=== A4. API /health（FastAPI 真实起进程，curl 200） ==="
 $PY -m uvicorn testpilot_orchestrator.app:app --port 8765 >/tmp/tp_api.log 2>&1 &
 APID=$!
-for _ in $(seq 1 20); do curl -sf http://127.0.0.1:8765/health -o /tmp/tp_health.json && break; sleep 0.5; done
+a4_dead=0
+# 就绪轮询同时检测进程存活：端口被遗留进程占用时新进程会立即退出，
+# 否则 curl 会打到旧进程造成「假绿」（2026-11-06 A8 排障实证）
+for _ in $(seq 1 20); do
+  kill -0 $APID 2>/dev/null || { a4_dead=1; break; }
+  curl -sf http://127.0.0.1:8765/health -o /tmp/tp_health.json && break
+  sleep 0.5
+done
 kill $APID 2>/dev/null; wait $APID 2>/dev/null
-if [ -f /tmp/tp_health.json ] && grep -q '"status":"ok"' /tmp/tp_health.json && grep -q '"external_write_enabled":false' /tmp/tp_health.json; then
+if [ $a4_dead = 0 ] && [ -f /tmp/tp_health.json ] && grep -q '"status":"ok"' /tmp/tp_health.json && grep -q '"external_write_enabled":false' /tmp/tp_health.json; then
   echo "PASS  $(cat /tmp/tp_health.json)"; pass_n=$((pass_n+1))
-else echo "FAIL  见 /tmp/tp_api.log"; fail_n=$((fail_n+1)); fi
+else echo "FAIL  uvicorn 未存活或健康检查失败（端口占用？lsof -nP -iTCP:8765），见 /tmp/tp_api.log"; fail_n=$((fail_n+1)); fi
 
 echo "=== A5. 三个 worker 独立进程装配自检 ==="
 ok=1
@@ -53,7 +61,40 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   && { echo "PASS  $(grep '✅' /tmp/tp_qa_probe.log)"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_qa_probe.log"; fail_n=$((fail_n+1)); }
 
+echo "=== A8. 问答 HTTP API 冒烟（S1.5：ask/幽灵反馈 404/config，真实 uvicorn + curl） ==="
+# A7 探针已完成入库，这里只验 HTTP 契约层；web/out 缺失时静态挂载跳过，API 不受影响。
+# 不把 node 构建放进自动门禁：npm 不可用不能拖垮 Python 链路（前端见 scripts/build_web.sh）。
+$PY -m uvicorn testpilot_orchestrator.app:app --port 8765 >/tmp/tp_api8.log 2>&1 &
+APID=$!
+ok=1
+a8_dead=0
+for _ in $(seq 1 20); do
+  kill -0 $APID 2>/dev/null || { a8_dead=1; break; }
+  curl -sf http://127.0.0.1:8765/health -o /dev/null && break
+  sleep 0.5
+done
+[ $a8_dead = 0 ] || ok=0
+# ① chitchat 预设 → unknown/out_of_scope（与 A7 探针同故事，验 HTTP 序列化面）
+curl -sf -X POST http://127.0.0.1:8765/api/qa/ask -H 'Content-Type: application/json' \
+  -d '{"question":"你好，讲个笑话","project":"AlarmKitSpike-demo","branch":"alarmkit-spike","case_key":"chitchat"}' \
+  -o /tmp/tp_a8_ask.json || ok=0
+grep -q '"status":"unknown"' /tmp/tp_a8_ask.json && \
+  grep -q '"unknown_reason":"out_of_scope"' /tmp/tp_a8_ask.json || ok=0
+# ② 幽灵 run 反馈必须 HTTP 404 且错误体带类型名（不留孤儿行由 A2 单测/行数差守卫）
+code=$(curl -s -o /tmp/tp_a8_fb.json -w '%{http_code}' -X POST \
+  http://127.0.0.1:8765/api/qa/runs/run-ghost-a8/feedback \
+  -H 'Content-Type: application/json' -d '{"kind":"useful"}')
+[ "$code" = "404" ] || ok=0
+grep -q 'NotFoundError' /tmp/tp_a8_fb.json || ok=0
+# ③ /api/config：前端录制夹具横幅的数据源
+curl -sf http://127.0.0.1:8765/api/config -o /tmp/tp_a8_cfg.json || ok=0
+grep -q '"profile":"offline-demo"' /tmp/tp_a8_cfg.json && \
+  grep -q '"recorded":true' /tmp/tp_a8_cfg.json || ok=0
+kill $APID 2>/dev/null; wait $APID 2>/dev/null
+[ $ok = 1 ] && { echo "PASS  ask=unknown/out_of_scope, ghost feedback=404, config=offline-demo/recorded"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_api8.log 与 /tmp/tp_a8_*.json"; fail_n=$((fail_n+1)); }
+
 echo
-echo "S0 自动门禁结果：$pass_n PASS / $fail_n FAIL"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5）"
 [ $fail_n = 0 ] || exit 1
-echo "剩余手动门禁（Langfuse 服务端可见 trace）按 subsystems/README.md「手动门禁」节执行。"
+echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"
