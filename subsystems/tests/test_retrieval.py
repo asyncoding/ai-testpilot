@@ -9,6 +9,7 @@ from testpilot_core.retrieval import (
     build_stage_trace,
     freshness_factor,
     fuse_and_rank,
+    parse_symbol_reference,
     reciprocal_rank_fuse,
     shape_trigram_query,
 )
@@ -132,3 +133,56 @@ def test_stage_trace_partitions_and_degraded():
     t2 = build_stage_trace(fts, dead_vec)
     assert t2.degraded is True
     assert t2.vector_available is False
+
+
+# ── P3 题面符号解析（parse_symbol_reference，hostless 纯函数）──────────────────
+
+def test_parse_symbol_reference_single_label_matches_ingestion_selector():
+    # 与线上问题同形：归一化结果必须等于 entities.name / chunker._selector 口径
+    ref = parse_symbol_reference(
+        "AlertListViewModel.snoozeRingingMission(minutes:) 方法的实现逻辑是什么")
+    assert ref is not None
+    assert ref.type_name == "AlertListViewModel"
+    assert ref.member == "snoozeRingingMission"
+    assert ref.normalized_name == "AlertListViewModel.snoozeRingingMission(minutes:)"
+
+
+def test_parse_symbol_reference_multi_label_with_underscore_wildcard():
+    ref = parse_symbol_reference(
+        "MissionCoordinator.schedulePrimary(_:at:) 怎么实现的？")
+    assert ref is not None
+    assert ref.normalized_name == "MissionCoordinator.schedulePrimary(_:at:)"
+    # 源码签名形（逗号分隔 + 类型标注）归一化到同一个 compact selector
+    src = parse_symbol_reference(
+        "MissionCoordinator.schedulePrimary(_ mission: Mission, at date: Date) 怎么实现")
+    assert src is not None
+    assert src.normalized_name == "MissionCoordinator.schedulePrimary(_:at:)"
+
+
+def test_parse_symbol_reference_no_arg_and_whitespace_and_type_annotation():
+    assert parse_symbol_reference("C.keep() 的逻辑").normalized_name == "C.keep()"
+    # 空白容忍 + 标签后的类型文本按 chunker 同口径忽略
+    ref = parse_symbol_reference("请问 Foo.bar( x : Int ) 干嘛的")
+    assert ref is not None and ref.normalized_name == "Foo.bar(x:)"
+    # external internal 双词形取外部标签
+    ref2 = parse_symbol_reference("Foo.bar(with internal: String)")
+    assert ref2 is not None and ref2.normalized_name == "Foo.bar(with:)"
+
+
+def test_parse_symbol_reference_repeated_mention_still_pins_but_distinct_pair_does_not():
+    repeated = parse_symbol_reference(
+        "Foo.bar(x:) 和 Foo.bar(x:) 是同一个吗")  # 同一符号重复 → 仍唯一
+    assert repeated is not None and repeated.normalized_name == "Foo.bar(x:)"
+    # 两个不同符号（对比型提问）：置顶任何一个都是误判，放弃路由
+    assert parse_symbol_reference("Foo.bar(x:) 与 Baz.qux(y:) 的区别") is None
+
+
+def test_parse_symbol_reference_natural_language_and_lowercase_never_route():
+    # 小写接收者（变量/函数调用）、无点号中文括号、无标签自然语言全部拒绝
+    assert parse_symbol_reference("print(hello) 会输出什么") is None
+    assert parse_symbol_reference("这个函数（怎么回事）能讲讲吗") is None
+    assert parse_symbol_reference("看一下 Foo.bar(随便写的自然语言)") is None
+    # 嵌套括号：题面 selector 不该出现，出现即视为复杂表达式不识别
+    assert parse_symbol_reference("Foo.bar(f { x in x }) 怎么用") is None
+    # 长点链后缀不许从中间类型起匹配
+    assert parse_symbol_reference("a.b.Foo.bar(x:) 的行为") is None

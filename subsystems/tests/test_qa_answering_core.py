@@ -25,6 +25,7 @@ from testpilot_core.answering import (
     fallback_classify_intent,
     normalize_ws,
     qa_run_urn,
+    render_citation_quote,
     should_regenerate,
     to_evidence_dict,
     validate_citations,
@@ -76,7 +77,9 @@ def evidence(urn=CHUNK_URN, *, doc_urn=DOC_URN, kind="text", text="证据原文"
 def draft(*, summary="结论", citations=None):
     return AnswerDraft(
         summary=summary, sections=[],
-        citations=citations if citations is not None else [DraftCitation(urn=CHUNK_URN, quote="证据原文")],
+        # P2 起模型只给 anchor（证据里确实出现的短文本），quote 由服务端渲染
+        citations=citations if citations is not None
+        else [DraftCitation(urn=CHUNK_URN, anchor="证据原文")],
     )
 
 
@@ -184,6 +187,58 @@ def test_urn_whitelist_includes_chunk_and_doc():
     assert "urn:testpilot:fs-docs:document:docs/x.md" in wl
 
 
+# ── 锚点渲染（P2：模型只给 anchor，quote 服务端确定性渲染，fail-closed）────────
+
+def test_render_code_symbol_returns_whole_chunk_on_anchor_hit():
+    body = "func keep() {\n  print(\"changed\", interval)\n}"
+    ev = evidence(urn=CODE_URN, kind="code_symbol", text=body)
+    # 短锚点命中 → 渲染整个符号块原文（边界由切块保证，模型不碰 quote）
+    assert render_citation_quote(DraftCitation(urn=CODE_URN, anchor="func keep()"), [ev]) == body
+
+
+def test_render_text_chunk_returns_exact_source_span_on_literal_hit():
+    text = "# 标题\n\n项目通过 kill-backup 机制在 30 秒后兜底。超时任务由看门狗回收。"
+    ev = evidence(text=text)
+    out = render_citation_quote(
+        DraftCitation(urn=CHUNK_URN, anchor="kill-backup 机制在 30 秒后兜底"), [ev])
+    # 逐字源文切片，不是整段、不是模型转述
+    assert out == "kill-backup 机制在 30 秒后兜底"
+    assert out in text
+
+
+def test_render_text_chunk_whitespace_fallback_returns_whole_chunk_verbatim():
+    text = "第一行\n  第二行\t收尾"
+    ev = evidence(text=text)
+    # 锚点空白与源文不一致：归一化能命中时兜底返回整块原文（不做归一化改写输出）
+    out = render_citation_quote(
+        DraftCitation(urn=CHUNK_URN, anchor="第一行 第二行 收尾"), [ev])
+    assert out == text
+
+
+def test_render_anchor_miss_is_fail_closed_none():
+    ev = evidence(text="证据原文")
+    # 禁止模糊凑句：锚点不在证据里 → None，由 validate 落 anchor_not_found
+    assert render_citation_quote(
+        DraftCitation(urn=CHUNK_URN, anchor="模型自己编的句子"), [ev]) is None
+
+
+def test_render_first_occurrence_is_deterministic():
+    text = "let id = 1\nprint(id)"
+    ev = evidence(text=text)
+    out = render_citation_quote(DraftCitation(urn=CHUNK_URN, anchor="id"), [ev])
+    assert out == "id"
+    assert text.index(out) == text.index("id")  # 首次命中位置，确定性不靠运气
+
+
+def test_render_doc_level_uses_first_child_chunk_containing_anchor():
+    c1 = evidence(urn="urn:testpilot:fs-docs:chunk:docs/kb.md#s1", text="段落甲内容")
+    c2 = evidence(urn="urn:testpilot:fs-docs:chunk:docs/kb.md#s2", text="段落乙内容")
+    out = render_citation_quote(DraftCitation(urn=DOC_URN, anchor="段落乙"), [c1, c2])
+    assert out == "段落乙"  # 在第二个子块字面命中，返回源文切片
+    assert render_citation_quote(
+        DraftCitation(urn=DOC_URN, anchor="两段都没有的句子"), [c1, c2]) is None
+
+
 # ── 引用校验 ────────────────────────────────────────────────────────────────
 
 def test_validate_citations_happy_path():
@@ -197,22 +252,27 @@ def test_validate_citations_rejects_empty_citations():
 
 
 def test_validate_citations_rejects_urn_outside_whitelist():
-    forged = draft(citations=[DraftCitation(urn="urn:testpilot:fs-docs:document:docs/never-retrieved.md", quote="x")])
+    forged = draft(citations=[DraftCitation(
+        urn="urn:testpilot:fs-docs:document:docs/never-retrieved.md", anchor="x")])
     v = validate_citations(forged, [evidence()])
     assert not v.ok and any("urn_not_in_evidence" in e for e in v.errors)
 
 
-def test_validate_citations_rejects_empty_quote_and_non_verbatim_quote():
-    v1 = validate_citations(draft(citations=[DraftCitation(urn=CHUNK_URN, quote=" ")]), [evidence()])
-    assert any("empty_quote" in e for e in v1.errors)
+def test_validate_citations_rejects_empty_anchor_and_anchor_not_found():
+    v1 = validate_citations(
+        draft(citations=[DraftCitation(urn=CHUNK_URN, anchor=" ")]), [evidence()])
+    assert any("empty_anchor" in e for e in v1.errors)
 
-    v2 = validate_citations(draft(citations=[DraftCitation(urn=CHUNK_URN, quote="模型自己编的句子")]), [evidence()])
-    assert any("quote_not_verbatim" in e for e in v2.errors)
+    v2 = validate_citations(
+        draft(citations=[DraftCitation(urn=CHUNK_URN, anchor="模型自己编的句子")]),
+        [evidence()])
+    # fail-closed：不做模糊匹配，锚点未命中直接判失败（旧 quote_not_verbatim 语义收口到这里）
+    assert any("anchor_not_found" in e for e in v2.errors)
 
 
-def test_validate_citations_normalizes_whitespace_before_substring_match():
+def test_validate_citations_normalizes_whitespace_before_anchor_match():
     messy = evidence(text="第一行\n  第二行\t收尾")
-    d = draft(citations=[DraftCitation(urn=CHUNK_URN, quote="第一行 第二行 收尾")])
+    d = draft(citations=[DraftCitation(urn=CHUNK_URN, anchor="第一行 第二行 收尾")])
     assert validate_citations(d, [messy]).ok
     assert normalize_ws("a\t\n b") == "a b"
 
@@ -222,7 +282,7 @@ def test_validate_citations_doc_level_matches_any_child_chunk():
         evidence(urn="urn:testpilot:fs-docs:chunk:docs/kb.md#s1", text="段落甲内容"),
         evidence(urn="urn:testpilot:fs-docs:chunk:docs/kb.md#s2", text="段落乙内容"),
     ]
-    d = draft(citations=[DraftCitation(urn=DOC_URN, quote="段落乙内容")])
+    d = draft(citations=[DraftCitation(urn=DOC_URN, anchor="段落乙内容")])
     assert validate_citations(d, evs).ok
 
 
@@ -255,30 +315,35 @@ def annotated(citations, evs, vrs, *, refreshed=None, doc_hashes=None):
 
 
 def test_annotate_text_chunk_is_consistent_without_verify():
-    out = annotated([DraftCitation(urn=CHUNK_URN, quote="证据原文")], [evidence()], [])
+    out = annotated([DraftCitation(urn=CHUNK_URN, anchor="证据原文")], [evidence()], [])
     assert out[0].version_state == VersionState.CONSISTENT
     assert out[0].uri and out[0].content_hash == "h1"
+    # quote 是服务端按 anchor 渲染的源文切片，模型草稿里不再有 quote 字段
+    assert out[0].quote == "证据原文"
 
 
-def test_annotate_code_unchanged_consistent():
-    evs = [evidence(urn=CODE_URN, kind="code_symbol")]
+def test_annotate_code_unchanged_consistent_renders_whole_symbol_block():
+    body = "func keep() {\n  print(interval)\n}"
+    evs = [evidence(urn=CODE_URN, kind="code_symbol", text=body)]
     vrs = [verify_result(verified=True, body_changed=False)]
     vrs[0]["reason"] = "unchanged"
-    out = annotated([DraftCitation(urn=CODE_URN)], evs, vrs)
+    out = annotated([DraftCitation(urn=CODE_URN, anchor="func keep()")], evs, vrs)
     assert out[0].version_state == VersionState.CONSISTENT
+    assert out[0].quote == body  # 代码块引用渲染整个符号体
 
 
 def test_annotate_degraded_verify_goes_unknown_not_consistent():
     evs = [evidence(urn=CODE_URN, kind="code_symbol")]
     vrs = [verify_result(degraded=True, exists=None)]
-    out = annotated([DraftCitation(urn=CODE_URN)], evs, vrs)
+    out = annotated([DraftCitation(urn=CODE_URN, anchor="证据原文")], evs, vrs)
     assert out[0].version_state == VersionState.UNKNOWN
 
 
 def test_annotate_stale_index_refreshed_at_head():
     evs = [evidence(urn=CODE_URN, kind="code_symbol", content_hash="head-new-hash")]
     vrs = [verify_result(verified=False, body_changed=True)]
-    out = annotated([DraftCitation(urn=CODE_URN)], evs, vrs, refreshed=[CODE_URN])
+    out = annotated([DraftCitation(urn=CODE_URN, anchor="证据原文")], evs, vrs,
+                    refreshed=[CODE_URN])
     assert out[0].version_state == VersionState.VERIFIED_AT
     assert out[0].version_ref == "7936295"  # 短 sha
     assert out[0].content_hash == "head-new-hash"  # 刷新后的证据块带新 hash
@@ -288,17 +353,17 @@ def test_annotate_stale_index_refresh_failed_goes_unknown():
     evs = [evidence(urn=CODE_URN, kind="code_symbol")]
     vrs = [verify_result(verified=False, body_changed=True)]
     # body_changed 但不在 head_refreshed_urns（HEAD 重读失败路径）
-    out = annotated([DraftCitation(urn=CODE_URN)], evs, vrs, refreshed=[])
+    out = annotated([DraftCitation(urn=CODE_URN, anchor="证据原文")], evs, vrs, refreshed=[])
     assert out[0].version_state == VersionState.UNKNOWN
 
 
 def test_annotate_symbol_missing_and_missing_verify_row_go_unknown():
     evs = [evidence(urn=CODE_URN, kind="code_symbol")]
-    out1 = annotated([DraftCitation(urn=CODE_URN)], evs,
+    out1 = annotated([DraftCitation(urn=CODE_URN, anchor="证据原文")], evs,
                      [verify_result(exists=False, body_changed=None)])
     assert out1[0].version_state == VersionState.UNKNOWN
     # 接线 bug 防御：code 证据没有对应 verify 行 → 未知，绝不默认一致
-    out2 = annotated([DraftCitation(urn=CODE_URN)], evs, [])
+    out2 = annotated([DraftCitation(urn=CODE_URN, anchor="证据原文")], evs, [])
     assert out2[0].version_state == VersionState.UNKNOWN
 
 
@@ -310,14 +375,15 @@ def test_annotate_doc_level_aggregation():
         verify_result(urn=c2["urn"], verified=False, body_changed=True),
     ]
     # 一个刷新一个一致 → 文档级 verified_at
-    out = annotated([DraftCitation(urn=DOC_URN)], [c1, c2], vrs,
+    out = annotated([DraftCitation(urn=DOC_URN, anchor="证据原文")], [c1, c2], vrs,
                     refreshed=[c2["urn"]], doc_hashes={DOC_URN: "dochash"})
     assert out[0].version_state == VersionState.VERIFIED_AT
     assert out[0].content_hash == "dochash"
 
     # 任一未知 → 文档级未知
     vrs[1] = verify_result(urn=c2["urn"], degraded=True, exists=None)
-    out2 = annotated([DraftCitation(urn=DOC_URN)], [c1, c2], vrs, doc_hashes={DOC_URN: "dochash"})
+    out2 = annotated([DraftCitation(urn=DOC_URN, anchor="证据原文")], [c1, c2], vrs,
+                     doc_hashes={DOC_URN: "dochash"})
     assert out2[0].version_state == VersionState.UNKNOWN
 
 

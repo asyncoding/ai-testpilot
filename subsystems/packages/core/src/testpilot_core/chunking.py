@@ -349,17 +349,19 @@ def _has_doc_comment(source: str, decl_start: int) -> bool:
     return contiguous > 0
 
 
-def _selector(name: str, signature: str) -> str:
-    """从签名文本提取 Swift selector 风格参数标签，如 schedulePrimary(notification:at:)。"""
-    open_paren = signature.find("(")
-    close_paren = signature.rfind(")")
-    if open_paren == -1 or close_paren == -1 or close_paren <= open_paren:
-        return f"{name}()"
-    raw = signature[open_paren + 1 : close_paren]
-    labels: list[str] = []
+# Swift 参数段标签形态：`label:`、`external internal:`、`_ internal:`；取外部标签。
+# 入库切块（_selector）与查询侧符号解析（retrieval.parse_symbol_reference）共用此常量，
+# 保证题面归一化与入库 selector 同一口径——P3 符号路由的正确性前提。
+SWIFT_LABEL_PART_RE = re.compile(
+    r"\s*(?:([A-Za-z_]\w*|_)\s+)?([A-Za-z_]\w*)\s*:"
+)
+
+
+def split_top_level_args(raw: str) -> list[str]:
+    """按顶层逗号切分参数文本（括号/方括号/花括号嵌套不切）。"""
+    parts: list[str] = []
     depth = 0
     current = ""
-    parts: list[str] = []
     for ch in raw:
         if ch in "([{":
             depth += 1
@@ -372,11 +374,50 @@ def _selector(name: str, signature: str) -> str:
             current += ch
     if current.strip():
         parts.append(current)
-    for part in parts:
+    return parts
+
+
+def parse_swift_arg_labels(args_text: str) -> list[str] | None:
+    """括号内参数文本 → Swift 外部参数标签列表（查询侧严格口径）。
+
+    支持两种题面形态并归一化到同一 compact selector：
+    - 源码签名形（逗号分隔）：`_ mission: Mission, at date: Date` → ["_", "at"]；
+    - 紧凑 selector 形（冒号连接、无逗号，文档/头文件常用）：`_:at:` → ["_", "at"]。
+    空参数返 []；任一参数段不符合 `label:` / `external internal:` / `_ internal:`
+    形态（如自然语言括号、中文、无冒号表达式）返 None——调用方据此放弃符号路由，
+    杜绝把普通文本误判成符号调用（false routing 的代价是挤掉真证据，必须从严）。
+    标签后的类型文本（如 `minutes: Int`）按 _selector 同口径忽略。
+    """
+    if not args_text.strip():
+        return []
+    labels: list[str] = []
+    for part in split_top_level_args(args_text):
+        m = SWIFT_LABEL_PART_RE.match(part.strip())
+        if not m:
+            return None
+        label = m.group(1) or m.group(2)
+        labels.append("_" if label == "_" else label)
+        # 紧凑 selector 形：首标签之后可能直接跟更多 `label:` 段（_:at: 中的 at:）
+        remainder = part.strip()[m.end():]
+        for extra in re.finditer(r"([A-Za-z_]\w*|_)\s*:", remainder):
+            labels.append("_" if extra.group(1) == "_" else extra.group(1))
+        # 残余文本里若还藏着冒号却匹配不成标签（如中文冒号段），判非法拒绝路由
+        if ":" in re.sub(r"([A-Za-z_]\w*|_)\s*:", "", remainder):
+            return None
+    return labels
+
+
+def _selector(name: str, signature: str) -> str:
+    """从签名文本提取 Swift selector 风格参数标签，如 schedulePrimary(notification:at:)。"""
+    open_paren = signature.find("(")
+    close_paren = signature.rfind(")")
+    if open_paren == -1 or close_paren == -1 or close_paren <= open_paren:
+        return f"{name}()"
+    raw = signature[open_paren + 1 : close_paren]
+    labels: list[str] = []
+    for part in split_top_level_args(raw):
         # Swift 参数：`label:`、`external internal:`、`_ internal:`；取外部标签
-        m = re.match(
-            r"\s*(?:([A-Za-z_]\w*|_)\s+)?([A-Za-z_]\w*)\s*:", part.strip()
-        )
+        m = SWIFT_LABEL_PART_RE.match(part.strip())
         if not m:
             continue
         label = m.group(1) or m.group(2)

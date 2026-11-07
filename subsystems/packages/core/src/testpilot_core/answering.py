@@ -7,8 +7,10 @@ LangGraph 节点只负责调适配器/模型与状态搬运；所有可 hostless
 纪律：
 - 图的 state 只流通 JSON 原语（checkpoint 序列化限制），证据块统一经
   to_evidence_dict 白名单转换，pydantic/datetime 一律不进 state；
-- 无证据不输出结论：引用为空/URN 不在白名单/quote 非原文 → 校验失败，
-  最多重生成一次（MAX_ANSWER_ATTEMPTS），仍失败由图降级为「未知」；
+- 无证据不输出结论：引用为空/URN 不在白名单/anchor 在证据中逐字找不到 →
+  校验失败，最多重生成一次（MAX_ANSWER_ATTEMPTS），仍失败由图降级为「未知」；
+- P2 起模型只给短 anchor，最终 quote 由本模块服务端渲染，模型文本永不直接
+  进入 QaCitation.quote；
 - 三态标注里 None（无法判定）只能落 unknown，绝不能冒充 consistent。
 """
 
@@ -172,10 +174,50 @@ def build_urn_whitelist(evidence: list[dict]) -> set[str]:
     return allowed
 
 
-# ── 引用校验 ───────────────────────────────────────────────────────────────
+# ── 锚点渲染 + 引用校验 ──────────────────────────────────────────────────────
 
 def normalize_ws(text: str) -> str:
     return " ".join(text.split())
+
+
+def _render_from_chunk(citation: DraftCitation, ev: dict) -> str | None:
+    """单个证据块内的锚点渲染；未命中返回 None（调用方 fail-closed，不模糊凑句）。
+
+    - 字面命中：code_symbol 块渲染整个符号体（切块边界即引用边界，天然逐字、
+      边界天然正确）；text 等块返回锚点本身——字面 in 命中已证明它与源文该跨度
+      字节相同，等价于源文切片，模型拿不到任何改写进入 quote 的机会。
+    - 仅空白归一化后命中（换行/缩进差异）：兜底返回整块原文，输出绝不做归一化
+      改写（normalize_ws 只用于准入判定）。
+    """
+    text = ev["text"]
+    if citation.anchor in text:
+        return text if ev.get("kind") == "code_symbol" else citation.anchor
+    if normalize_ws(citation.anchor) in normalize_ws(text):
+        return text
+    return None
+
+
+def render_citation_quote(
+    citation: DraftCitation, evidence: list[dict]
+) -> str | None:
+    """按草稿锚点从证据渲染最终引用文本（纯函数，零 IO）。
+
+    块级 URN 直接渲染该块；文档级 URN 在该文档的证据块里按 evidence 顺序取
+    第一个命中块（确定性，不做相关性重排）。任何一级未命中都返回 None，由
+    validate_citations 落 anchor_not_found——禁止服务端自行脑补引用。
+    """
+    if not citation.anchor.strip():
+        return None
+    by_urn = {e["urn"]: e for e in evidence}
+    target = by_urn.get(citation.urn)
+    if target is not None:
+        return _render_from_chunk(citation, target)
+    for ev in evidence:  # 文档级引用：子块顺序即检索融合顺序
+        if ev.get("doc_urn") == citation.urn:
+            rendered = _render_from_chunk(citation, ev)
+            if rendered is not None:
+                return rendered
+    return None
 
 
 def validate_citations(draft: AnswerDraft, evidence: list[dict]) -> CitationVerdict:
@@ -183,31 +225,30 @@ def validate_citations(draft: AnswerDraft, evidence: list[dict]) -> CitationVerd
 
     1) 草稿不允许零引用（无引用结论率=0；闲聊在 acl 节点已收口，到不了这里）；
     2) citation.urn 必须 ∈ 检索证据白名单（块 URN 或文档 URN）；
-    3) quote 空白归一化后必须是证据原文子串——doc 级引用在该文档全部证据块
-       拼接文本里匹配。hash 对账在装配层：草稿来自模型、不带 hash，而证据块
-       自带 content_hash，由 annotate_version_states 落到最终 QaCitation。
+    3) anchor 必须能在对应证据里逐字（或空白归一化后）命中，渲染由
+       render_citation_quote 确定性完成；未命中 fail-closed 落 anchor_not_found。
+       hash 对账在装配层：草稿不带 hash，证据块自带 content_hash，由
+       annotate_version_states 落到最终 QaCitation。
     """
     errors: list[str] = []
     if not draft.citations:
         return CitationVerdict(ok=False, errors=["no_citations: 草稿未给出任何引用"])
 
     whitelist = build_urn_whitelist(evidence)
-    chunk_text = {e["urn"]: normalize_ws(e["text"]) for e in evidence}
-    doc_text: dict[str, str] = {}
-    for e in evidence:
-        doc_text[e["doc_urn"]] = (
-            doc_text.get(e["doc_urn"], "") + "\n" + chunk_text[e["urn"]]
-        )
-
     for c in draft.citations:
         if c.urn not in whitelist:
             errors.append(f"urn_not_in_evidence: {c.urn}")
             continue
-        if not c.quote.strip():
-            errors.append(f"empty_quote: {c.urn}")
+        if not c.anchor.strip():
+            errors.append(f"empty_anchor: {c.urn}")
             continue
-        target = chunk_text.get(c.urn) or doc_text.get(c.urn, "")
-        if normalize_ws(c.quote) not in target:
+        rendered = render_citation_quote(c, evidence)
+        if rendered is None:
+            errors.append(f"anchor_not_found: {c.urn}")
+            continue
+        # 渲染器不变量兜底：自己渲染的文本必然包含锚点（归一化口径）；
+        # 不成立只可能是渲染器接线 bug，保留 quote_not_verbatim 前缀报警
+        if normalize_ws(c.anchor) not in normalize_ws(rendered):
             errors.append(f"quote_not_verbatim: {c.urn}")
     return CitationVerdict(ok=not errors, errors=errors)
 
@@ -260,11 +301,14 @@ def annotate_version_states(
 
     out: list[QaCitation] = []
     for c in citations:
+        # 能进装配说明 validate_citations 已过：渲染必然命中；None 只可能是
+        # 绕过校验的接线 bug，quote 留空让三态/URN 仍可落，不凭空造文本
+        rendered = render_citation_quote(c, evidence) or ""
         ev = by_urn.get(c.urn)
         if ev is not None:  # 块级引用
             state, ref = _state_for_chunk(ev, verify_results, refreshed)
             out.append(QaCitation(
-                urn=c.urn, uri=ev.get("source_uri", ""), quote=c.quote,
+                urn=c.urn, uri=ev.get("source_uri", ""), quote=rendered,
                 version_state=state, version_ref=ref,
                 content_hash=ev.get("content_hash", ""),
             ))
@@ -282,7 +326,7 @@ def annotate_version_states(
         out.append(QaCitation(
             urn=c.urn,
             uri=children[0].get("source_uri", "") if children else "",
-            quote=c.quote, version_state=state, version_ref=ref,
+            quote=rendered, version_state=state, version_ref=ref,
             content_hash=(doc_hashes or {}).get(c.urn, ""),
         ))
     return out

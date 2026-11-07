@@ -111,7 +111,7 @@ async def test_recorded_first_fail_then_retry_pass_is_answered():
     assert out["attempts"] == 2
     cite = out["final_answer"]["citations"][0]
     assert cite["urn"] == CHUNK1
-    # 逐字 quote 来自夹具且与证据文本严格一致
+    # quote 由 anchor 服务端渲染：文本块逐字命中，回填值即 anchor 本身
     assert cite["quote"] == "证据原文"
     evidence = [to_evidence_dict(make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文"))]
     assert cite["quote"] in evidence[0]["text"]

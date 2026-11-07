@@ -35,11 +35,11 @@ SYM1 = "urn:testpilot:fs-docs:symbol:Sources/Alarm.swift#Alarm.ring"
 SYM_DOC = "urn:testpilot:fs-docs:document:Sources/Alarm.swift"
 
 
-def _answer_env(urn: str, quote: str) -> dict:
+def _answer_env(urn: str, anchor: str) -> dict:
     return structured_envelope({
-        "summary": f"结论：{quote}",
+        "summary": f"结论：{anchor}",
         "sections": [],
-        "citations": [{"urn": urn, "quote": quote}],
+        "citations": [{"urn": urn, "anchor": anchor}],
     })
 
 
@@ -65,13 +65,15 @@ async def test_ask_persists_full_qa_run_and_roundtrips_json(tmp_path):
 
     assert resp.status == QaStatus.ANSWERED
     assert resp.intent == QaIntent.CODE
+    assert resp.intent_source == "model"
     row = await service.get_run("run-fixed-1")
     assert row is not None and row["status"] == "answered"
     assert row["question"].startswith("Alarm.ring")
+    assert row["intent_source"] == "model"
     assert row["thread_id"] == "run-fixed-1"
     assert row["attempts"] == 1 and row["regens"] == 0
     assert row["tokens_in"] == 200 and row["tokens_out"] == 60  # intent+answer 两次信封累加
-    assert row["prompt_version"] == "qa-prompt-1"
+    assert row["prompt_version"] == "qa-prompt-3"
     assert row["params_version"] == "qa-params-1"
     assert row["data_version"]  # verify 节点写入的 HEAD sha
     assert len(row["verify_results"]) == 1
@@ -79,6 +81,27 @@ async def test_ask_persists_full_qa_run_and_roundtrips_json(tmp_path):
     assert row["citations"][0]["version_state"] == VersionState.CONSISTENT.value
     assert row["answer_payload"]["markdown"]
     assert row["retrieval_event_id"] == 11
+
+
+async def test_symbol_question_bypasses_intent_model_end_to_end(tmp_path):
+    # P4 端到端：符号形态题面只给 answer 录制键——若意图节点误调模型，缺 key 立即报错
+    chunk = make_chunk(SYM1, doc_urn=SYM_DOC, kind="code_symbol")
+    model = FakeModel({"qa_answer_t1": _answer_env(SYM1, "证据原文")})
+    service = _service(tmp_path, model, FakeHybridSearch([chunk]))
+
+    resp = await service.ask(
+        _request("Alarm.ring() 方法的实现逻辑是什么？"),
+        case_key="t1", run_id="run-bypass-1",
+    )
+
+    assert resp.status == QaStatus.ANSWERED
+    assert resp.intent_source == "regex_bypass"
+    # 只有 answer 一次信封的 token：意图调用整次省掉
+    row = await service.get_run("run-bypass-1")
+    assert row["intent_source"] == "regex_bypass"
+    assert row["tokens_in"] == 100 and row["tokens_out"] == 30
+    trace = await service.get_run_trace("run-bypass-1")
+    assert trace["intent_source"] == "regex_bypass"
 
 
 async def test_unknown_run_is_persisted_with_reason(tmp_path):
@@ -265,17 +288,117 @@ async def test_get_run_trace_assembles_timeline_without_inventing_links(tmp_path
     trace = await service.get_run_trace("run-tr-1")
     assert trace["run_id"] == "run-tr-1"
     assert trace["status"] == "answered" and trace["intent"] == "howto"
+    assert trace["intent_source"] == "model"
     assert trace["attempts"] == 1 and trace["regens"] == 0
     assert trace["tokens"] == {"in": 200, "out": 60}
     assert trace["evidence"][0]["urn"] == CHUNK1
+    # RRF 小分值不再单独面向 UI：证据投影改显排名+命中通道（分数保留供调试）
     assert set(trace["evidence"][0]) == {
-        "urn", "doc_urn", "kind", "score", "authority_level"}
+        "urn", "doc_urn", "kind", "rank", "channels", "score", "authority_level"}
+    assert trace["evidence"][0]["rank"] == 1
+    # fake 不写 retrieval_events 表（event_id=11 只挂在 qa_runs 上），查不到事件→通道如实为空
+    assert trace["evidence"][0]["channels"] == []
+    assert trace["citation_errors"] == []
     assert trace["versions"]["model"] == "fake-model-1"
     assert trace["retrieval_event_id"] == 11  # FakeHybridSearch 默认 event_id
     # 服务层不读 profile 配置：Langfuse 深链由 router 注入，这里绝不能自造字段
     assert "langfuse" not in trace
     with pytest.raises(NotFoundError):
         await service.get_run_trace("run-ghost")
+
+
+async def test_trace_evidence_projects_rank_and_channels_from_retrieval_event(tmp_path):
+    """trace 通道反查：retrieval_events 里 fts/vector 名单投影成每条证据的 channels，
+    rank 按 run 证据顺序 1-based；事件缺失（FTS 裸路径）时 channels 为空而非报错。"""
+    store = bootstrap_store(tmp_path / "data")
+    chunk1 = make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文一")
+    chunk2 = make_chunk(CHUNK2, doc_urn=DOC2, text="证据原文二")
+    # 真实写一行 retrieval_events：CHUNK1 双路命中、CHUNK2 仅 FTS；
+    # raw_json 带 P3 符号置顶决策（模拟适配器 symbol_name 命中后的留痕）
+    event_id = store.record_retrieval_event(
+        query="备份", query_sha="sha-1", project="demo", branch="main",
+        acl_scope="default", kinds=["code_symbol", "text"],
+        model_version="fake-model-1", fts_available=True, vector_available=True,
+        degraded=False, fts_urns=[CHUNK1, CHUNK2], vector_urns=[CHUNK1],
+        fused_urns=[CHUNK1, CHUNK2], fts_latency_ms=10, vector_latency_ms=20,
+        extra={"symbol_pinned": True, "symbol_pin_urn": CHUNK1,
+               "symbol_pin_name": "Alarm.ring()"})
+    model = FakeModel({
+        "qa_intent_t1": structured_envelope({"intent": "howto"}),
+        "qa_answer_t1": _answer_env(CHUNK1, "证据原文一"),
+    })
+    service = _service(tmp_path, model,
+                       FakeHybridSearch([chunk1, chunk2], event_id=event_id))
+    await service.ask(_request("如何配置备份？"), case_key="t1", run_id="run-ch-1")
+
+    trace = await service.get_run_trace("run-ch-1")
+    by_urn = {e["urn"]: e for e in trace["evidence"]}
+    assert by_urn[CHUNK1]["rank"] == 1 and by_urn[CHUNK1]["channels"] == ["fts", "vector"]
+    assert by_urn[CHUNK2]["rank"] == 2 and by_urn[CHUNK2]["channels"] == ["fts"]
+    # get_retrieval_event 主键反查契约（trace 之外的排查入口）
+    event = store.get_retrieval_event(event_id)
+    assert event is not None and event["fts_urns"] == [CHUNK1, CHUNK2]
+    assert store.get_retrieval_event(999_999) is None
+    # P3：置顶决策从 raw_json 投影到 trace（无 qa_runs schema 变更）
+    assert trace["symbol_pinned"] is True
+    assert trace["symbol_pin_urn"] == CHUNK1
+    assert trace["symbol_pin_name"] == "Alarm.ring()"
+
+
+async def test_citation_errors_roundtrip_from_graph_to_qa_run(tmp_path):
+    """端到端：citation_check 的具体错误进 graph state → qa_runs.citation_errors →
+    AskResponse 与 trace 三处口径一致（事故 run 只有 unknown_reason、看不出错因的修复）。"""
+    chunk = make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文")
+    # 模型两次都给白名单外 URN：attempts 耗尽 → citation_failed_exhausted
+    forged = structured_envelope({
+        "summary": "结论", "sections": [],
+        "citations": [{"urn": "urn:testpilot:fs-docs:chunk:docs/ghost.md#x",
+                       "anchor": "证据原文"}]})
+    model = FakeModel({
+        "qa_intent_t1": structured_envelope({"intent": "howto"}),
+        # 首稿与重生成键不同（节点 _model_key 约定），两次都给同一伪造 URN
+        "qa_answer_t1": forged,
+        "qa_answer_retry_t1": forged,
+    })
+    service = _service(tmp_path, model, FakeHybridSearch([chunk]))
+
+    resp = await service.ask(_request("如何配置备份？"), case_key="t1", run_id="run-err-1")
+    assert resp.status == QaStatus.UNKNOWN
+    assert resp.unknown_reason == "citation_failed_exhausted"
+    assert resp.citation_errors and all(
+        "urn_not_in_evidence" in e for e in resp.citation_errors)
+
+    row = await service.get_run("run-err-1")
+    trace = await service.get_run_trace("run-err-1")
+    assert row["citation_errors"] == resp.citation_errors == trace["citation_errors"]
+
+
+async def test_rewritten_anchor_on_valid_urn_exhausts_with_anchor_not_found(tmp_path):
+    """线上事故同构回归（run 3e64fb59）：URN 在白名单内，但模型把证据原文改写成
+    证据里不存在的句子。P2 前靠 quote 逐字比对拦截；P2 后 anchor 渲染 fail-closed，
+    必须落 anchor_not_found 而非静默出带污染引用的答案。"""
+    chunk = make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文")
+    rewritten = structured_envelope({
+        "summary": "结论", "sections": [],
+        "citations": [{"urn": CHUNK1,
+                       "anchor": "模型改写后证据里根本不存在的句子"}]})
+    model = FakeModel({
+        "qa_intent_t1": structured_envelope({"intent": "howto"}),
+        "qa_answer_t1": rewritten,
+        "qa_answer_retry_t1": rewritten,
+    })
+    service = _service(tmp_path, model, FakeHybridSearch([chunk]))
+
+    resp = await service.ask(_request("如何配置备份？"), case_key="t1",
+                             run_id="run-anchor-miss")
+    assert resp.status == QaStatus.UNKNOWN
+    assert resp.unknown_reason == "citation_failed_exhausted"
+    assert resp.citation_errors and all(
+        "anchor_not_found" in e for e in resp.citation_errors)
+
+    row = await service.get_run("run-anchor-miss")
+    trace = await service.get_run_trace("run-anchor-miss")
+    assert row["citation_errors"] == resp.citation_errors == trace["citation_errors"]
 
 
 async def test_list_runs_filters_by_status_and_retains_limit(tmp_path):

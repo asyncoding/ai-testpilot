@@ -52,7 +52,7 @@ from testpilot_core.models import (
     HistoryTestimony,
     RepoRef,
 )
-from testpilot_core.retrieval import HybridResult
+from testpilot_core.retrieval import HybridResult, parse_symbol_reference
 from testpilot_adapters.tracers import NoopTracer
 
 from .prompts import (
@@ -74,6 +74,14 @@ N_CITATION_CHECK = "citation_check"
 N_ASSEMBLY = "assembly"
 
 _VALID_INTENTS = {i.value for i in QaIntent}
+
+# v7 意图来源留痕三值（qa_runs.intent_source）：
+# - regex_bypass：题面是精确 `Type.member(label:)` 形态，确定性判 code，整次 LLM 调用省掉；
+#   与 retrieval 节点的符号路由共用同一解析器，免模型与置顶尝试的题面口径严格一致。
+# - model：模型分类成功；fallback：模型不可用/非法枚举，走关键词保守兜底（同时落降级标记）。
+INTENT_SOURCE_BYPASS = "regex_bypass"
+INTENT_SOURCE_MODEL = "model"
+INTENT_SOURCE_FALLBACK = "fallback"
 _VERIFY_KEYS = (
     "urn", "kind", "exists", "verified", "body_changed", "degraded",
     "reason", "head_commit", "indexed_commit", "latency_ms", "branch",
@@ -155,6 +163,15 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
     async def intent(state: dict) -> dict:
         question = state["question"]
         with tracer.span("qa.intent", run_id=state.get("run_id", "")):
+            # P4 高精度免模型：精确符号形态的题面必然是代码/符号类问题，直接判 code，
+            # 省一次意图 LLM 调用（P0 实测三次本地 LLM 调用占 >99% 墙钟）。这是确定性
+            # 路由而非降级：不写 degraded_flags，零 token 累积，来源单独留痕。
+            if parse_symbol_reference(question) is not None:
+                return {
+                    "intent": QaIntent.CODE.value,
+                    "intent_degraded": False,
+                    "intent_source": INTENT_SOURCE_BYPASS,
+                }
             try:
                 env = await deps.model.structured(
                     build_intent_messages(question),
@@ -168,6 +185,7 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
                 out: dict[str, Any] = {
                     "intent": intent_value,
                     "intent_degraded": False,
+                    "intent_source": INTENT_SOURCE_MODEL,
                     "model_version": env.get("model", ""),
                     "tokens_total": _add_tokens(state, env),
                 }
@@ -176,6 +194,7 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
                 out = {
                     "intent": fallback_classify_intent(question).value,
                     "intent_degraded": True,
+                    "intent_source": INTENT_SOURCE_FALLBACK,
                     "degraded_flags": _flags(state, f"intent_degraded:{type(exc).__name__}"),
                 }
         return out
@@ -207,12 +226,21 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
             }
             flags = list(state.get("degraded_flags") or [])
             # 能力探测：HybridSearchAdapter.search 有 kinds 形参，FtsSearchAdapter 没有
-            supports_kinds = "kinds" in inspect.signature(deps.search.search).parameters
+            search_params = inspect.signature(deps.search.search).parameters
+            supports_kinds = "kinds" in search_params
             if state["intent"] == QaIntent.CODE.value:
                 if supports_kinds:
                     kwargs["kinds"] = ("code_symbol", "text")
                 else:
                     flags.append("kinds_filter_unsupported")
+                # P3：题面精确符号形态（Type.member(label:)）→ 确定性置顶路由；
+                # 解析不出/多符号/非 code 意图都不传，检索维持原混合路径
+                symbol_ref = parse_symbol_reference(state["question"])
+                if symbol_ref is not None:
+                    if "symbol_name" in search_params:
+                        kwargs["symbol_name"] = symbol_ref.normalized_name
+                    else:
+                        flags.append("symbol_pin_unsupported")
             result = await deps.search.search(state["question"], **kwargs)
 
             if isinstance(result, HybridResult):
@@ -224,6 +252,9 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
                     "degraded": result.trace.degraded,
                     "fts_urns": list(result.trace.fts_urns),
                     "vector_urns": list(result.trace.vector_urns),
+                    "symbol_pinned": result.trace.symbol_pinned,
+                    "symbol_pin_urn": result.trace.symbol_pin_urn,
+                    "symbol_pin_name": result.trace.symbol_pin_name,
                 }
                 degraded = result.degraded
                 event_id = result.event_id
@@ -362,13 +393,19 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
                 state, "answer_retry" if attempt > 1 else "answer"
             )
             evidence = state.get("evidence") or []
+            # P4：仅当 P3 符号置顶真实命中（retrieval_trace 带 pin URN）时瘦身 prompt；
+            # FTS 裸 list/未命中/重名路径 trace 无此键，pinned_urn=None，消息维持全文
+            pinned_urn = (state.get("retrieval_trace") or {}).get("symbol_pin_urn") or None
             messages = build_answer_messages(
                 state["question"], evidence, build_urn_whitelist(evidence),
                 regen_errors=state.get("citation_errors") or None,
+                pinned_urn=pinned_urn,
             )
             try:
                 env = await deps.model.structured(
                     messages, AnswerDraft.model_json_schema(), key=key,
+                    # 零引用草稿在适配器重试循环内当场拦，不白跑一轮图迭代
+                    required_nonempty=("citations",),
                 )
             except AdapterUnavailableError as exc:
                 return {

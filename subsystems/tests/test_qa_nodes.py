@@ -69,11 +69,11 @@ def evidence(urn=CHUNK1, *, kind="text", text="证据原文", doc_urn=DOC_URN,
     return to_evidence_dict(chunk)
 
 
-def draft_data(urn=CHUNK1, quote="证据原文") -> dict:
+def draft_data(urn=CHUNK1, anchor="证据原文") -> dict:
     return {
         "summary": "结论：证据原文如此",
         "sections": [],
-        "citations": [{"urn": urn, "quote": quote}],
+        "citations": [{"urn": urn, "anchor": anchor}],
     }
 
 
@@ -91,8 +91,48 @@ async def test_intent_uses_recorded_key_and_returns_enum():
 
     assert out["intent"] == "code"
     assert out["intent_degraded"] is False
+    assert out["intent_source"] == "model"
     assert out["model_version"] == "fake-model-1"
     assert out["tokens_total"] == {"in": 100, "out": 30}
+    assert model.structured_keys() == ["qa_intent_t1"]
+
+
+async def test_intent_symbol_form_bypasses_model_with_zero_calls():
+    # P4：题面是精确符号形态 → 确定性判 code，整次意图 LLM 调用省掉
+    model = FakeModel({})  # 即使没有任何录制 key 也必须成功，证明模型根本没被调用
+    nodes = nodes_of(model, FakeSearch([]))
+
+    out = await nodes[N_INTENT](base_state(
+        question="AlertListViewModel.snoozeRingingMission(minutes:) 的实现逻辑是什么？"))
+
+    assert out["intent"] == QaIntent.CODE.value
+    assert out["intent_degraded"] is False
+    assert out["intent_source"] == "regex_bypass"
+    assert model.calls == []  # 反假绿：零模型调用，不只是返回值正确
+    assert "tokens_total" not in out and "model_version" not in out
+    assert "degraded_flags" not in out  # 确定性路由不是降级
+
+
+async def test_intent_bypass_accepts_no_arg_and_compact_selector_forms():
+    model = FakeModel({})
+    nodes = nodes_of(model, FakeSearch([]))
+
+    for question in ("C.keep() 怎么实现？", "MissionCoordinator.schedulePrimary(_:at:) 在哪调用？"):
+        out = await nodes[N_INTENT](base_state(question=question))
+        assert out["intent"] == QaIntent.CODE.value
+        assert out["intent_source"] == "regex_bypass"
+    assert model.calls == []
+
+
+async def test_intent_natural_language_question_never_bypasses():
+    # 无符号形态的中文题必须仍走模型：免模型只认真正则，不做关键词猜测
+    model = FakeModel({"qa_intent_t1": structured_envelope({"intent": "concept"})})
+    nodes = nodes_of(model, FakeSearch([]))
+
+    out = await nodes[N_INTENT](base_state(question="停钟兜底机制是什么概念？"))
+
+    assert out["intent"] == "concept"
+    assert out["intent_source"] == "model"
     assert model.structured_keys() == ["qa_intent_t1"]
 
 
@@ -104,6 +144,7 @@ async def test_intent_missing_key_falls_back_to_keyword_classifier():
 
     assert out["intent"] == QaIntent.OUT_OF_SCOPE.value
     assert out["intent_degraded"] is True
+    assert out["intent_source"] == "fallback"
     assert any(f.startswith("intent_degraded:") for f in out["degraded_flags"])
 
 
@@ -115,6 +156,7 @@ async def test_intent_invalid_enum_falls_back():
 
     assert out["intent"] == QaIntent.CODE.value  # 拿不准保守归 code
     assert out["intent_degraded"] is True
+    assert out["intent_source"] == "fallback"
 
 
 async def test_intent_degraded_envelope_falls_back():
@@ -127,6 +169,7 @@ async def test_intent_degraded_envelope_falls_back():
 
     assert out["intent_degraded"] is True
     assert out["intent"] == QaIntent.CODE.value
+    assert out["intent_source"] == "fallback"
 
 
 # ── 2) acl ───────────────────────────────────────────────────────────────────
@@ -217,6 +260,49 @@ async def test_retrieval_non_code_intent_does_not_request_kinds():
 
     # 非 code 意图节点不传 kinds：适配器形参保持默认 None（对照 code 用例的二元组）
     assert search.search_calls[0]["kinds"] is None
+
+
+async def test_retrieval_code_intent_passes_normalized_symbol_name():
+    search = FakeSearch([make_chunk(CHUNK1)], hybrid=True)
+    nodes = nodes_of(FakeModel({}), search)
+
+    state = base_state(
+        intent="code",
+        question="AlertListViewModel.snoozeRingingMission(minutes:) 的实现逻辑是什么？")
+    out = await nodes[N_RETRIEVAL](state)
+
+    assert search.search_calls[0]["symbol_name"] == \
+        "AlertListViewModel.snoozeRingingMission(minutes:)"
+    # 未置顶（fake 检索不做实体路由）：trace 标记如实给 False/空，不造置顶事实
+    assert out["retrieval_trace"]["symbol_pinned"] is False
+    assert out["retrieval_trace"]["symbol_pin_urn"] == ""
+
+
+async def test_retrieval_plain_and_non_code_questions_never_pin():
+    # code 意图但题面无符号形态 → 不传 symbol_name（常规混合检索零变化）
+    search = FakeSearch([make_chunk(CHUNK1)], hybrid=True)
+    nodes = nodes_of(FakeModel({}), search)
+    await nodes[N_RETRIEVAL](base_state(intent="code", question="闹钟为什么不响？"))
+    assert search.search_calls[0]["symbol_name"] is None
+
+    # 题面有符号形态但非 code 意图 → 同样不路由（意图门禁，不替别的意图做确定性置顶）
+    search2 = FakeSearch([make_chunk(CHUNK1)], hybrid=True)
+    nodes2 = nodes_of(FakeModel({}), search2)
+    await nodes2[N_RETRIEVAL](base_state(
+        intent="howto",
+        question="怎么调用 Alarm.ring() 方法？"))
+    assert search2.search_calls[0]["symbol_name"] is None
+
+
+async def test_retrieval_fts_adapter_flags_symbol_pin_unsupported():
+    search = FakeSearch([make_chunk(CHUNK1)], hybrid=False)
+    nodes = nodes_of(FakeModel({}), search)
+
+    out = await nodes[N_RETRIEVAL](base_state(
+        intent="code", question="Alarm.ring() 的实现逻辑是什么？"))
+
+    assert "symbol_pin_unsupported" in out["degraded_flags"]
+    assert "symbol_name" not in search.search_calls[0]
 
 
 async def test_retrieval_extracts_l2_history_testimony_verbatim():
@@ -383,7 +469,7 @@ async def test_generation_first_attempt_uses_answer_key_and_persists_draft():
     assert model.structured_keys() == ["qa_answer_t1"]
     assert out["attempts"] == 1
     assert out["draft"]["citations"][0]["urn"] == CHUNK1
-    assert out["prompt_version"] == "qa-prompt-1"
+    assert out["prompt_version"] == "qa-prompt-3"
     assert out["params_version"] == "qa-params-1"
     assert out["tokens_total"]["in"] == 100
 
@@ -403,6 +489,47 @@ async def test_generation_retry_uses_retry_key_and_injects_errors():
     assert out["attempts"] == 2
     joined = "\n".join(m["content"] for m in model.messages[0])
     assert "urn_not_in_evidence: urn:x" in joined
+
+
+async def test_generation_symbol_pin_slims_prompt_but_keeps_pinned_full_text():
+    # P4：retrieval_trace 带置顶 URN 时，置顶块全文进 prompt，其余块只投影签名
+    long_body = "func snoozeRingingMission(minutes: Int) {\n" + \
+        "\n".join(f"    line {i}" for i in range(30)) + "\n}\n"
+    other_body = "func unrelated() {\n" + "    // 无关实现细节 " * 10 + "}\n"
+    pinned = evidence(SYM1, kind="code_symbol", doc_urn=SYM_DOC, text=long_body,
+                      extra_meta={"signature": "func snoozeRingingMission(minutes: Int)"})
+    other = evidence(SYM2, kind="code_symbol", doc_urn=SYM_DOC, text=other_body,
+                     extra_meta={"signature": "func unrelated()"})
+    model = FakeModel({"qa_answer_t1": structured_envelope(draft_data(urn=SYM1))})
+    nodes = nodes_of(model, FakeSearch([]))
+    state = base_state(
+        evidence=[pinned, other],
+        retrieval_trace={"symbol_pinned": True, "symbol_pin_urn": SYM1,
+                         "symbol_pin_name": "AlertListViewModel.snoozeRingingMission(minutes:)"},
+    )
+
+    out = await nodes[N_GENERATION](state)
+
+    assert out["attempts"] == 1
+    joined = "\n".join(m["content"] for m in model.messages[0])
+    assert long_body in joined  # 置顶块全文可见，anchor 素材不丢
+    assert "func unrelated()" in joined and other_body not in joined  # 非置顶只剩签名
+    assert "非置顶证据" in joined
+
+
+async def test_generation_without_pin_keeps_full_text_prompt():
+    # 护栏：无置顶（FTS 裸 list / 未命中 / 重名）时 prompt 与旧版全文形态一致
+    other_body = "func unrelated() {\n    detail line\n}\n"
+    other = evidence(SYM2, kind="code_symbol", doc_urn=SYM_DOC, text=other_body,
+                     extra_meta={"signature": "func unrelated()"})
+    model = FakeModel({"qa_answer_t1": structured_envelope(draft_data(urn=SYM2))})
+    nodes = nodes_of(model, FakeSearch([]))
+
+    await nodes[N_GENERATION](base_state(evidence=[other]))  # 无 retrieval_trace 键
+
+    joined = "\n".join(m["content"] for m in model.messages[0])
+    assert other_body in joined
+    assert "非置顶证据" not in joined
 
 
 async def test_generation_missing_key_degrades_unknown():
@@ -522,7 +649,7 @@ async def test_assembly_consistent_code_answer_answered_with_tri_state():
         verify_results=[{"urn": SYM1, "verified": True, "body_changed": False,
                          "degraded": False, "exists": True}],
         draft=AnswerDraft.model_validate(draft_data(
-            urn=SYM1, quote="证据原文")).model_dump())
+            urn=SYM1, anchor="证据原文")).model_dump())
 
     out = await nodes[N_ASSEMBLY](state)
 
@@ -558,7 +685,7 @@ async def test_assembly_refreshed_citation_marked_verified_at_head():
                          "head_commit": HEAD}],
         head_refreshed_urns=[SYM1],
         draft=AnswerDraft.model_validate(draft_data(
-            urn=SYM1, quote="证据原文")).model_dump())
+            urn=SYM1, anchor="证据原文")).model_dump())
 
     out = await nodes[N_ASSEMBLY](state)
 
@@ -575,7 +702,7 @@ async def test_assembly_incident_renders_verbatim_history_and_current_sections()
         extra_meta={"date": "2026-01-01"})
     current_ev = evidence(SYM1, kind="code_symbol", doc_urn=SYM_DOC)
     # 模型只能引用当前文档，历史文档 URN 不得进 draft（assemble_incident 会拒交叉）
-    draft = AnswerDraft.model_validate(draft_data(urn=SYM1, quote="证据原文"))
+    draft = AnswerDraft.model_validate(draft_data(urn=SYM1, anchor="证据原文"))
     nodes = nodes_of(FakeModel({}), FakeSearch([]))
     state = base_state(
         intent="incident", evidence=[history_ev, current_ev],

@@ -9,7 +9,7 @@ import json
 import httpx
 import pytest
 
-from testpilot_adapters.ollama_model import OllamaModelGateway
+from testpilot_adapters.ollama_model import OllamaModelGateway, _has_required_nonempty
 from testpilot_core.errors import AdapterUnavailableError
 
 
@@ -95,8 +95,17 @@ async def test_embed_batch_payload_and_vectors():
     vectors = await gw.embed(["物理键", "侧边键"])
     assert vectors == [[0.1, 0.2], [0.3, 0.4]]
     assert tr[0].url.path == "/api/embed"
-    body = bodies_of(tr)[0]
-    assert body == {"model": "dmeta-x", "input": ["物理键", "侧边键"]}
+    # 默认 keep_alive=30m 随每个请求下发，防止 Ollama 空闲 5m 卸载（冷加载 55.3s）
+    assert bodies_of(tr)[0] == {
+        "model": "dmeta-x", "input": ["物理键", "侧边键"], "keep_alive": "30m"}
+
+
+async def test_keep_alive_none_omits_field_on_embed_and_chat():
+    gw, tr = _gateway([(200, {"embeddings": [[0.1]]}), CHAT_OK], keep_alive=None)
+    await gw.embed(["x"])
+    await gw.chat([])
+    embed_body, chat_body = bodies_of(tr)
+    assert "keep_alive" not in embed_body and "keep_alive" not in chat_body
 
 
 async def test_embed_empty_input_skips_http():
@@ -194,6 +203,61 @@ async def test_structured_all_bad_returns_degraded_without_raising():
     assert resp["degraded"] is True and resp["attempts"] == 3 and resp["data"] is None
     assert resp["text"] == "not json"
     assert len(tr) == 3
+
+
+# ── structured 业务级非空字段（required_nonempty，P1 浅校验收紧）────────────────
+
+async def test_structured_empty_required_field_retries_with_dedicated_hint_then_passes():
+    # 首稿 citations=[]：schema required 通过但业务非空不过，适配器循环内当场重发，
+    # 不白跑一轮图迭代（真实事故里零引用草稿要到 citation_check 才被拦）
+    gw, tr = _gateway([
+        (200, {**CHAT_BODY, "message": {"content": '{"summary": "x", "citations": []}'}}),
+        (200, {**CHAT_BODY, "message": {
+            "content": '{"summary": "x", "citations": [{"urn": "u1", "quote": "q"}]}'}}),
+    ])
+    schema = {"type": "object", "required": ["summary", "citations"]}
+    resp = await gw.structured([{"role": "user", "content": "q"}], schema,
+                               required_nonempty=("citations",))
+    assert resp["degraded"] is False and resp["attempts"] == 2
+    assert resp["data"]["citations"][0]["urn"] == "u1"
+    hint = bodies_of(tr)[1]["messages"][-1]["content"]
+    assert "缺少非空字段" in hint and "citations" in hint
+
+
+async def test_structured_empty_required_field_exhausts_to_degraded():
+    empty = (200, {**CHAT_BODY, "message": {"content": '{"summary": "x", "citations": []}'}})
+    gw, tr = _gateway([empty, empty], structured_max_attempts=2)
+    resp = await gw.structured([], {"type": "object", "required": ["summary", "citations"]},
+                               required_nonempty=("citations",))
+    assert resp["degraded"] is True and resp["data"] is None and resp["attempts"] == 2
+    assert len(tr) == 2
+
+
+async def test_structured_without_required_nonempty_keeps_legacy_shape_only():
+    # 不传该选项时维持旧契约：键存在即过，空列表不算适配器层失败
+    gw, tr = _gateway([
+        (200, {**CHAT_BODY, "message": {"content": '{"summary": "x", "citations": []}'}}),
+    ])
+    resp = await gw.structured([], {"type": "object", "required": ["summary", "citations"]})
+    assert resp["degraded"] is False and resp["attempts"] == 1
+    assert resp["data"] == {"summary": "x", "citations": []}
+    assert len(tr) == 1
+
+
+def test_has_required_nonempty_pure_function_contract():
+    # hostless 纯函数：不触网、不依赖事件循环，直接钉死判定口径
+    assert _has_required_nonempty({}, ()) is True  # 无要求永远通过
+    assert _has_required_nonempty({"citations": ["u"]}, ("citations",)) is True
+    assert _has_required_nonempty({"citations": "u"}, ("citations",)) is True
+    assert _has_required_nonempty({"citations": []}, ("citations",)) is False
+    assert _has_required_nonempty({"citations": ""}, ("citations",)) is False
+    assert _has_required_nonempty({}, ("citations",)) is False  # 缺键
+    assert _has_required_nonempty("not-a-dict", ("citations",)) is False
+    # 多字段全真才过
+    assert _has_required_nonempty(
+        {"a": ["x"], "b": "y"}, ("a", "b")) is True
+    assert _has_required_nonempty(
+        {"a": ["x"], "b": ""}, ("a", "b")) is False
 
 
 # ── trace（FR-CON-006 AC3）────────────────────────────────────────────────────

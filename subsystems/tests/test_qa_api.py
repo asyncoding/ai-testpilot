@@ -252,12 +252,22 @@ async def test_trace_timeline_langfuse_null_under_noop_tracer(container):
     assert set(data["versions"]) == {"model", "prompt", "params", "data"}
     assert data["versions"]["model"]
     first_evidence = data["evidence"][0]
+    # trace 证据面向排查：排名+命中通道取代裸 RRF 分值的主位（分值保留在 score）
     assert set(first_evidence) == {
-        "urn", "doc_urn", "kind", "score", "authority_level"}
+        "urn", "doc_urn", "kind", "rank", "channels", "score", "authority_level"}
+    assert first_evidence["rank"] == 1
+    assert isinstance(first_evidence["channels"], list)
     assert data["citations"]
+    # v6 起 citation_errors 是固定键位：成功 run 为空列表，失败 run 装具体错误
+    assert data["citation_errors"] == []
     # FTS 通道可能不写 retrieval_events：允许 null 或整数，绝不造数
     assert data["retrieval_event_id"] is None or isinstance(
         data["retrieval_event_id"], int)
+    # P3 符号置顶三键为固定键位：非符号题面如实 False/空串，不缺键
+    assert data["symbol_pinned"] is False
+    assert data["symbol_pin_urn"] == "" and data["symbol_pin_name"] == ""
+    # v7 意图来源固定键位：中文题面走模型分类
+    assert data["intent_source"] == "model"
     # offline profile tracer=noop：深链必须如实为 null
     assert data["langfuse"] is None
 

@@ -41,11 +41,11 @@ def intent_env(value: str) -> dict:
     return structured_envelope({"intent": value})
 
 
-def answer_env(urn: str, quote: str) -> dict:
+def answer_env(urn: str, anchor: str) -> dict:
     return structured_envelope({
-        "summary": f"结论：{quote}",
+        "summary": f"结论：{anchor}",
         "sections": [],
-        "citations": [{"urn": urn, "quote": quote}],
+        "citations": [{"urn": urn, "anchor": anchor}],
     })
 
 

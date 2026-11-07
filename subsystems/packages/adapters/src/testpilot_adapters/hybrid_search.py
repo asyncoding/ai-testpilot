@@ -13,6 +13,7 @@ trigram-BM25 与向量两路并行召回 → core 纯函数 RRF×质量×新鲜�
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import time
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from testpilot_core.retrieval import (
     FTS,
     VECTOR,
     ChannelRanking,
+    FusedScore,
     HybridResult,
     build_stage_trace,
     fuse_and_rank,
@@ -73,10 +75,21 @@ class HybridSearchAdapter:
         acl_scope: str = "default",
         kinds: tuple[str, ...] = (),
         limit: int = 8,
+        symbol_name: str | None = None,
     ) -> HybridResult:
+        """混合检索。symbol_name 非空时走 P3 精确符号路由：entities 精确唯一
+        命中的代码切块确定性置顶（哪怕两通道都没召回它），其余候选仍由 RRF 补位；
+        无命中/重名时本参数不产生任何行为变化。"""
         project = project if project is not None else self.project
         branch = branch or self.default_branch
         match_expr, like_terms = shape_trigram_query(query)
+
+        # 精确符号解析与通道召回并发：纯本地等值查询，不额外增加串行段
+        pin_task = (
+            asyncio.ensure_future(asyncio.to_thread(
+                self.store.lookup_symbol_chunks, symbol_name, branch))
+            if symbol_name else None
+        )
 
         # 两通道并发（sqlite 调用放线程池，避免阻塞事件循环）
         fts_task = asyncio.ensure_future(self._fts_recall(match_expr, like_terms, branch, acl_scope, kinds))
@@ -112,22 +125,38 @@ class HybridSearchAdapter:
             row = by_urn.get(fused.urn)
             if row is None:
                 continue  # 两通道召回后、融合前被删的极端情况：跳过
-            # doc_* 不在 KnowledgeChunk 字段里（直接 validate 会被忽略），
-            # 并入 metadata 供答案引用溯源（KNO-001 AC2）。
-            row = dict(row)
-            doc_meta = {
-                k: row.pop(k)
-                for k in ("doc_uri", "doc_mtime", "doc_authority", "doc_content_hash")
-                if k in row
-            }
-            row["metadata"] = {**(row.get("metadata") or {}), **doc_meta}
-            chunks.append(KnowledgeChunk.model_validate(row))
+            chunk = self._chunk_from_row(row)
+            chunks.append(chunk)
             scores.append(fused)
+
+        # P3 精确符号路由：唯一精确命中才置顶；0 个（符号表无此名）/多个（重名）
+        # 都不干预，检索行为与无 symbol_name 时完全一致。
+        pin_urn = ""
+        if pin_task is not None:
+            pin_candidates = await pin_task
+            if len(pin_candidates) == 1:
+                pin_urn = self._apply_symbol_pin(
+                    pin_candidates[0], chunks, scores, limit=limit
+                )
+        if pin_urn:
+            trace = dataclasses.replace(
+                trace, symbol_pinned=True, symbol_pin_urn=pin_urn,
+                symbol_pin_name=symbol_name or "",
+            )
 
         model_version = getattr(self.model, "embed_model", None) or getattr(
             self.model, "model_version", ""
         )
         vector_error = getattr(vec_ranking, "error", "")
+        extra: dict[str, Any] = {}
+        if vector_error:
+            extra["vector_error"] = vector_error
+        if pin_urn:
+            # 置顶决策随事件留痕（无 qa_runs schema 变更）：trace 时间线可解释 rank 1 成因
+            extra.update(
+                symbol_pinned=True, symbol_pin_urn=pin_urn,
+                symbol_pin_name=symbol_name or "",
+            )
         event_id = self.store.record_retrieval_event(
             query=query,
             query_sha=hashlib.sha256(query.encode("utf-8")).hexdigest()[:16],
@@ -144,9 +173,51 @@ class HybridSearchAdapter:
             fused_urns=[f.urn for f in scores],
             fts_latency_ms=trace.fts_latency_ms,
             vector_latency_ms=trace.vector_latency_ms,
-            extra={"vector_error": vector_error} if vector_error else None,
+            extra=extra or None,
         )
         return HybridResult(chunks=chunks, scores=scores, trace=trace, event_id=event_id)
+
+    @staticmethod
+    def _chunk_from_row(row: dict) -> KnowledgeChunk:
+        """检索行 → KnowledgeChunk：doc_* 折叠进 metadata（KNO-001 AC2 溯源）。"""
+        row = dict(row)
+        doc_meta = {
+            k: row.pop(k)
+            for k in ("doc_uri", "doc_mtime", "doc_authority", "doc_content_hash")
+            if k in row
+        }
+        row["metadata"] = {**(row.get("metadata") or {}), **doc_meta}
+        return KnowledgeChunk.model_validate(row)
+
+    def _apply_symbol_pin(
+        self, pin_urn: str, chunks: list[KnowledgeChunk],
+        scores: list[FusedScore], *, limit: int,
+    ) -> str:
+        """把精确命中的符号切块确定性置顶，返回实际置顶的 URN（无法置顶返空串）。
+
+        - 已在融合结果中：原位提取插到 rank 1，保留其真实 RRF 分与命中通道；
+        - 两通道均未召回：按 symbol_urn 直接补载，合成 channels=() 的占位分
+          （total=0 是诚实值：它没有任何通道召回证据，置顶权威来自精确符号表），
+          占一个 limit 名额、挤掉末位；补载失败（极端竞态删除）放弃置顶。
+        """
+        existing = next((i for i, c in enumerate(chunks) if c.urn == pin_urn), None)
+        if existing is not None:
+            chunks.insert(0, chunks.pop(existing))
+            scores.insert(0, scores.pop(existing))
+            return pin_urn
+        loaded = self.store.load_retrieval_chunks([pin_urn])
+        if not loaded:
+            return ""
+        chunks.insert(0, self._chunk_from_row(loaded[0]))
+        scores.insert(0, FusedScore(
+            urn=pin_urn, total=0.0, rrf=0.0,
+            quality=float(loaded[0].get("quality_score", 0.5)),
+            freshness=1.0, channels=(),
+        ))
+        if len(chunks) > limit:
+            chunks.pop()
+            scores.pop()
+        return pin_urn
 
     async def _fts_recall(
         self,

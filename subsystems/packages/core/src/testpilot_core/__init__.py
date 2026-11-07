@@ -6,6 +6,10 @@
 
 # v5（S1.4）：新增 qa_runs 表与 feedback.run_id 索引；老库经 schema.sql
 # CREATE IF NOT EXISTS 幂等补建，无需 ALTER 列迁移。
-SCHEMA_VERSION = 5
+# v6（S1.6 前置）：qa_runs 增 citation_errors 列，持久化引用校验的具体错误
+# （quote_not_verbatim/urn_not_in_evidence/no_citations），老库经 _COLUMN_MIGRATIONS ALTER 补列。
+# v7（P4 延迟治理）：qa_runs 增 intent_source 列，区分意图来源 regex_bypass（确定性
+# 免模型）/ model / fallback，支撑两类 run 的延迟 SQL 切片对比。
+SCHEMA_VERSION = 7
 
 __all__ = ["SCHEMA_VERSION"]

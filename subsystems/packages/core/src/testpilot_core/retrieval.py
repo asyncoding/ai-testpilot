@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .chunking import parse_swift_arg_labels
+
 if TYPE_CHECKING:
     from .models import KnowledgeChunk
 
@@ -22,6 +24,50 @@ _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[一-鿿]+")
 
 FTS = "fts"
 VECTOR = "vector"
+
+# P3 符号路由：题面中的 `Type.member(...)` 精确符号形态。
+# - 类型名强制大写开头（Swift 类型约定），小写接收者（变量/函数调用）不认；
+# - 前导负向断言防止匹配长点链的后缀段（a.b.Foo.bar(x:) 不允许从 Foo 起匹配）；
+# - 参数位不含嵌套括号 [^()]：题面里的 selector 不会带闭包类型，出现嵌套说明是
+#   自然语言/复杂表达式，宁可不识别也不误路由。
+_SYMBOL_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])([A-Z][A-Za-z0-9_]*)\.([A-Za-z_]\w*)\s*\(([^()]*)\)"
+)
+
+
+@dataclass(frozen=True)
+class SymbolReference:
+    """题面解析出的精确符号引用；normalized_name 与 entities.name 同口径。"""
+
+    type_name: str
+    member: str
+    normalized_name: str
+
+
+def parse_symbol_reference(question: str) -> SymbolReference | None:
+    """从题面提取唯一的 `Type.member(label:)` 符号引用并归一化到入库 selector 口径。
+
+    返回 None 的情形（全部走常规混合检索，行为与 P3 前完全一致）：
+    - 题面没有合规符号形态；括号内不是 Swift 参数标签（自然语言/中文/无冒号表达式）；
+    - 出现两个及以上**不同**的符号（题面在做对比，置顶任何一个都是误判）；
+      同一符号重复出现仍按唯一引用处理。
+    归一化示例：`AlertListViewModel.snoozeRingingMission( minutes : Int )`
+    → `AlertListViewModel.snoozeRingingMission(minutes:)`，与 chunker._selector 同形。
+    """
+    refs = {
+        (m.group(1), m.group(2), m.group(3))
+        for m in _SYMBOL_REF_RE.finditer(question)
+    }
+    if len(refs) != 1:
+        return None
+    type_name, member, args_text = next(iter(refs))
+    labels = parse_swift_arg_labels(args_text)
+    if labels is None:
+        return None
+    selector = (
+        f"{member}({':'.join(labels) + ':'})" if labels else f"{member}()"
+    )
+    return SymbolReference(type_name, member, f"{type_name}.{selector}")
 
 
 @dataclass(frozen=True)
@@ -60,6 +106,11 @@ class StageTrace:
     overlap: list[str] = field(default_factory=list)
     fts_latency_ms: int = 0
     vector_latency_ms: int = 0
+    # P3 精确符号路由：entities 精确唯一命中时确定性置顶，绕过向量语义抽奖；
+    # 留痕随 retrieval_events.raw_json 持久化，trace 时间线可解释「为什么它排第 1」
+    symbol_pinned: bool = False
+    symbol_pin_urn: str = ""
+    symbol_pin_name: str = ""
 
 
 @dataclass(frozen=True)

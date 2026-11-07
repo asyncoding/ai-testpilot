@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS entities (
     doc_urn   TEXT,
     raw_json  TEXT NOT NULL
 );
+-- P3 符号路由：查询侧按 entities.name 精确反查（IF NOT EXISTS 幂等，老库启动即建）
+CREATE INDEX IF NOT EXISTS idx_entities_name_branch ON entities(name, branch);
 
 CREATE TABLE IF NOT EXISTS relations (
     urn           TEXT PRIMARY KEY,
@@ -225,6 +227,11 @@ CREATE TABLE IF NOT EXISTS qa_runs (
     verify_results     TEXT NOT NULL DEFAULT '[]',
     retrieval_event_id INTEGER,
     unknown_reason     TEXT NOT NULL DEFAULT '',
+    -- v6：引用校验具体错误（quote_not_verbatim/urn_not_in_evidence/no_citations），
+    -- 只存最后一次 citation_check 的结果；空列表=校验通过或未进生成
+    citation_errors    TEXT NOT NULL DEFAULT '[]',
+    -- v7：意图来源 regex_bypass（符号形态免模型）/ model / fallback；老行为 '' 表 legacy
+    intent_source      TEXT NOT NULL DEFAULT '',
     degraded           TEXT NOT NULL DEFAULT '[]',
     attempts           INTEGER NOT NULL DEFAULT 0,
     regens             INTEGER NOT NULL DEFAULT 0,

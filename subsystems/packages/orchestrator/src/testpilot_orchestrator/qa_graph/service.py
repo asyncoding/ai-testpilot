@@ -208,16 +208,31 @@ class QaService:
         run = await self.get_run(run_id)
         if run is None:
             raise NotFoundError(f"qa_run 不存在: {run_id}")
-        evidence = [
-            {
-                "urn": e.get("urn", ""),
+        # 命中通道反查：RRF 分是 0–0.033 量纲的秩信号，UI 不直接展示，改显排名+通道；
+        # FTS 裸 list 路径无 retrieval_event，channels 如实给空（前端显示 —）。
+        event_id = run.get("retrieval_event_id")
+        event = self._store.get_retrieval_event(event_id) if event_id else None
+        fts_set = set((event or {}).get("fts_urns") or [])
+        vec_set = set((event or {}).get("vector_urns") or [])
+        # P3 符号置顶决策随 retrieval_events.raw_json 留痕（无独立列、无 schema 迁移）
+        event_raw = (event or {}).get("raw_json") or {}
+        evidence = []
+        for rank, e in enumerate(run.get("evidence") or [], start=1):
+            urn = e.get("urn", "")
+            channels: list[str] = []
+            if urn in fts_set:
+                channels.append("fts")
+            if urn in vec_set:
+                channels.append("vector")
+            evidence.append({
+                "urn": urn,
                 "doc_urn": e.get("doc_urn", ""),
                 "kind": e.get("kind", ""),
+                "rank": rank,
+                "channels": channels,
                 "score": e.get("score", 0.0),
                 "authority_level": e.get("authority_level", ""),
-            }
-            for e in (run.get("evidence") or [])
-        ]
+            })
         citations = [
             {
                 "urn": c.get("urn", ""),
@@ -230,14 +245,19 @@ class QaService:
             "run_id": run["run_id"],
             "question": run.get("question", ""),
             "intent": run.get("intent", ""),
+            "intent_source": run.get("intent_source", ""),
             "status": run.get("status", ""),
             "unknown_reason": run.get("unknown_reason", ""),
+            "citation_errors": run.get("citation_errors") or [],
             "attempts": run.get("attempts", 0),
             "regens": run.get("regens", 0),
             "tokens": {"in": run.get("tokens_in", 0), "out": run.get("tokens_out", 0)},
             "latency_ms": run.get("latency_ms", 0),
             "degraded": run.get("degraded") or [],
             "retrieval_event_id": run.get("retrieval_event_id"),
+            "symbol_pinned": bool(event_raw.get("symbol_pinned")),
+            "symbol_pin_urn": event_raw.get("symbol_pin_urn", ""),
+            "symbol_pin_name": event_raw.get("symbol_pin_name", ""),
             "evidence": evidence,
             "verify_results": run.get("verify_results") or [],
             "citations": citations,
@@ -264,6 +284,8 @@ class QaService:
             status=QaStatus(final.get("status", QaStatus.ERROR.value)),
             answer=answer,
             unknown_reason=final.get("unknown_reason", ""),
+            citation_errors=list(final.get("citation_errors") or []),
+            intent_source=final.get("intent_source", ""),
             degraded=list(final.get("degraded_flags") or []),
             intent=QaIntent(intent_value) if intent_value else None,
             model_version=final.get("model_version", ""),
@@ -291,6 +313,8 @@ class QaService:
             "verify_results": final.get("verify_results") or [],
             "retrieval_event_id": final.get("retrieval_event_id"),
             "unknown_reason": final.get("unknown_reason", ""),
+            "citation_errors": final.get("citation_errors") or [],
+            "intent_source": final.get("intent_source", ""),
             "degraded": final.get("degraded_flags") or [],
             "attempts": attempts,
             # regens = 实际重生成次数：首次生成不计，attempt=2 即重生成 1 次

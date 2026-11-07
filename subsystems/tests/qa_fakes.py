@@ -131,10 +131,11 @@ class FakeHybridSearch(_FakeSearchBase):
     """对齐 HybridSearchAdapter：search 带显式 kinds 形参，返回 HybridResult。"""
 
     async def search(self, query, *, project="", branch="main",
-                     acl_scope="default", limit=8, kinds=None):
+                     acl_scope="default", limit=8, kinds=None, symbol_name=None):
         self.search_calls.append({
             "query": query, "project": project, "branch": branch,
             "acl_scope": acl_scope, "limit": limit, "kinds": kinds,
+            "symbol_name": symbol_name,
         })
         return self._hybrid_result()
 

@@ -4,7 +4,7 @@
 from testpilot_adapters.store import bootstrap_store
 from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import AuthorityLevel
-from testpilot_core.models import KnowledgeChunk, SourceDocument
+from testpilot_core.models import Entity, KnowledgeChunk, SourceDocument
 
 
 def _doc(urn: str = "urn:testpilot:fs-docs:document:d1@h1") -> SourceDocument:
@@ -155,3 +155,61 @@ def test_v3_store_gains_verification_events_on_reopen(tmp_path):
         assert row["symbol_exists"] is None and row["body_changed"] is None
     finally:
         store.close()
+
+
+# ── P3 精确符号路由：entities.name → chunks.symbol_urn 反查 ────────────────────
+
+def _symbol_doc(doc_urn: str, uri: str) -> SourceDocument:
+    return SourceDocument(
+        urn=doc_urn, source_system="fs-docs", uri=uri, title=doc_urn,
+        version="h1", content_hash=f"hash-{doc_urn}",
+        authority_level=AuthorityLevel.L1_AUTHORITATIVE,
+    )
+
+
+def _symbol_chunk(*, chunk_urn: str, doc_urn: str, symbol_urn: str,
+                  branch: str = "main", index: int = 0) -> KnowledgeChunk:
+    return KnowledgeChunk(
+        urn=chunk_urn, doc_urn=doc_urn, index=index, kind="code_symbol",
+        text="func keep() { print(1) }", symbol_urn=symbol_urn,
+        quality_score=0.8, branch=branch, content_hash=f"ch-{chunk_urn}",
+    )
+
+
+def test_lookup_symbol_chunks_unique_name_resolves_to_chunk(tmp_path):
+    store = bootstrap_store(tmp_path)
+    doc_urn = "urn:testpilot:fs-docs:document:src/alarm.swift"
+    symbol_urn = "urn:testpilot:fs-docs:symbol:src/alarm.swift#Alarm.ring()"
+    chunk_urn = "urn:testpilot:fs-docs:chunk:src/alarm.swift#Alarm.ring()"
+    chunk = _symbol_chunk(chunk_urn=chunk_urn, doc_urn=doc_urn, symbol_urn=symbol_urn)
+    entity = Entity(urn=symbol_urn, kind="code_symbol",
+                    name="Alarm.ring()", branch="main")
+    store.replace_document_index(
+        _symbol_doc(doc_urn, "file:///repo/src/alarm.swift"),
+        [chunk], [entity], [], "run-1")
+
+    assert store.lookup_symbol_chunks("Alarm.ring()", "main") == [chunk_urn]
+    # 精确等值：模糊前缀不许命中
+    assert store.lookup_symbol_chunks("Alarm.ring", "main") == []
+    # 分支隔离
+    assert store.lookup_symbol_chunks("Alarm.ring()", "release") == []
+
+
+def test_lookup_symbol_chunks_duplicate_name_returns_all_for_caller_to_skip_pin(tmp_path):
+    # 跨文件重名：返回多个 URN，置顶决策（放弃置顶）在适配器层
+    store = bootstrap_store(tmp_path)
+    name = "Logger.info(_:)"
+    rows = []
+    for i in range(2):
+        doc_urn = f"urn:testpilot:fs-docs:document:src/f{i}.swift"
+        symbol_urn = f"urn:testpilot:fs-docs:symbol:src/f{i}.swift#Logger.info()"
+        chunk_urn = f"urn:testpilot:fs-docs:chunk:src/f{i}.swift#Logger.info()"
+        store.replace_document_index(
+            _symbol_doc(doc_urn, f"file:///repo/src/f{i}.swift"),
+            [_symbol_chunk(chunk_urn=chunk_urn, doc_urn=doc_urn, symbol_urn=symbol_urn)],
+            [Entity(urn=symbol_urn, kind="code_symbol", name=name, branch="main")],
+            [], f"run-{i}")
+        rows.append(chunk_urn)
+
+    assert store.lookup_symbol_chunks(name, "main") == sorted(rows)
+    assert store.lookup_symbol_chunks("Nope.missing()", "main") == []

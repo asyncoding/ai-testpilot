@@ -435,10 +435,16 @@ class AskRequest(BaseModel):
 
 
 class DraftCitation(BaseModel):
-    """模型生成草稿中的引用：只能引用白名单 URN，quote 必须是证据原文子串。"""
+    """模型生成草稿中的引用：只能引用白名单 URN。
+
+    P2 起模型只输出 anchor（证据中逐字出现的短文本/标识符），不再输出 quote——
+    7B 模型在长上下文里逐字摘抄长代码会系统性腐化（实测 3/3 改写插值/省略号）。
+    quote 由服务端按 anchor 确定性渲染（answering.render_citation_quote），
+    未命中 fail-closed，杜绝模型转述进入最终引用。
+    """
 
     urn: str
-    quote: str = ""
+    anchor: str = ""
 
 
 class AnswerDraft(BaseModel):
@@ -500,6 +506,10 @@ class AskResponse(BaseModel):
     status: QaStatus
     answer: AssembledAnswer | None = None
     unknown_reason: str = ""
+    # v6：最后一次 citation_check 的具体错误；answered 时为空列表
+    citation_errors: list[str] = Field(default_factory=list)
+    # v7：意图来源 regex_bypass（符号形态免模型）/ model / fallback；老行为为空串
+    intent_source: str = ""
     degraded: list[str] = Field(default_factory=list)
     intent: QaIntent | None = None
     model_version: str = ""

@@ -33,7 +33,7 @@ def _deps(tmp_path, **kw) -> tuple[QaDeps, object, FakeModel]:
         "qa_answer_t1": structured_envelope({
             "summary": "结论：证据原文",
             "sections": [],
-            "citations": [{"urn": SYM1, "quote": "证据原文"}],
+            "citations": [{"urn": SYM1, "anchor": "证据原文"}],
         }),
     })
     search = FakeHybridSearch([chunk])

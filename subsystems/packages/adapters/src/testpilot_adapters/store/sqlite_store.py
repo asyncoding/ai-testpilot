@@ -32,6 +32,12 @@ def _now_iso() -> str:
 _COLUMN_MIGRATIONS = {
     "entities": {"doc_urn": "TEXT"},
     "relations": {"doc_urn": "TEXT"},
+    # v6：qa_runs 持久化引用校验具体错误（老库 ALTER 补列，默认空列表）
+    # v7：qa_runs 持久化意图来源（regex_bypass/model/fallback，老库补空串表 legacy）
+    "qa_runs": {
+        "citation_errors": "TEXT NOT NULL DEFAULT '[]'",
+        "intent_source": "TEXT NOT NULL DEFAULT ''",
+    },
     # v3 向量嵌入阶段（FR-ING-001：每步留痕可重跑）
     "ingestion_status": {
         "embed_stage": "TEXT NOT NULL DEFAULT ''",
@@ -296,6 +302,28 @@ class Store:
         )
         self.conn.commit()
         return int(cur.lastrowid)
+
+    def lookup_symbol_chunks(self, name: str, branch: str) -> list[str]:
+        """P3 精确符号路由：entities.name → chunks.symbol_urn → 代码切块 URN。
+
+        只走精确等值（不做 LIKE/模糊），branch 严格隔离。返回 0 个=符号表无此名
+        （调用方回退常规混合检索）；>1 个=跨文件重名/重载（调用方放弃置顶，避免
+        在多个候选间替用户做选择）；恰好 1 个才允许确定性置顶。
+        """
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT c.urn AS urn
+            FROM entities e
+            JOIN chunks c
+              ON c.symbol_urn = e.urn AND c.branch = e.branch
+            WHERE e.kind = 'code_symbol'
+              AND c.kind = 'code_symbol'
+              AND e.name = ? AND e.branch = ?
+            ORDER BY c.urn
+            """,
+            (name, branch),
+        ).fetchall()
+        return [r["urn"] for r in rows]
 
     def get_verification_context(self, urn: str) -> dict[str, Any] | None:
         """live-verify 取索引侧证据（S1.3 FR-QA-002）：chunk URN 或 symbol URN
@@ -716,7 +744,7 @@ class Store:
         self.conn.commit()
         return int(cur.lastrowid or 0)
 
-    # ── 问答运行（schema v5，FR-QA-001～004）──────────────────────────
+    # ── 问答运行（schema v5 起，v6/v7 各增一列，FR-QA-001～004）─────────
     def insert_qa_run(self, *, record: dict[str, Any]) -> int:
         """qa_runs 落一行。record 是图 state 投影出的全原语 dict（见 QaService）；
         run_id UNIQUE，重复写入直接抛 IntegrityError——服务层承诺一次 run 一行，
@@ -726,10 +754,10 @@ class Store:
             """INSERT INTO qa_runs
                (run_id, ts, project, branch, acl_scope, question, intent, status,
                 answer_payload, citations, evidence, verify_results, retrieval_event_id,
-                unknown_reason, degraded, attempts, regens, model_version, prompt_version,
-                params_version, data_version, tokens_in, tokens_out, latency_ms,
-                thread_id, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                unknown_reason, citation_errors, intent_source, degraded, attempts, regens,
+                model_version, prompt_version, params_version, data_version, tokens_in,
+                tokens_out, latency_ms, thread_id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 record["run_id"], record.get("ts", _now_iso()),
                 record.get("project", ""), record.get("branch", "main"),
@@ -741,6 +769,8 @@ class Store:
                 json.dumps(record.get("verify_results") or [], ensure_ascii=False),
                 record.get("retrieval_event_id"),
                 record.get("unknown_reason", ""),
+                json.dumps(record.get("citation_errors") or [], ensure_ascii=False),
+                record.get("intent_source", ""),
                 json.dumps(record.get("degraded") or [], ensure_ascii=False),
                 int(record.get("attempts", 0)), int(record.get("regens", 0)),
                 record.get("model_version", ""), record.get("prompt_version", ""),
@@ -756,7 +786,20 @@ class Store:
     @staticmethod
     def _qa_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
-        for key in ("answer_payload", "citations", "evidence", "verify_results", "degraded"):
+        for key in ("answer_payload", "citations", "evidence", "verify_results",
+                    "degraded", "citation_errors"):
+            d[key] = json.loads(d[key])
+        return d
+
+    def get_retrieval_event(self, event_id: int) -> dict[str, Any] | None:
+        """按主键取检索留痕（trace 时间线反查命中通道用）；不存在返回 None。"""
+        row = self.conn.execute(
+            "SELECT * FROM retrieval_events WHERE id=?", (event_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        for key in ("fts_urns", "vector_urns", "fused_urns", "raw_json"):
             d[key] = json.loads(d[key])
         return d
 

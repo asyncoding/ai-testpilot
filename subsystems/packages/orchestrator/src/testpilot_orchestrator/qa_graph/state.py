@@ -23,6 +23,8 @@ class QaState(TypedDict, total=False):
     # ── intent 节点写入 ──
     intent: str  # QaIntent 的 value
     intent_degraded: bool
+    # v7：regex_bypass（题面精确符号形态，免模型）/ model / fallback
+    intent_source: str
     model_version: str
 
     # ── acl 节点写入 ──

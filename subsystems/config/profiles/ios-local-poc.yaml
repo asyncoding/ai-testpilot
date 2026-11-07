@@ -99,6 +99,8 @@ adapters:
       chat_model: qwen2.5:7b
       embed_model: shaw/dmeta-embedding-zh   # ~200MB；拉取失败退 bge-m3
       timeout: 60
+      # Ollama 默认空闲 5m 卸载模型，冷加载实测 55.3s；常驻窗口拉到 30m
+      keep_alive: 30m
   vectors:
     type: chroma                 # 地址可用 TESTPILOT_CHROMA_URL 覆盖
     settings:

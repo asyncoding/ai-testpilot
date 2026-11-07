@@ -97,19 +97,19 @@ async def test_recorded_incident_question_renders_verbatim_dual_sections():
     history_doc_urns = {h["doc_urn"] for h in answer["history"]}
     assert citation_urns == {CUR_DOC}
     assert history_doc_urns.isdisjoint(citation_urns)
-    # 当前段引用仍走逐字 quote 校验
+    # 当前段引用由 anchor 确定性渲染：文本块命中即回填 anchor 原文本身
     assert answer["citations"][0]["quote"] == CURRENT_QUOTE
 
 
 async def test_graph_hard_stops_when_model_cites_history_document():
-    # 模型越界：草稿直接引用历史文档（文档级 URN，quote 逐字能过引用校验，
+    # 模型越界：草稿直接引用历史文档（文档级 URN，anchor 逐字能过引用校验，
     # 唯一防线是 assemble_incident 的交叉守卫），图必须抛错而不是静默出答案。
     model = FakeModel({
         "qa_intent_cross": structured_envelope({"intent": "incident"}),
         "qa_answer_cross": structured_envelope({
             "summary": "错误地把历史文档当当前规范引用。",
             "sections": [],
-            "citations": [{"urn": HIST_DOC, "quote": HISTORY_TEXT}],
+            "citations": [{"urn": HIST_DOC, "anchor": HISTORY_TEXT}],
         }),
     })
     search = FakeHybridSearch(_chunks())

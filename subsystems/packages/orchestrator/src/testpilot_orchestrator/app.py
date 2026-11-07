@@ -8,6 +8,7 @@ CI/无 node 环境照常启动。
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -25,6 +26,28 @@ logger = logging.getLogger("testpilot.orchestrator.app")
 
 # subsystems/web/out（app.py 位于 subsystems/packages/orchestrator/src/testpilot_orchestrator/）
 _DEFAULT_WEB_DIST = Path(__file__).resolve().parents[4] / "web" / "out"
+
+
+def _schedule_warmup(container: Container) -> None:
+    """后台预热本地模型：冷加载实测 55.3s，首个真实提问不应承担这笔开销。
+
+    只对 Ollama 网关生效（recorded/stub 无加载成本）；后台任务不阻塞启动、
+    失败只记日志不影响服务就绪；keep_alive 让预热加载的模型在窗口内常驻。
+    """
+    model = container.get("model")
+    if model is None or type(model).__name__ != "OllamaModelGateway":
+        return
+
+    async def _warm() -> None:
+        try:
+            await model.chat([{"role": "user", "content": "ping"}])
+            await model.embed(["ping"])
+            logger.info("模型预热完成（chat+embed 已加载，keep_alive=%s）", model.keep_alive)
+        except Exception as exc:  # 预热是优化不是契约：任何失败都不得拖垮启动
+            logger.warning("模型预热失败（不影响服务，首个请求自行加载）：%s", exc)
+
+    # 引用挂 app.state 由调用方持有，避免任务被 GC；进程退出时随事件循环取消
+    container.warmup_task = asyncio.create_task(_warm())
 
 
 def create_app(
@@ -56,11 +79,16 @@ def create_app(
         app.state.container = active_container
         # sqlite saver 依赖 running loop，只能在 lifespan 内异步启动
         app.state.qa = await build_qa_service(active_container)
+        # 后台预热本地模型（不阻塞就绪，失败只记日志）；任务引用由 container 持有
+        _schedule_warmup(active_container)
         try:
             yield
         finally:
             # 先收口图的 checkpoint 连接，再关账本库，顺序不可反
             await app.state.qa.aclose()
+            warmup = getattr(active_container, "warmup_task", None)
+            if warmup is not None and not warmup.done():
+                warmup.cancel()
             store = active_container.get("store")
             if store is not None:
                 store.close()

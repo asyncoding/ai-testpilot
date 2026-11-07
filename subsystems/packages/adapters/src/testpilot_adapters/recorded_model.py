@@ -40,15 +40,23 @@ class RecordedModelGateway:
         if key not in self._responses:
             raise AdapterUnavailableError(f"录制响应缺少 key: {key}")
         resp = self._responses[key]
+        data = resp.get("structured")
+        # 与 Ollama 网关同一业务级形状口径：required_nonempty 字段缺失/为空按降级处理
+        required_nonempty = tuple(options.get("required_nonempty", ()) or ())
+        empty_shape = isinstance(data, dict) and any(
+            not isinstance(data.get(k), (list, str)) or len(data.get(k)) == 0
+            for k in required_nonempty
+        )
+        degraded = bool(resp.get("degraded", False)) or empty_shape
         return {
-            "data": resp.get("structured"),
+            "data": None if empty_shape else data,
             "text": resp.get("text", ""),
             "model": self.model_version,
             "tokens_in": resp.get("tokens_in", 0),
             "tokens_out": resp.get("tokens_out", 0),
             "latency_ms": 0,
             "attempts": 1,
-            "degraded": resp.get("degraded", False),
+            "degraded": degraded,
         }
 
     async def embed(self, texts: list[str]) -> list[list[float]]:

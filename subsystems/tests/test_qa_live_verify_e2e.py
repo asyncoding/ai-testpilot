@@ -99,9 +99,10 @@ async def test_stale_index_question_refreshes_head_and_answers_verified_at(world
                 "recursion_limit": recursion_limit()},
     )
 
-    # 1) 图结论：answered，意图来自录制模型而非兜底
+    # 1) 图结论：answered；C.keep() 是精确符号形态，P4 起意图免模型（regex_bypass）
     assert out["status"] == QaStatus.ANSWERED.value
     assert out["intent"] == "code" and out["intent_degraded"] is False
+    assert out["intent_source"] == "regex_bypass"
 
     # 2) live-verify 留痕：恰好 1 行（只有 1 个 code_symbol 证据块），裁决 body_changed
     after = _event_count(world)
@@ -150,6 +151,7 @@ async def test_fresh_index_same_question_answers_consistent(world):
     )
 
     assert out["status"] == QaStatus.ANSWERED.value
+    assert out["intent_source"] == "regex_bypass"  # 同题面同走免模型路径
     # 无 body_changed 时 route_after_verify 直连 generation、head_refresh 节点不执行，
     # 该字段按 total=False 契约保持缺失（assembly 侧也以 .get(...) or [] 读法容忍）
     assert (out.get("head_refreshed_urns") or []) == []

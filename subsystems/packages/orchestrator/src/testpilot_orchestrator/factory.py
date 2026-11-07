@@ -11,6 +11,7 @@ model+vectors，否则 build_container 直接 ValueError（防止静默退化为
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,6 +35,8 @@ class Container:
     base_dir: Path
     data_dir: Path
     adapters: dict[str, object] = field(default_factory=dict)
+    # app lifespan 安排的模型预热后台任务（仅 ollama profile 非 None），关停时取消
+    warmup_task: asyncio.Task | None = None
 
     def get(self, name: str):  # noqa: ANN202
         return self.adapters.get(name)
@@ -154,6 +157,7 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             timeout=float(ms.get("timeout", 60.0)),
             max_retries=int(ms.get("max_retries", 2)),
             backoff_seconds=float(ms.get("backoff_seconds", 0.5)),
+            keep_alive=str(ms.get("keep_alive", "30m")),
             tracer=tracer,
         )
         container.adapters["model"] = model_gw

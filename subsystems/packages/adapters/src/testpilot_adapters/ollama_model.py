@@ -39,6 +39,7 @@ class OllamaModelGateway:
         max_retries: int = 2,
         backoff_seconds: float = 0.5,
         structured_max_attempts: int = 2,
+        keep_alive: str = "30m",
         transport: httpx.AsyncBaseTransport | None = None,
         tracer: Any | None = None,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
@@ -50,6 +51,9 @@ class OllamaModelGateway:
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
         self.structured_max_attempts = structured_max_attempts
+        # Ollama 默认 5 分钟空闲卸载模型，冷加载实测 55.3s；显式常驻把卸载推迟到 30m。
+        # None=不带该字段，回退 Ollama 服务端默认（OLLAMA_KEEP_ALIVE）。
+        self.keep_alive = keep_alive
         self._transport = transport
         self._tracer = tracer
         self._sleeper = sleeper or asyncio.sleep
@@ -70,6 +74,11 @@ class OllamaModelGateway:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    def _with_keep_alive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
+        return payload
 
     async def _post_json(
         self, path: str, payload: dict[str, Any], *, span_name: str
@@ -129,7 +138,9 @@ class OllamaModelGateway:
             return []
         data = await self._post_json(
             "/api/embed",
-            {"model": self.embed_model, "input": texts},
+            self._with_keep_alive(
+                {"model": self.embed_model, "input": texts}
+            ),
             span_name="model.embed",
         )
         vectors = data.get("embeddings")
@@ -143,11 +154,11 @@ class OllamaModelGateway:
     async def chat(
         self, messages: list[dict[str, str]], **options: Any
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
+        payload: dict[str, Any] = self._with_keep_alive({
             "model": str(options.pop("model", self.chat_model)),
             "messages": messages,
             "stream": False,
-        }
+        })
         extra = {k: v for k, v in options.items() if k in {"temperature", "top_p", "seed"}}
         if extra:
             payload["options"] = extra
@@ -181,13 +192,16 @@ class OllamaModelGateway:
         t0 = time.monotonic()
         tokens_in = tokens_out = 0
         model = ""
+        # 业务级非空字段（如 AnswerDraft 的 citations）：在重试循环内判定，
+        # 零引用草稿当场重发而不是放行到图的 citation_check 才失败
+        required_nonempty = tuple(options.pop("required_nonempty", ()) or ())
         for attempts in range(1, self.structured_max_attempts + 1):
-            payload: dict[str, Any] = {
+            payload: dict[str, Any] = self._with_keep_alive({
                 "model": str(options.pop("model", self.chat_model)),
                 "messages": attempts_messages,
                 "stream": False,
                 "format": schema,
-            }
+            })
             data = await self._post_json(
                 "/api/chat", payload, span_name="model.structured"
             )
@@ -199,7 +213,11 @@ class OllamaModelGateway:
                 parsed = json.loads(last_text)
             except json.JSONDecodeError:
                 parsed = None
-            if parsed is not None and _matches_schema_shape(parsed, schema):
+            if (
+                parsed is not None
+                and _matches_schema_shape(parsed, schema)
+                and _has_required_nonempty(parsed, required_nonempty)
+            ):
                 return {
                     "data": parsed,
                     "text": last_text,
@@ -210,15 +228,19 @@ class OllamaModelGateway:
                     "attempts": attempts,
                     "degraded": False,
                 }
+            if parsed is not None and not _has_required_nonempty(parsed, required_nonempty):
+                hint = (
+                    f"上一次输出缺少非空字段：{list(required_nonempty)}。"
+                    "请补齐这些字段后只输出一个 JSON 对象，不要解释。"
+                )
+            else:
+                hint = (
+                    "上一次输出不是符合所给 JSON Schema 的合法 JSON。"
+                    "请只输出一个 JSON 对象，不要包含 markdown 代码块或任何解释文字。"
+                )
             attempts_messages = attempts_messages + [
                 {"role": "assistant", "content": last_text},
-                {
-                    "role": "user",
-                    "content": (
-                        "上一次输出不是符合所给 JSON Schema 的合法 JSON。"
-                        "请只输出一个 JSON 对象，不要包含 markdown 代码块或任何解释文字。"
-                    ),
-                },
+                {"role": "user", "content": hint},
             ]
         return {
             "data": None,
@@ -241,4 +263,22 @@ def _matches_schema_shape(parsed: Any, schema: dict[str, Any]) -> bool:
         return all(k in parsed for k in schema.get("required", []))
     if expected_type == "array":
         return isinstance(parsed, list)
+    return True
+
+
+def _has_required_nonempty(parsed: Any, required_nonempty: tuple[str, ...]) -> bool:
+    """业务级最小形状：指定字段必须存在且为非空 list/str。
+
+    `_matches_schema_shape` 只认 required 键存在，挡不住 `{"summary": "..."}` 这类
+    零引用草稿（AnswerDraft 仅 summary 必填）——它会白跑一次完整图迭代才被
+    citation_check 拦下。此处放在适配器重试循环内，失败当场重发，不浪费整轮生成。
+    """
+    if not required_nonempty:
+        return True
+    if not isinstance(parsed, dict):
+        return False
+    for key in required_nonempty:
+        value = parsed.get(key)
+        if not isinstance(value, (list, str)) or len(value) == 0:
+            return False
     return True
