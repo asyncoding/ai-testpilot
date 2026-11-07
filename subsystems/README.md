@@ -40,10 +40,11 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（328 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（377 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
-# S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）；
-# 3 个 Chroma 真容器集成例在容器未起时自动 skip）
+# S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
+# P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
+# 意图免模型旁路）；3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
 # 核心层防腐门禁（core 禁止 import fastapi/sqlite/yaml/各兄弟包等）
@@ -373,6 +374,76 @@ fragment）；不引 openapi 生成与 UI 框架，类型手写镜像后端契�
 均不入库。已知缺口：仅对话页一页（其余四个控制台页在 S2–S5）、无 SSE（ask 同步）、
 无 HTTP 认证/多用户（POC 单用户，acl_scope 走请求体）。
 
+## 引用失败 / 低分观感 / 慢响应专项治理（P1–P4，2026-11-07）
+
+起因是一次真实留痕（run `3e64fb59`）：精确符号提问
+`AlertListViewModel.snoozeRingingMission(minutes:)` 回「未知 / citation_failed_exhausted」，
+96.5s、20879 tokens_in；同时界面上精确命中块的 score 只有 0.012。排查先纠正一个误读：
+**0.012 是 RRF 秩信号（量纲 0–0.033），不是相关性质量分**。三组隔离实验定根因：
+① 长 prompt（10.3k token / 8 块证据）下 7B 模型抄写退化 3/3 复现，短 prompt 逐字复制
+4/4 合格——是长上下文退化，不是 JSON 传输问题；② 精确符号查询走了向量语义抽奖，目标块
+只排到第 5；③ Ollama 冷加载 55.3s（服务端 `--keep 4` 分钟即卸载）。修复按四阶段落地，
+每阶段独立可回滚，每项都做过临时回退看红的红→绿自证。
+
+- **P1 可观测与便宜项（schema v5→v6）**：`qa_runs` 增 `citation_errors` 列（ALTER 迁移，
+  老行吃 DEFAULT '[]'），失败真因（`no_citations` / `urn_not_in_evidence` /
+  `anchor_not_found` 等）贯通节点→账本→API→UI，AnswerCard 按错误类型说话，不再笼统
+  甩「白名单」；trace 证据表删裸 RRF 分列，改展示 rank + 命中通道（fts/vector），原始分
+  只留调试视图；Ollama `keep_alive=30m` + lifespan 后台预热（chat+embed，失败只 warning
+  不阻断启动）；structured 输出增加 `citations` 非空浅校验，零引用草稿在适配器重试循环内
+  当场重发，不白跑整轮图迭代。
+- **P2 锚点引用 + 服务端渲染（PROMPT_VERSION → qa-prompt-2）**：模型只产
+  `{urn, anchor}`——一个证据中逐字出现的短锚点，不抄长 quote、不数行号；core 新增
+  hostless 纯函数 `render_citation_quote`：code_symbol 块锚点准入后渲染整个符号块
+  （切块边界即引用边界），text 块取锚点源文切片，**锚点未命中 fail-closed 返 None
+  （anchor_not_found），禁止模糊凑句**。`validate_citations` 的逐字口径不放宽，校验对象
+  换成服务端渲染结果，退化为不变量断言 + 防接线 bug 的第二道防线。图级回归用例精确复刻
+  3e64fb59 形态（URN 合法但 anchor 被改写 → 重生成耗尽 → 三处账本同构留痕）。
+- **P3 符号路由（零重摄入、零新依赖）**：core 新增 hostless 纯函数
+  `parse_symbol_reference`，解析 `Type.member(label:)` 与紧凑 selector `_:label:` 形态，
+  标签归一化复用 chunker 同一套 Swift 口径（不造第二个正则）；store 经
+  `entities JOIN chunks ON symbol_urn` 精确反查（库内 526 个符号 100% 已挂 symbol_urn）。
+  code 意图且**唯一**命中时该 chunk 确定性置顶（trace 标 `symbol_pinned=true`），其余候选
+  仍走 RRF 补位；重名 / 查无 / 非 code 意图 → 原 hybrid 路径**零行为变化**；裸 FTS 形态
+  不支持此路由，落 `symbol_pin_unsupported` 降级标记。精确符号查询不再经过向量语义抽奖，
+  0.012 观感问题同步消失。
+- **P4 延迟治理（schema v6→v7，PROMPT_VERSION → qa-prompt-3）**：
+  - **提示词瘦身只作用于符号置顶路径**：置顶块给全文，其余 code_symbol 块只给入库时归一的
+    签名、其他块只给首行（200 字符上限并显式声明截断）；URN 白名单仍含全部证据，anchor
+    渲染与引用校验始终读 state 里的全文证据，链路不变。`pinned_urn=None`（没有精确路由
+    背书）时消息与 qa-prompt-2 **字节级一致**，由 hostless 快照测试锁死——避免在目标块
+    本来排第 5 的非符号查询上把正确证据饿死。
+  - **意图免模型与检索共用同一高精度解析器**：题面命中符号形态直接判 code，省一次 LLM
+    调用，账本落 `intent_source='regex_bypass'`；正常模型分类记 `model`，异常关键词兜底
+    记 `fallback`（与 degraded 标记同时出现）。`qa_runs` 经 schema v7 增 `intent_source`
+    列（ALTER 迁移，v7 之前的历史行是空串，前端显示「—（v7 之前的历史 run）」不造数），
+    trace/API/UI 全链路可见，可直接 SQL 切片对比两类 run。中文概念/howto 题有对照实测，
+    仍走模型分类，旁路没有过宽。
+
+实测验收用**真库的 hermetic 字节副本**（526 符号，副本上自动迁移 v5→v7）+ 共享只读
+Chroma + 真 ollama，不碰在 8765 端口运行的旧进程、不写真库：
+
+- 原问题暖身后连跑 3 次 **3/3 answered**：`symbol_pinned` 稳定 true、目标 chunk 稳定
+  rank 1、`citation_errors=[]`、版本态 consistent、prompt=qa-prompt-3、来源 regex_bypass；
+  暖身中位数延迟 6.7s（另一轮 10.9s），对照历史 run 96.5s 失败 / 31.4s 勉强成功。
+- **反事实对照**（运行时 monkeypatch 关闭投影、生产代码零改动）：同题回全文形态 →
+  20879 tokens_in、60.8s、citation_failed_exhausted——与历史失败的 20878 token 同量级，
+  复现了原始长上下文失败条件；瘦身路径 3854 tokens_in、16.0s answered，输入 token 降约
+  82%。token 数全部取自真 ollama 留痕，不是估算。
+- 红→绿三组回退：旁路关闭 5 红、投影强制全文 6 红、v7 迁移条目摘除 2 红，恢复后全绿；
+  全量 377 passed、import-lint OK、`web` 静态构建（含 tsc）通过。
+- **静态前端与后端的版本错配防护**：`web/out` 是独立重建的静态包，可能比在跑的 uvicorn
+  新——旧后端 trace 响应没有 `citation_errors`/`intent_source`/`symbol_*` 字段、证据项没有
+  `channels`/`rank`，裸 `.length` 会把 trace 抽屉打白（实测用旧进程真实载荷复现逐字同款
+  `TypeError`）。这些字段在前端类型上标可选，渲染侧一律 `?? []` / 序号回退；但根治仍需
+  重启后端进程让新代码生效（重启即对真库自动做 v5→v7 加列迁移，列都是追加式的，建议先备份）。
+
+明确不做（避免单样本过拟合，留 S1.6 的 20–30 题 golden set 标定）：RRF k 与 top-k 调参、
+quality 分公式与物化分重算、全库重嵌入、tree-sitter（entities 已 100% 覆盖）、LCS 模糊
+自救、把引用搬出 JSON 的传输重构（隔离实验已证伪其前提）。SSE 流式只改体感，未授权不做。
+另如实记账：模型路径上的高难中文事故题仍可能 citation 失败——fail-closed 拦截伪造引用是
+正确行为，属 S1.6 golden set 待标定项，不是本批回归（符号旁路路径近 5 run 同类失败已清零）。
+
 ## 一键验收（8 个自动门禁）
 
 ```bash
@@ -380,7 +451,7 @@ cd subsystems
 bash scripts/verify_s0.sh    # 8 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、328 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、377 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）。
