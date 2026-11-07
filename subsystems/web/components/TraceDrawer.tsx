@@ -19,6 +19,9 @@ export default function TraceDrawer({
 }) {
   const [trace, setTrace] = useState<TraceData | null>(null);
   const [error, setError] = useState("");
+  // 静态前端可能比后端新（版本错配）：v6 前的老 trace 没有 citation_errors，
+  // 直接 .length 会抛 undefined.length 把整个抽屉打白，缺失按空数组渲染
+  const citationErrors = trace?.citation_errors ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -64,12 +67,12 @@ export default function TraceDrawer({
                 {trace.unknown_reason && (
                   <tr><th>未知原因</th><td>{trace.unknown_reason}</td></tr>
                 )}
-                {trace.citation_errors.length > 0 && (
+                {citationErrors.length > 0 && (
                   <tr>
                     <th>引用校验错误</th>
                     <td>
                       <ul className="citation-errors">
-                        {trace.citation_errors.map((raw, i) => (
+                        {citationErrors.map((raw, i) => (
                           <li key={`${raw}-${i}`}>
                             <span className="tag">{citationErrorPrefix(raw)}</span>{" "}
                             {citationErrorLabel(raw)}
@@ -134,20 +137,24 @@ export default function TraceDrawer({
                 <tr><th>URN</th><th>kind</th><th>排名</th><th>命中通道</th><th>权威</th></tr>
               </thead>
               <tbody>
-                {trace.evidence.map((e) => (
+                {trace.evidence.map((e, idx) => {
+                  // 老后端证据项只有 score：rank 回退展示序号、channels 缺失显「—」
+                  const channels = e.channels ?? [];
+                  return (
                   <tr key={e.urn}>
                     <td className="hash-line">{e.urn}</td>
                     <td>{e.kind}</td>
                     <td>
-                      #{e.rank}
+                      #{e.rank ?? idx + 1}
                       {trace.symbol_pinned && e.urn === trace.symbol_pin_urn && (
                         <> <span className="tag">置顶</span></>
                       )}
                     </td>
-                    <td>{e.channels.length ? e.channels.join("+") : "—"}</td>
+                    <td>{channels.length ? channels.join("+") : "—"}</td>
                     <td>{e.authority_level || "—"}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
 

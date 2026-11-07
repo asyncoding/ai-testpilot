@@ -19,6 +19,8 @@ const REASON_LABEL: Record<string, string> = {
 
 export default function AnswerCard({ response }: { response: AskResponse }) {
   const unknown = response.status !== "answered";
+  // 静态前端可能比后端新（老进程不发 v6 字段），缺失按「无错误」渲染而非崩溃
+  const citationErrors = response.citation_errors ?? [];
   return (
     <div className={`panel ${unknown ? "answer-unknown" : "answer-answered"}`}>
       <div className="status-line">
@@ -45,9 +47,9 @@ export default function AnswerCard({ response }: { response: AskResponse }) {
       )}
 
       {/* 引用校验的具体错误按前缀映射成人话；整串保留（含 URN），排查时不用回库 */}
-      {unknown && response.citation_errors.length > 0 && (
+      {unknown && citationErrors.length > 0 && (
         <ul className="citation-errors">
-          {response.citation_errors.map((raw, i) => (
+          {citationErrors.map((raw, i) => (
             <li key={`${raw}-${i}`}>
               <span className="tag">{citationErrorPrefix(raw)}</span>{" "}
               {citationErrorLabel(raw)}
