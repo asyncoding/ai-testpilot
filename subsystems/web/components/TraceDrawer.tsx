@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { fetchTrace } from "@/lib/api";
 import type { TraceData } from "@/lib/types";
+import { citationErrorLabel, citationErrorPrefix } from "@/lib/citationErrors";
+import { intentSourceLabel } from "@/lib/intentSource";
 
 // FR-EV-004 AC1：UI → trace 反查一次问答的完整本地链路。
 // Langfuse 深链仅在 tracer=langfuse 时存在；noop 如实提示，不造链接。
@@ -45,9 +47,38 @@ export default function TraceDrawer({
               <tbody>
                 <tr><th>run_id</th><td>{trace.run_id}</td></tr>
                 <tr><th>问题</th><td>{trace.question}</td></tr>
-                <tr><th>状态 / 意图</th><td>{trace.status} / {trace.intent || "—"}</td></tr>
+                <tr>
+                  <th>状态 / 意图</th>
+                  <td>
+                    {trace.status} / {trace.intent || "—"}
+                    {trace.intent_source && (
+                      <>
+                        {" "}
+                        <span className="tag" title={intentSourceLabel(trace.intent_source)}>
+                          {trace.intent_source}
+                        </span>
+                      </>
+                    )}
+                  </td>
+                </tr>
                 {trace.unknown_reason && (
                   <tr><th>未知原因</th><td>{trace.unknown_reason}</td></tr>
+                )}
+                {trace.citation_errors.length > 0 && (
+                  <tr>
+                    <th>引用校验错误</th>
+                    <td>
+                      <ul className="citation-errors">
+                        {trace.citation_errors.map((raw, i) => (
+                          <li key={`${raw}-${i}`}>
+                            <span className="tag">{citationErrorPrefix(raw)}</span>{" "}
+                            {citationErrorLabel(raw)}
+                            <span className="hash-line citation-error-raw">{raw}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                  </tr>
                 )}
                 <tr><th>尝试 / 重生成</th><td>{trace.attempts} / {trace.regens}</td></tr>
                 <tr><th>token</th><td>in={trace.tokens.in}，out={trace.tokens.out}</td></tr>
@@ -62,6 +93,16 @@ export default function TraceDrawer({
                     )}
                   </td>
                 </tr>
+                {trace.symbol_pinned && (
+                  <tr>
+                    <th>符号置顶</th>
+                    <td>
+                      <span className="tag">symbol_pinned</span>{" "}
+                      精确符号 <code>{trace.symbol_pin_name}</code> 经 entities 表唯一命中，
+                      确定性置顶（不参与向量语义抽奖）
+                    </td>
+                  </tr>
+                )}
                 <tr>
                   <th>版本四元组</th>
                   <td>
@@ -88,14 +129,22 @@ export default function TraceDrawer({
             <h4>证据（{trace.evidence.length}）</h4>
             <table className="kv-table">
               <thead>
-                <tr><th>URN</th><th>kind</th><th>score</th><th>权威</th></tr>
+                {/* RRF 分值是 0–0.033 的排名刻度，精确符号也只有 0.012，
+                    展示它只会误导"精确匹配分很低"；排名+命中通道才解释排序 */}
+                <tr><th>URN</th><th>kind</th><th>排名</th><th>命中通道</th><th>权威</th></tr>
               </thead>
               <tbody>
                 {trace.evidence.map((e) => (
                   <tr key={e.urn}>
                     <td className="hash-line">{e.urn}</td>
                     <td>{e.kind}</td>
-                    <td>{e.score.toFixed(3)}</td>
+                    <td>
+                      #{e.rank}
+                      {trace.symbol_pinned && e.urn === trace.symbol_pin_urn && (
+                        <> <span className="tag">置顶</span></>
+                      )}
+                    </td>
+                    <td>{e.channels.length ? e.channels.join("+") : "—"}</td>
                     <td>{e.authority_level || "—"}</td>
                   </tr>
                 ))}

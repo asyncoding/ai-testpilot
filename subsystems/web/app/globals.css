@@ -160,6 +160,18 @@ button.primary:disabled {
   font-size: 12px;
   margin-right: 6px;
 }
+/* citation_check 具体错误列表（AnswerCard + TraceDrawer 共用） */
+.citation-errors {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.citation-errors li {
+  margin: 4px 0;
+}
+.citation-error-raw {
+  display: block;
+  margin-top: 2px;
+}
 
 /* markdown 渲染 */
 .markdown h3,

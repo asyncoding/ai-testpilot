@@ -40,6 +40,11 @@ export interface AskResponse {
   status: QaStatus;
   answer: AssembledAnswer | null;
   unknown_reason: string;
+  // 最后一次 citation_check 的具体错误（"前缀: 详情"整串，前缀见 CITATION_ERROR_LABELS）；
+  // 空数组=校验通过或未进生成节点。v6 schema 起持久化，老 run 反序列化回退为空数组。
+  citation_errors: string[];
+  // v7：regex_bypass（符号形态免模型）/ model / fallback；老 run 为空串
+  intent_source: string;
   degraded: string[];
   intent: string | null;
   model_version: string;
@@ -93,6 +98,9 @@ export interface TraceEvidence {
   urn: string;
   doc_urn: string;
   kind: string;
+  // 融合后排名（1-based）与命中通道（fts/vector，可双路）；比 RRF 小分值更能解释排序
+  rank: number;
+  channels: string[];
   score: number;
   authority_level: string;
 }
@@ -101,14 +109,21 @@ export interface TraceData {
   run_id: string;
   question: string;
   intent: string;
+  // v7 意图来源：regex_bypass / model / fallback；v7 之前的老 run 为空串
+  intent_source: string;
   status: QaStatus;
   unknown_reason: string;
+  citation_errors: string[];
   attempts: number;
   regens: number;
   tokens: { in: number; out: number };
   latency_ms: number;
   degraded: string[];
   retrieval_event_id: number | null;
+  // P3 精确符号路由：entities 唯一精确命中时确定性置顶（false=走常规 RRF 融合）
+  symbol_pinned: boolean;
+  symbol_pin_urn: string;
+  symbol_pin_name: string;
   evidence: TraceEvidence[];
   verify_results: unknown[];
   citations: { urn: string; version_state: VersionState; version_ref: string }[];
