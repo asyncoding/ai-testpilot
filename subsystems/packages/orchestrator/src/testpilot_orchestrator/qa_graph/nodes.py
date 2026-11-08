@@ -222,7 +222,8 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
                 "project": state.get("project", ""),
                 "branch": state.get("branch", "main"),
                 "acl_scope": state.get("acl_scope", "default"),
-                "limit": 8,
+                # S1.6 标定接缝：默认 8 与原硬编码一致，改值经 profile qa 段注入并 bump 版本
+                "limit": deps.params.retrieval_limit,
             }
             flags = list(state.get("degraded_flags") or [])
             # 能力探测：HybridSearchAdapter.search 有 kinds 形参，FtsSearchAdapter 没有

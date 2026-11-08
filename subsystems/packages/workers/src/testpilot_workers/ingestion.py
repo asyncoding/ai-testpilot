@@ -90,13 +90,40 @@ def _event(event_type: str, urn: str, project: str, mtime, extra: dict) -> Event
     )
 
 
+def _chunk_swift_source(
+    text: str, swift_chunker, store, doc_urn: str, run_id: str
+) -> tuple[list[RawChunk], str]:
+    """Swift 切块入口（E6）：注入 tree-sitter 切块器时单文件解析失败回退词法器。
+
+    docs/08 FR-ING-002 选型注记明确：tree-sitter 不显著胜出则词法器留作离线/解析
+    失败降级路径，单文件回退并进 dead_letters。swift_chunker=None（默认 profile）
+    走 core 零依赖词法器，行为与 S1.1 完全一致。
+    """
+    if swift_chunker is None:
+        return chunk_swift(text), SWIFT_CHUNKER_VERSION
+    try:
+        raws = swift_chunker.chunk(text)
+    except Exception as exc:  # noqa: BLE001 - 单文件回退是显式设计，不炸整批
+        error = f"{type(exc).__name__}: {str(exc)[:300]}"
+        store.add_dead_letter(
+            "ingestion-tree-sitter-fallback",
+            {"doc_urn": doc_urn, "run_id": run_id,
+             "fallback_chunker": SWIFT_CHUNKER_VERSION},
+            error,
+        )
+        return chunk_swift(text), SWIFT_CHUNKER_VERSION
+    return raws, swift_chunker.version
+
+
 def _build_chunks(
-    doc, raws: list[RawChunk], valid_from: str | None
+    doc, raws: list[RawChunk], valid_from: str | None,
+    swift_chunker_version: str = SWIFT_CHUNKER_VERSION,
 ) -> tuple[list[KnowledgeChunk], dict[str, str]]:
     """RawChunk → KnowledgeChunk + 符号名→symbol URN 映射。
 
     valid_from 写本轮 HEAD sha（证据被索引时的版本下界，FR-QA-002 live-verify 读它）；
     调用方只对 created/updated 文档调本函数，unchanged 文档根本不进这里（不刷版本位）。
+    swift_chunker_version 透传实际切块口径（E6 tree-sitter 可选切块器有独立版本位）。
     """
     _, _, external_id, _ = parse_urn(doc.urn)
     chunks: list[KnowledgeChunk] = []
@@ -141,7 +168,7 @@ def _build_chunks(
                 # 切块口径版本位：live-verify 跨版本比 hash 前先比对，
                 # 缺/漂移 → body_changed=None（绝不把口径差异误报成代码变更）
                 "chunker_version": (
-                    SWIFT_CHUNKER_VERSION if raw.kind == "code_symbol"
+                    swift_chunker_version if raw.kind == "code_symbol"
                     else MARKDOWN_CHUNKER_VERSION
                 ),
             },
@@ -188,6 +215,8 @@ def _build_entities_relations(
 async def run_ingestion(container, *, trigger: str = "manual", full: bool = False) -> IngestionReport:
     """跑一轮入库。full=True 时忽略 hash 对账，全部重切重登记（仍幂等）。"""
     docs_adapter = container.get("docs")
+    # E6：默认 profile 无此组件 → None → 词法器；profile 选 tree-sitter 时 factory 装配
+    swift_chunker = container.get("swift_chunker")
     store = container.get("store")
     tracer = container.get("tracer")
     project = container.config.project.name
@@ -272,9 +301,13 @@ async def run_ingestion(container, *, trigger: str = "manual", full: bool = Fals
                     with tracer.span("ingest.doc", run_id=run_id,
                                      metadata={"urn": doc.urn, "kind": detail["kind"]}):
                         text = docs_adapter.read_content(doc.urn)
-                        raws = (chunk_swift(text) if detail["kind"] == "swift"
-                                else chunk_markdown(text))
-                        chunks, symbol_urns = _build_chunks(doc, raws, report.head_commit)
+                        if detail["kind"] == "swift":
+                            raws, swift_version = _chunk_swift_source(
+                                text, swift_chunker, store, doc.urn, run_id)
+                        else:
+                            raws, swift_version = chunk_markdown(text), SWIFT_CHUNKER_VERSION
+                        chunks, symbol_urns = _build_chunks(
+                            doc, raws, report.head_commit, swift_version)
                         entities, relations = _build_entities_relations(doc, raws, symbol_urns)
                         if vectors is not None:
                             # replace 会清掉旧切块；先存旧 URN，嵌入成功后删向量孤儿

@@ -20,6 +20,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 
+from testpilot_core.answering import AssemblyGuardError
 from testpilot_core.config_schema import Limits
 from testpilot_core.enums import QaStatus
 
@@ -107,6 +108,8 @@ async def run_qa_graph(compiled, state: dict, *, limit: int) -> dict:
     QaService 不直接 import langgraph（框架隔离纪律：业务代码只有本文件 import）。
     GraphRecursionError 不抛穿——归一为 status=error 的最小 state，由服务层照常
     落 qa_runs（可观测、可对账），请求侧拿到的仍是结构化 AskResponse 而非 500。
+    AssemblyGuardError 同语义收口：图内部仍硬停（S1.4 图级测试钉死），但服务边界
+    不允许裸 ValueError 变成 500——污染答案绝不装配，异常归一为结构化 error。
     """
     cfg = {
         "configurable": {"thread_id": state["run_id"]},
@@ -120,4 +123,11 @@ async def run_qa_graph(compiled, state: dict, *, limit: int) -> dict:
             "status": QaStatus.ERROR.value,
             "unknown_reason": "recursion_limit_exceeded",
             "degraded_flags": [f"recursion_limit_exceeded:{limit}"],
+        }
+    except AssemblyGuardError as exc:
+        return {
+            "run_id": state["run_id"],
+            "status": QaStatus.ERROR.value,
+            "unknown_reason": "assembly_guard_overlap",
+            "degraded_flags": [f"assembly_guard_overlap:{exc}"],
         }

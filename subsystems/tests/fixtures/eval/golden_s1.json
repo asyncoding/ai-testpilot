@@ -1,0 +1,473 @@
+{
+  "set_id": "golden-s1-v1",
+  "schema_version": 1,
+  "comment": "S1.6 冻结 golden set（FR-EV-001）：30 题，仅覆盖 S1 问答场景（qa/negative）；test_design/attribution 题型属 S2/S3。配比：代码机制 12（符号形态 8 + 自然语言 4）、事实/概念/howto 8、L2 历史 3、版本错配陷阱 1、负例 6（20%，≥15% 红线）。required_evidence 是 URN 子串（与 recall_probe 的 expect 同口径），全部经真库取证；改题走 git 评审（FR-EV-001 AC2）。holdout 题引用的文档未入库（泄漏检查见 test_eval_golden_set）。勘误 2026-11-08：12 处文档证据原带 document: 前缀，与实际 chunk URN（urn:...:chunk:app-calendar-alarm/...）永不子串命中，造成 4 个假红 recall_miss（G13/G14/G17/G19）；统一去掉前缀改为裸路径，判定口径与裸路径标注（代码文件）一致。",
+  "corpus": {
+    "project": "AlarmKitSpike",
+    "branch": "alarmkit-spike",
+    "chunks": 1421,
+    "code_symbols": 526,
+    "doc_urns_ingested": 34
+  },
+  "cases": [
+    {
+      "case_id": "G01",
+      "kind": "qa",
+      "question": "AlertListViewModel.snoozeRingingMission(minutes:) 方法的实现逻辑是什么？",
+      "holdout": false,
+      "required_evidence": ["Sources/App.swift#AlertListViewModel.snoozeRingingMission(minutes:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G02",
+      "kind": "qa",
+      "question": "AlarmAlertRouter.notice(_:) 的实现逻辑是什么？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/AlarmAlertRouter.swift#AlarmAlertRouter.notice(_:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G03",
+      "kind": "qa",
+      "question": "AlarmAlertRouter.systemAlarmEnded(alarmID:) 做了什么处理？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/AlarmAlertRouter.swift#AlarmAlertRouter.systemAlarmEnded(alarmID:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G04",
+      "kind": "qa",
+      "question": "AlarmIdentity.soundName(for:) 怎么决定提示音名称？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/AlarmIdentity.swift#AlarmIdentity.soundName(for:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G05",
+      "kind": "qa",
+      "question": "AlarmDismissal.alertingOurs() 的判断逻辑是什么？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/AlarmAlertRouter.swift#AlarmDismissal.alertingOurs()"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G06",
+      "kind": "qa",
+      "question": "LunarDateEngine.hasLeapMonth(_:inLunarYear:) 怎么判断闰月？",
+      "holdout": false,
+      "required_evidence": ["Sources/Lunar/LunarDateEngine.swift#LunarDateEngine.hasLeapMonth(_:inLunarYear:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G07",
+      "kind": "qa",
+      "question": "LunarDateEngine.nextOccurrence(of:after:) 如何计算下一次发生时间？",
+      "holdout": false,
+      "required_evidence": ["Sources/Lunar/LunarDateEngine.swift#LunarDateEngine.nextOccurrence(of:after:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G08",
+      "kind": "qa",
+      "question": "BackgroundAlarmTakeover.enter(alarmID:source:) 的接管流程是什么？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/BackgroundAlarmTakeover.swift#BackgroundAlarmTakeover.enter(alarmID:source:)"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G09",
+      "kind": "qa",
+      "question": "App 在后台时闹钟响铃是怎么被接管的？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/BackgroundAlarmTakeover.swift"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G10",
+      "kind": "qa",
+      "question": "农历引擎是怎么判断某一年有没有闰月的？",
+      "holdout": false,
+      "required_evidence": ["Sources/Lunar/LunarDateEngine.swift"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G11",
+      "kind": "qa",
+      "question": "闹钟的提示音名称是根据什么决定的？",
+      "holdout": false,
+      "required_evidence": ["Sources/Services/AlarmIdentity.swift"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G12",
+      "kind": "qa",
+      "question": "联系人生日选择器怎么找到当前顶层控制器来弹窗？",
+      "holdout": false,
+      "required_evidence": ["Sources/Contacts/ContactBirthdayPicker.swift"],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G13",
+      "kind": "qa",
+      "question": "entitlement-spike 验证了哪些权益机制相关的结论？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/Resources/entitlement-spike.md"],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G14",
+      "kind": "qa",
+      "question": "V1 需求文档里强提醒闹钟的核心目标是什么？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/V1需求文档-强提醒闹钟.md"],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G15",
+      "kind": "qa",
+      "question": "App 关键漏斗分析计划里定义了哪些分析事件？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/App_Key_Funnel_Analytics_Plan.md"],
+      "ground_truth": {
+        "expected_intent": "howto",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G16",
+      "kind": "qa",
+      "question": "LiveActivity 在本项目里是怎么用来展示闹钟状态的？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/LiveActivity学习.md"],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G17",
+      "kind": "qa",
+      "question": "零授权联系人选择器在真机上是怎么验证的？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/AlarmKitSpike-农历引擎与零授权联系人选择器真机验证.md"],
+      "ground_truth": {
+        "expected_intent": "howto",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G18",
+      "kind": "qa",
+      "question": "真机签名和 caf 资源打包问题是怎么修复的？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/AlarmKitSpike-真机签名与caf资源打包修复.md"],
+      "ground_truth": {
+        "expected_intent": "howto",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G19",
+      "kind": "qa",
+      "question": "AppLog 日志过滤有哪些常用命令？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/AppLog 日志过滤命令速查.md"],
+      "ground_truth": {
+        "expected_intent": "howto",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G20",
+      "kind": "qa",
+      "question": "agent_pitfalls 文档记录了哪些 Agent 协作踩坑？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/docs/agent_pitfalls.md"],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G21",
+      "kind": "qa",
+      "question": "侧边键停钟失效的兜底机制是怎么演进的？现在 kill-backup 多少秒？",
+      "holdout": false,
+      "required_evidence": [
+        "app-calendar-alarm/docs/AlarmKitSpike-Alarmy快速闹钟双阶段响铃机制-20261013.md",
+        "Sources/Services/MissionCoordinator.swift"
+      ],
+      "ground_truth": {
+        "expected_intent": "incident",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G22",
+      "kind": "qa",
+      "question": "AlarmKitSpike 编译修复阶段解决过哪些编译错误？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/ALARMKIT_SPIKE_FIXES.md"],
+      "ground_truth": {
+        "expected_intent": "incident",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G23",
+      "kind": "qa",
+      "question": "VERIFICATION_SUMMARY 里总结了哪些验证结论？",
+      "holdout": false,
+      "required_evidence": ["app-calendar-alarm/AlarmKitSpike/VERIFICATION_SUMMARY.md"],
+      "ground_truth": {
+        "expected_intent": "incident",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G24",
+      "kind": "qa",
+      "question": "kill-backup 的补发间隔现在是多少秒？历史上用过别的值吗？",
+      "holdout": false,
+      "required_evidence": [
+        "Sources/Services/MissionCoordinator.swift",
+        "app-calendar-alarm/docs/AlarmKitSpike-Alarmy快速闹钟双阶段响铃机制-20261013.md"
+      ],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": true,
+        "version_trap": true,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G25",
+      "kind": "negative",
+      "question": "你好，讲个笑话吧",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "out_of_scope",
+        "expected_status": "unknown",
+        "expected_unknown_reason": "out_of_scope",
+        "symbol_form": false,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G26",
+      "kind": "negative",
+      "question": "AlertListViewModel.deleteAllAlarms() 是怎么实现的？",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G27",
+      "kind": "negative",
+      "question": "LunarDateEngine.weatherForecast(for:) 的实现逻辑是什么？",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "symbol_form": true,
+        "judge_required": false,
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G28",
+      "kind": "negative",
+      "question": "技术方案文档里定义的系统架构和模块职责是怎么划分的？",
+      "holdout": true,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "holdout_doc": "docs/技术方案文档.md",
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G29",
+      "kind": "negative",
+      "question": "功能设计文档里的版本策略和目标用户是怎么定义的？",
+      "holdout": true,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "holdout_doc": "docs/功能设计文档.md",
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "G30",
+      "kind": "negative",
+      "question": "Swift 语言的 Actor 隔离特性是哪一年在哪个 Swift 版本正式发布的？",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "concept",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "symbol_form": false,
+        "judge_required": false,
+        "expert_label": null
+      }
+    }
+  ]
+}

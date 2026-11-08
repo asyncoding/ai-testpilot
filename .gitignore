@@ -24,8 +24,9 @@ venv/
 /subsystems/web/.next/
 /subsystems/web/out/
 
-# 评测/运行临时产物
+# 评测/运行临时产物（S1.6 评测报告 JSON/Markdown 落 subsystems/out/eval/）
 results/
+/subsystems/out/
 *.xcresult
 screenshots/
 videos/

@@ -12,7 +12,7 @@ from langgraph.errors import GraphRecursionError
 
 from qa_fakes import FakeHybridSearch, FakeModel, make_chunk, structured_envelope
 from testpilot_adapters.store import bootstrap_store
-from testpilot_core.answering import qa_run_urn
+from testpilot_core.answering import PARAMS_VERSION, qa_run_urn
 from testpilot_core.enums import (
     AuthorityLevel,
     FeedbackKind,
@@ -74,7 +74,7 @@ async def test_ask_persists_full_qa_run_and_roundtrips_json(tmp_path):
     assert row["attempts"] == 1 and row["regens"] == 0
     assert row["tokens_in"] == 200 and row["tokens_out"] == 60  # intent+answer 两次信封累加
     assert row["prompt_version"] == "qa-prompt-3"
-    assert row["params_version"] == "qa-params-1"
+    assert row["params_version"] == PARAMS_VERSION  # 跟常量走，bump 不再误红
     assert row["data_version"]  # verify 节点写入的 HEAD sha
     assert len(row["verify_results"]) == 1
     assert row["evidence"][0]["urn"] == SYM1
@@ -208,6 +208,58 @@ async def test_recursion_error_is_normalized_and_persisted(tmp_path):
     assert row["degraded"][0].startswith("recursion_limit_exceeded:")
     assert row["thread_id"] == "run-recursion-1"
     await service.aclose()  # C5 无资源收口，调通即可（C6 接 sqlite saver）
+
+
+class _AssemblyGuardExplodingGraph:
+    """模拟装配层 URN 交叉守卫：只暴露服务实际使用的 ainvoke 面。"""
+
+    async def ainvoke(self, state, *, config):  # noqa: ANN001
+        from testpilot_core.answering import AssemblyGuardError
+
+        raise AssemblyGuardError(
+            "历史证词与模型引用的文档交叉，拒绝装配: ['urn:testpilot:fs-docs:document:x']")
+
+
+async def test_assembly_guard_error_is_normalized_and_persisted(tmp_path):
+    # S1.6 基线发现：守卫裸 ValueError 会抛穿成 HTTP 500 且 qa_runs 无行；
+    # 与超步归一化同语义——status=error 结构化落库，绝不装配污染答案。
+    store = bootstrap_store(tmp_path / "data")
+    chunk = make_chunk(CHUNK1, doc_urn=DOC1, text="证据原文")
+    deps = QaDeps(model=FakeModel({}), search=FakeHybridSearch([chunk]), store=store)
+    service = QaService(deps, store, graph=_AssemblyGuardExplodingGraph())
+
+    resp = await service.ask(_request(), run_id="run-assembly-guard-1")
+
+    assert resp.status == QaStatus.ERROR
+    assert resp.unknown_reason == "assembly_guard_overlap"
+    assert any("assembly_guard_overlap" in f for f in resp.degraded)
+    assert resp.answer is None  # 污染答案不得装配
+    row = await service.get_run("run-assembly-guard-1")
+    assert row["status"] == "error"
+    assert row["question"]  # 请求侧字段仍完整留痕
+    assert row["degraded"][0].startswith("assembly_guard_overlap:")
+    assert row["answer_payload"] == {}
+    await service.aclose()
+
+
+def test_qa_params_mapping_from_profile_qa_section():
+    from types import SimpleNamespace
+
+    from testpilot_orchestrator.qa_graph.service import _qa_params_from_config
+
+    # 无 qa 段：保守默认，retrieval_limit=8 与历史硬编码一致
+    default = _qa_params_from_config(SimpleNamespace(qa={}))
+    assert default.retrieval_limit == 8
+    # qa 段注入标定值；未知键白名单过滤不炸；list→tuple 归一
+    cfg = SimpleNamespace(qa={
+        "retrieval_limit": 12, "unknown_knob": 1,
+        "permitted_scopes": ["team-a"],
+    })
+    params = _qa_params_from_config(cfg)
+    assert params.retrieval_limit == 12
+    assert params.permitted_scopes == ("team-a",)
+    # 连 qa 属性都没有的最小 config 也安全落默认
+    assert _qa_params_from_config(SimpleNamespace()).retrieval_limit == 8
 
 
 async def test_service_uses_mapped_step_limit(tmp_path):

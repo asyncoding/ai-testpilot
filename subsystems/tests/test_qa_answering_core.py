@@ -460,5 +460,9 @@ def test_qa_run_urn_convention():
 
 def test_params_version_pinned():
     # 改 QaParams 默认值必须 bump PARAMS_VERSION（评测四元组可复算）
+    # S1.6 标定收官：qa-params-2/3 实验均不采纳，出厂默认零变化 → 版本位保持 qa-params-1；
+    # 下次真实改默认值用 qa-params-4（2/3 已被实验报告占用，禁止复用）。
     assert PARAMS_VERSION == "qa-params-1"
     assert QaParams().min_evidence == 1
+    # 出厂默认保持 8：标定值只走 profile qa 段，未配 qa 的 profile 行为与历史一致
+    assert QaParams().retrieval_limit == 8

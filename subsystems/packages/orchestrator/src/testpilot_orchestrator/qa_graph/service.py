@@ -21,7 +21,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from testpilot_core.answering import qa_run_urn
+from dataclasses import fields
+
+from testpilot_core.answering import QaParams, qa_run_urn
 from testpilot_core.enums import FeedbackKind, FeedbackReason, QaIntent, QaStatus
 from testpilot_core.errors import NotFoundError
 from testpilot_core.models import (
@@ -331,6 +333,15 @@ class QaService:
         self._store.insert_qa_run(record=record)
 
 
+def _qa_params_from_config(config: Any) -> QaParams:
+    """profile qa 段 → QaParams：白名单过滤未知键，缺省段返回保守默认（行为不变）。"""
+    settings = dict(getattr(config, "qa", None) or {})
+    allowed = {f.name for f in fields(QaParams)}
+    if "permitted_scopes" in settings and settings["permitted_scopes"] is not None:
+        settings["permitted_scopes"] = tuple(settings["permitted_scopes"])
+    return QaParams(**{k: v for k, v in settings.items() if k in allowed})
+
+
 async def build_qa_service(container, *, use_sqlite: bool = True) -> QaService:
     """从同步 Container 装配问答服务（factory 保持 LangGraph 无感知的异步边界）。
 
@@ -344,6 +355,7 @@ async def build_qa_service(container, *, use_sqlite: bool = True) -> QaService:
         store=container.get("store"),
         repo=container.get("repo"),
         tracer=container.get("tracer"),
+        params=_qa_params_from_config(container.config),
     )
     if use_sqlite:
         service = QaService(deps, container.get("store"), data_dir=container.data_dir)

@@ -1,0 +1,73 @@
+{
+  "set_id": "golden-recorded-smoke-v1",
+  "schema_version": 1,
+  "comment": "S1.6 A9 离线机控题集：不承担质量测量（质量测量用 golden_s1.json 跑真模型 hermetic 形态），只在无网环境下确定性验证评测 runner 全链路装配——加载题集→问答服务→CaseResult 适配→core 裁判→指标聚合→eval_cases/eval_runs 落库→JSON/Markdown 报告。题目与 tests/fixtures/model/responses.json 的录制故事一一对应（ground_truth.recorded_case_key），期望状态取自 qa_probe 已冻结的同一夹具行为；offline-demo 语料只有 4 个 text chunk（kill-backup/sidebar-fallback 两份文档），故不设 holdout 题，泄漏检查由单测用合成 marker 覆盖。",
+  "corpus": {
+    "project": "AlarmKitSpike-demo",
+    "branch": "alarmkit-spike",
+    "chunks": 4,
+    "code_symbols": 0,
+    "doc_urns_ingested": 2
+  },
+  "cases": [
+    {
+      "case_id": "R01",
+      "kind": "qa",
+      "question": "侧边键停钟失效的兜底机制是怎么演进的？现在 kill-backup 多少秒？",
+      "holdout": false,
+      "required_evidence": [
+        "docs/kill-backup.md",
+        "docs/sidebar-fallback.md"
+      ],
+      "ground_truth": {
+        "expected_intent": "incident",
+        "expected_status": "answered",
+        "expected_unknown_reason": null,
+        "recorded_case_key": "kill_backup",
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "R02",
+      "kind": "negative",
+      "question": "C.keep() 方法的实现逻辑是什么？",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "code",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "recorded_case_key": "stale_code",
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "R03",
+      "kind": "negative",
+      "question": "kill-backup 的告警阈值如何在生产环境配置？",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "howto",
+        "expected_status": "unknown",
+        "expected_unknown_reason": null,
+        "recorded_case_key": "unanswerable",
+        "expert_label": null
+      }
+    },
+    {
+      "case_id": "R04",
+      "kind": "negative",
+      "question": "你好，讲个笑话",
+      "holdout": false,
+      "required_evidence": [],
+      "ground_truth": {
+        "expected_intent": "out_of_scope",
+        "expected_status": "unknown",
+        "expected_unknown_reason": "out_of_scope",
+        "recorded_case_key": "chitchat",
+        "expert_label": null
+      }
+    }
+  ]
+}

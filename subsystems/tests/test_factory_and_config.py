@@ -205,3 +205,41 @@ def test_tracer_env_override(monkeypatch):
     monkeypatch.setenv("TESTPILOT_TRACER", "langfuse")
     config = load_profile(PROFILE)
     assert config.adapters.tracer.type == "langfuse"
+
+
+# ── E6 Swift 切块器 profile 接缝（FR-ING-002 AC3）────────────────────────────
+
+def test_default_profile_has_no_tree_sitter_chunker(tmp_path):
+    # 行为不变性守卫：默认 lexical，容器里根本不出现 swift_chunker 组件
+    config = load_profile(PROFILE)
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        assert container.get("swift_chunker") is None
+    finally:
+        container.get("store").close()
+
+
+def test_unknown_swift_chunker_setting_raises(tmp_path):
+    config = load_profile(PROFILE)
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    config.adapters.docs.settings["swift_chunker"] = "bogus"
+    with pytest.raises(ValueError, match="swift_chunker"):
+        build_container(config, SUBSYSTEMS)
+
+
+def test_tree_sitter_setting_registers_optional_chunker(tmp_path):
+    pytest.importorskip("tree_sitter")  # optional group 未装的环境跳过装配测试
+    from testpilot_adapters.tree_sitter_chunker import TreeSwiftChunker
+
+    config = load_profile(PROFILE)
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    config.adapters.docs.settings["swift_chunker"] = "tree-sitter"
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        assert isinstance(container.get("swift_chunker"), TreeSwiftChunker)
+    finally:
+        container.get("store").close()

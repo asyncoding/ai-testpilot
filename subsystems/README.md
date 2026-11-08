@@ -40,11 +40,12 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（377 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（413 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
-# 意图免模型旁路）；3 个 Chroma 真容器集成例在容器未起时自动 skip）
+# 意图免模型旁路）、S1.6 评测（golden 结构、hostless 裁判红→绿、runner 投影/双形态/
+# hermetic 备份/容器端到端）；3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
 # 核心层防腐门禁（core 禁止 import fastapi/sqlite/yaml/各兄弟包等）
@@ -444,17 +445,124 @@ quality 分公式与物化分重算、全库重嵌入、tree-sitter（entities �
 另如实记账：模型路径上的高难中文事故题仍可能 citation 失败——fail-closed 拦截伪造引用是
 正确行为，属 S1.6 golden set 待标定项，不是本批回归（符号旁路路径近 5 run 同类失败已清零）。
 
-## 一键验收（8 个自动门禁）
+## 离线评测体系（S1.6，FR-EV-001～003）：golden set、hostless 裁判与双形态 runner
+
+题集与裁判分离、机控与质量分离：
+
+- **题集入 git，改题走 git 评审**。`tests/fixtures/eval/golden_s1.json` 是冻结的 30 题
+  golden-s1-v1（代码 12 / 文档 8 / L2 事故 3 / 版本陷阱 1 / 负例 6，负例占比 20%；
+  26 条取证 URN 全部查真库填写，2 篇 holdout 文档验证 0 入库）；
+  `golden_recorded_smoke.json` 是 4 题机控集，只验证评测链路装配，**不做门禁判定**。
+- **裁判是 core 零 IO 纯函数**（`testpilot_core.evaluation`，import-lint 保护）：
+  8 个错误标签按召回侧（intent_mismatch/empty_retrieval/recall_miss）与生成侧
+  （unexpected_unknown/no_citations/citation_forgery/wrong_answer_on_negative/
+  strict_reason_mismatch）二分记账，收集全部失败标签而非首错即停；聚合指标含
+  golden 通过率、Recall@K、拒答/意图/引用准确率、伪造护栏、延迟分位、token、attempts。
+  忠实度等语义分在 E5 隔离裁判模型接入前一律标「无基线」，报告任何位置不得造数。
+- **双形态 runner**（`scripts/eval_probe.py`，裁判代码同一份）：
+
+```bash
+# ① recorded：离线确定性，进 verify_s0 A9。录制模型 + offline-demo 语料，全绿才 exit 0
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python scripts/eval_probe.py
+
+# ② ollama：真模型 hermetic 基线（需 docker chroma + ollama serve；E4 标定用）
+#    sqlite 经 online backup API 复制到 /tmp 隔离目录，源库/活进程只读不碰；
+#    Chroma 继续 HTTP 共享只读。--limit N 可先冒烟 hermetic 路径
+.venv/bin/python scripts/eval_probe.py --mode ollama \
+  --profile config/profiles/ios-local-poc.yaml
+```
+
+  每次评测落 `eval_runs`（data/model/prompt/params 四元组 + 指标 + report_uri）与
+  `eval_cases`（locked_version 题集版本，幂等 upsert）；JSON/Markdown 报告落
+  `out/eval/`（gitignore），含 S1 门禁对照（引用准确 ≥.95 且伪造=0、Recall@K ≥.85、
+  拒答 ≥.9、忠实度 ≥.9）、错误二分、逐题判定与 holdout 泄漏检查。
+  ollama 形态的质量差距是发现项不是探针失败，只有机械故障才 exit 1。
+
+### E4 参数标定（2026-11-08）：两旋钮均证伪，出厂默认零变化
+
+真 ollama + hermetic 副本上跑单变量实验，每轮独立报告 + `--compare` 成对对比
+（超 1 个四元组槽位变动即判纪律破坏 exit 1）：
+
+- 规范基线（qa-params-1，top-k=8 / rrf_k=60）：10/30，引用准确 1.0 / 伪造 0（达标），
+  Recall@K .4583、拒答 .50（未达标，归因模型侧）。
+- 实验① top-k 8→12（qa-params-2）、实验② rrf_k 60→30（qa-params-3）表面分数互有
+  涨跌，但 required-evidence 成员分析证明 rrf_k 改动**没有把任何 golden 证据移过
+  top-8 截断边界**，翻转题在两旋钮下同时变绿/变红，是 ollama 网关无 temperature/seed
+  的采样噪声而非检索收益，且 token 成本上升。两个旋钮**均不采纳**。
+- 出厂默认保持 top-k=8 / rrf_k=60，`PARAMS_VERSION` 回归 `qa-params-1`（qa-params-2/3
+  被实验报告永久占用，禁止复用；今后真改默认值从 qa-params-4 起）。质量公式/物化分
+  重算经评估无可靠靶点（intent_mismatch 来自模型分类过触发，regex_bypass 8 题全对），
+  no-go 留诚实记账。
+
+### E5 隔离语义裁判（LLM-as-judge，docs/06 §6.3 / docs/07 §7）
+
+裁判模型与生成模型不同体：生成 qwen2.5:7b，裁判 `deepseek-r1:7b`（prompt 版本
+semantic-judge-1）。裁判纯函数在 core（`semantic_judge.py`，零 IO 零三方），
+fail-closed：信封非法/空 claims/被支撑却缺 URN 一律记 parse_error、两维判负、绝不抛穿；
+只裁正例已答题，人工裁定 `adjudication` 槽恒 null（专家盲标前不造 kappa 基线）。
+
+```bash
+.venv/bin/python scripts/eval_probe.py --mode ollama --semantic-judge
+```
+
+首版真模型基线（报告 eval-36a85c72，17 个正例已答题）：**忠实度陈述级微平均 .9429
+过 .90 门**；逐题全支撑率 .8235（G07/G19 各 1 条无证据陈述、G02 裁判信封解析失败）；
+**答案相关性 .5882 未过 .85 门**（7 题判负，与机控面 intent_mismatch 同源，归 S2
+提示工程/模型侧）。
+
+### E6 tree-sitter Swift 切块器选型复核（FR-ING-002 AC3）
+
+tree-sitter 只作 **adapters optional dependency group**，core 零三方红线不动；缺包时
+`TreeSwiftChunker` 构造抛 `AdapterUnavailableError`，入库单文件失败自动回退词法器并写
+dead_letter（`ingestion-tree-sitter-fallback`）。安装：
+
+```bash
+VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
+# profile 开启：adapters.docs.settings.swift_chunker: tree-sitter（默认 lexical）
+```
+
+离线边界对比探针 `scripts/chunker_compare.py`：扫三个 code_root 共 50 个 Swift 文件，
+以 `xcrun swiftc -dump-ast`（iOS 模拟器 target，否则 `#if canImport(UIKit)` 整段被
+条件编译跳过）的 564 个非隐式声明为真值。结论（报告 `out/eval/chunker-comparison.md`）：
+
+- **tree-sitter 真漏报 0（564/564 全覆盖），词法器真漏报 27（全部是 init 构造器）**；
+  GT 符号召回 .9858 vs .9167；边界精确率（结束行对真值）双双 1.0；真实仓 ERROR 节点 0；
+  tree-sitter 是词法器严格超集（独有 39 个紧凑声明/构造器符号，反向独有 0）。
+- 两器共享的命名口径差 8 处（core `_selector` 吸入返回元组标签、dotted 扩展只取首段），
+  非边界变量，修需动 core 共享函数，超出本次隔离范围，记档不做。
+- 选型期实证修复适配器一个真 bug：全树 DFS 取类型名会把 `@MainActor`/`@available`
+  属性里的类型误当 owner（真实仓曾切出 `MainActor.xxx`/`available.xxx`），改为只认
+  声明节点直接子节点，红→绿回归测试 `test_attributes_do_not_pollute_type_owner_naming`。
+
+**在线双索引 30 题对比与选型结论（默认不换，词法器留作降级路径）**：用独立 collection
+`alarmkitspike-chunks-treesitter`（生产 collection 不碰）+ 全新 data_dir 全量重建索引
+（565 块，版本位 tree-sitter-swift-1，零回退死信），同一份 golden_s1 跑批与词法基线
+成对对比（四元组零槽位变化，唯一变量是切块方式）：
+
+- **Recall@K 持平 .4583 → .4583**（切块器本应改善的检索指标零变化）；通过率 10/30→11/30
+  在采样噪声带内（1 退 G03、2 进 G14/G26，与 E4 rrf_k 实验同型的随机翻转），引用准确
+  1.0 / 伪造 0 持平。
+- 根因实证：26 条 golden 取证 URN **无一指向 init/构造器**，而 tree-sitter 多出的 39 个
+  符号绝大多数是 init；TS 检索进 top-k 的独有 URN 仅 31 个、其中 init 只 1 个——离线边界
+  优势在当前题集上没有检索收益。仅有的 2 条 required 文档新命中（G22/G23，RRF 池变化的
+  间接排名效应）仍因模型侧 intent_mismatch 失败，无端到端收益，且零证据丢失。
+- **决策：出厂默认保持 lexical**。tree-sitter 作为 optional 能力保留（profile 可开、
+  单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
+  构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
+
+## 一键验收（9 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 8 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 9 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、377 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、413 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
-（真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）。
+（真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
+A9 离线评测探针（FR-EV-001～003：golden smoke 4 题 + hostless 裁判 + eval 账本/报告）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
 旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。
 

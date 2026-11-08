@@ -10,7 +10,7 @@ import hashlib
 
 import pytest
 
-from testpilot_core.answering import QaParams, to_evidence_dict
+from testpilot_core.answering import PARAMS_VERSION, QaParams, to_evidence_dict
 from testpilot_core.chunking import chunk_swift
 from testpilot_core.config_schema import Limits
 from testpilot_core.enums import AuthorityLevel, QaIntent, QaStatus, VersionState
@@ -218,6 +218,20 @@ async def test_retrieval_hybrid_result_normalized_with_scores_and_trace():
     assert out["retrieval_trace"]["fts_available"] is True
     assert out["retrieval_degraded"] is False
     assert search.search_calls[0]["limit"] == 8
+
+
+async def test_retrieval_limit_comes_from_qaparams_for_calibration():
+    # S1.6 标定接缝：最终 top-k 不再硬编码，由 QaParams.retrieval_limit 注入，
+    # 默认 8 与历史行为逐字节一致；改值必须 bump PARAMS_VERSION。
+    from testpilot_core.answering import QaParams
+
+    chunks = [make_chunk(CHUNK1)]
+    search = FakeSearch(chunks, hybrid=True, event_id=12)
+    nodes = nodes_of(FakeModel({}), search, params=QaParams(retrieval_limit=12))
+
+    await nodes[N_RETRIEVAL](base_state(intent="code"))
+
+    assert search.search_calls[0]["limit"] == 12
 
 
 async def test_retrieval_fts_bare_list_has_no_trace_or_score():
@@ -470,7 +484,7 @@ async def test_generation_first_attempt_uses_answer_key_and_persists_draft():
     assert out["attempts"] == 1
     assert out["draft"]["citations"][0]["urn"] == CHUNK1
     assert out["prompt_version"] == "qa-prompt-3"
-    assert out["params_version"] == "qa-params-1"
+    assert out["params_version"] == PARAMS_VERSION  # 跟常量走，bump 不再误红
     assert out["tokens_total"]["in"] == 100
 
 

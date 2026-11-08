@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 自动门禁一键验收（docs/07 §10）：A1–A6 为 S0 骨架门禁，A7 为 S1.4 离线问答探针，
-# A8 为 S1.5 问答 HTTP API 冒烟（真实 uvicorn + curl）。
+# A8 为 S1.5 问答 HTTP API 冒烟（真实 uvicorn + curl），A9 为 S1.6 离线评测探针
+# （golden smoke 题集 + 录制模型，确定性验证评测 runner 全链路）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -94,7 +95,16 @@ kill $APID 2>/dev/null; wait $APID 2>/dev/null
 [ $ok = 1 ] && { echo "PASS  ask=unknown/out_of_scope, ghost feedback=404, config=offline-demo/recorded"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_api8.log 与 /tmp/tp_a8_*.json"; fail_n=$((fail_n+1)); }
 
+echo "=== A9. 离线评测探针（FR-EV-001～003，golden smoke 4 题+裁判/落库/报告，期望 exit 0） ==="
+# 机控题集只验证评测链路装配；S1 门禁数字由 ollama hermetic 形态跑 golden-s1-v1 产出，
+# 不进自动门禁（需 docker chroma + ollama serve，见 README「S1.6 评测」节）。
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  $PY scripts/eval_probe.py > /tmp/tp_eval_probe.log 2>&1 \
+  && grep -q '✅ eval_probe recorded 全部通过' /tmp/tp_eval_probe.log \
+  && { echo "PASS  $(grep '通过' /tmp/tp_eval_probe.log | tail -1)"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_eval_probe.log"; fail_n=$((fail_n+1)); }
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

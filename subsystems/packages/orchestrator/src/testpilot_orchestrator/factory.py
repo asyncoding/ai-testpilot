@@ -97,6 +97,18 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.docs.type != "stub":
         raise ValueError(f"未知 docs 适配器类型: {a.docs.type}")
 
+    # ── Swift 切块器选择（E6 FR-ING-002 AC3 选型复核）──
+    # 默认 lexical（core 零依赖词法器，行为不变）；tree-sitter 是 adapters optional
+    # dependency，缺包时 TreeSwiftChunker 构造抛 AdapterUnavailableError——显式配置了
+    # 不可用能力应在装配期响亮失败，单文件解析失败的回退在 ingestion 内处理。
+    swift_chunker_kind = docs_settings.get("swift_chunker", "lexical")
+    if swift_chunker_kind == "tree-sitter":
+        from testpilot_adapters.tree_sitter_chunker import TreeSwiftChunker
+
+        container.adapters["swift_chunker"] = TreeSwiftChunker()
+    elif swift_chunker_kind != "lexical":
+        raise ValueError(f"未知 swift_chunker 配置: {swift_chunker_kind}")
+
     # ── 工单 ──
     if a.tickets.type == "json":
         ticket_fixtures = _p(fixtures_dir, "tickets")

@@ -36,9 +36,22 @@ from .urn import parse_urn
 # 全图重生成硬上限：首次生成 + 1 次修复（docs/08 FR-QA-001 AC：失败重生成一次后未知）
 MAX_ANSWER_ATTEMPTS = 2
 # 参数版本位：S1.6 标定只改 QaParams 默认值并 bump 本常量，机制不动（评测四元组对齐）
+# S1.6 标定收官（2026-11-08，证据见 .agent-handoff/2026-11-08-s1.6-eval-golden-set.md）：
+# qa-params-2（top-k 8→12）与 qa-params-3（rrf_k 60→30）均为 /tmp profile 实验标签，
+# 成对对比证明门禁零改善/噪声主导且成本上升，均不采纳；出厂默认值（limit=8、rrf_k=60）
+# 从未改变，故常量保持 qa-params-1——默认 profile 跑批与规范基线四元组可直接对比。
+# 今后若真实修改出厂默认值，bump 到 qa-params-4（2/3 已被实验报告占用，禁止复用）。
 PARAMS_VERSION = "qa-params-1"
 # run 级反馈的 target_urn 约定（feedback 表 target_urn NOT NULL，且不引入 DB FK）
 RUN_URN_PREFIX = "urn:testpilot:qa-run:"
+
+
+class AssemblyGuardError(ValueError):
+    """事故双段 URN 交叉守卫触发：模型引用污染了历史证词文档，拒绝装配。
+
+    刻意继承 ValueError：S1.4 图级硬停测试以 pytest.raises(ValueError) 钉死契约，
+    子类化让服务层能按具体类型归一化为 status=error，同时不放松旧契约。
+    """
 
 # ── 兜底意图关键词（模型分类失败时启用；显式标记优先于符号形态）──────────────
 _OUT_OF_SCOPE_RE = re.compile(
@@ -69,6 +82,8 @@ class QaParams:
     min_top_score: float = 0.0
     # 空元组 = 不做 scope 限制（POC 无 IAM）；注入后 acl_scope 不在名单即拒
     permitted_scopes: tuple[str, ...] = ()
+    # 检索最终截断 top-k（S1.6 标定变量；默认 8 = 原硬编码值，改值必须 bump PARAMS_VERSION）
+    retrieval_limit: int = 8
 
 
 def qa_run_urn(run_id: str) -> str:
@@ -377,7 +392,8 @@ def assemble_incident(
     }
     overlap = history_docs & cited_docs
     if overlap:
-        raise ValueError(f"历史证词与模型引用的文档交叉，拒绝装配: {sorted(overlap)}")
+        raise AssemblyGuardError(
+            f"历史证词与模型引用的文档交叉，拒绝装配: {sorted(overlap)}")
 
     blocks = ["## 历史证词（逐字引用，未经模型改写）"]
     for h in history:

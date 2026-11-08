@@ -15,6 +15,7 @@ from testpilot_core.models import (
     Approval,
     Entity,
     EventEnvelope,
+    EvalCase,
     EvalRun,
     Feedback,
     KnowledgeChunk,
@@ -387,6 +388,11 @@ class Store:
             "SELECT urn, content_hash FROM source_documents WHERE source_system=?",
             (source_system,),
         ).fetchall()
+
+    def all_document_urns(self) -> list[str]:
+        """S1.6 泄漏检查（FR-EV-001）：holdout 文档 marker 要对全量已索引 URN 比对。"""
+        rows = self.conn.execute("SELECT urn FROM source_documents").fetchall()
+        return [r["urn"] for r in rows]
 
     def get_document(self, urn: str) -> SourceDocument | None:
         row = self.conn.execute(
@@ -840,6 +846,27 @@ class Store:
                 run.version.prompt_version, run.version.params_version,
                 int(run.version.degraded_path), json.dumps(run.metrics), run.report_uri,
                 run.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def upsert_eval_case(self, case: EvalCase, locked_version: str) -> None:
+        """冻结题集落库（FR-EV-001 AC2）：同一题集重跑幂等，locked_version 记录题集版本。"""
+        self.conn.execute(
+            """INSERT INTO eval_cases
+               (case_id, kind, question, ground_truth, required_evidence,
+                holdout, locked_version)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(case_id) DO UPDATE SET
+                 kind=excluded.kind, question=excluded.question,
+                 ground_truth=excluded.ground_truth,
+                 required_evidence=excluded.required_evidence,
+                 holdout=excluded.holdout, locked_version=excluded.locked_version""",
+            (
+                case.case_id, case.kind, case.question,
+                json.dumps(case.ground_truth, ensure_ascii=False),
+                json.dumps(case.required_evidence, ensure_ascii=False),
+                int(case.holdout), locked_version,
             ),
         )
         self.conn.commit()

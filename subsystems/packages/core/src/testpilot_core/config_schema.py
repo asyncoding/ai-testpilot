@@ -51,3 +51,5 @@ class ProfileConfig(BaseModel):
     adapters: AdapterSet
     limits: Limits = Field(default_factory=Limits)
     external_write_enabled: bool = False  # 全局停用开关，默认只 dry-run
+    # S1.6 标定接缝：问答图参数（如 retrieval_limit）；缺省即 QaParams 保守默认，行为不变
+    qa: dict[str, Any] = Field(default_factory=dict)
