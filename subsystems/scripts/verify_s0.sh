@@ -3,7 +3,8 @@
 # A8 为 S1.5 问答 HTTP API 冒烟（真实 uvicorn + curl），A9 为 S1.6 离线评测探针
 # （golden smoke 题集 + 录制模型，确定性验证评测 runner 全链路），A10 为 S2.1
 # 用例文档连接器探针（合成夹具全链路入库，含损坏行死信与取消/缺预期标记），
-# A11 为 S2.2 需求骨架抽取探针（合成夹具 + 录制模型 AC↔FR 链接，白名单 fail-closed）。
+# A11 为 S2.2 需求骨架抽取探针（合成夹具 + 录制模型 AC↔FR 链接，白名单 fail-closed），
+# A12 为 S2.3 测试点生成探针（确定性脊柱 13 点 + 录制模型补点，2 投毒行进 tp-gen 死信）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -142,7 +143,28 @@ else
   echo "FAIL  见 /tmp/tp_reqs_a11.log"; fail_n=$((fail_n+1))
 fi
 
+echo "=== A12. 测试点生成（S2.3 FR-TD-002：A11 骨架为前置，确定性脊柱+录制模型白名单补点） ==="
+# 前置依赖：A11 已把合成需求骨架写入同一 offline 库；worker 对空骨架会直接 ValueError。
+# 录制 tp_gen 夹具含 6 行：3 合法补点 + 2 投毒（unknown_fr/unknown_source）+ 1 重复去重。
+# 不断言证据计数：FTS 语料状态随 A5/A7 变化，检索降级只计数不阻断（单测已钉死该口径）。
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  $PY -m testpilot_workers.generate_testpoints --full > /tmp/tp_tps_a12.log 2>&1 || true
+if grep -q '"status": "succeeded"' /tmp/tp_tps_a12.log \
+  && grep -q '"docs_rebuilt": 1' /tmp/tp_tps_a12.log \
+  && grep -q '"points_total": 16' /tmp/tp_tps_a12.log \
+  && grep -q '"spine_points": 13' /tmp/tp_tps_a12.log \
+  && grep -q '"model_points": 3' /tmp/tp_tps_a12.log \
+  && grep -q '"model_rejected": 2' /tmp/tp_tps_a12.log \
+  && grep -q '"model_deduped": 1' /tmp/tp_tps_a12.log \
+  && grep -q '"hallucination_rate": 0.4' /tmp/tp_tps_a12.log \
+  && grep -q '"degraded_docs": 0' /tmp/tp_tps_a12.log; then
+  echo "PASS  16 测试点（13 脊柱+3 模型）/2 幻觉拒入死信/1 去重，幻觉率 0.4 如实入账"
+  pass_n=$((pass_n+1))
+else
+  echo "FAIL  见 /tmp/tp_tps_a12.log"; fail_n=$((fail_n+1))
+fi
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

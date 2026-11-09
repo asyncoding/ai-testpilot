@@ -1,0 +1,23 @@
+{
+  "doc_external_id": "requirements/synthetic-requirements.md",
+  "sealed_at": "2026-11-09T00:00:00Z",
+  "expert": "blind-expert-synthetic",
+  "points": [
+    {"expert_id": "E1", "text": "创建备忘后立即本地落盘可查", "fr_id": "FR-1", "priority": "P0", "match_keywords": ["创建备忘", "落盘"], "must_test": true},
+    {"expert_id": "E2", "text": "磁盘空间不足时创建备忘报错且不留半截记录", "fr_id": "FR-1", "priority": "P1", "match_keywords": ["磁盘"], "must_test": true},
+    {"expert_id": "E3", "text": "编辑备忘保留修改历史", "fr_id": "FR-2", "priority": "P0", "match_keywords": ["编辑", "修改历史"], "must_test": true},
+    {"expert_id": "E4", "text": "并发编辑串行化不产生覆盖历史", "fr_id": "FR-2", "priority": "P1", "match_keywords": ["并发", "串行化"], "must_test": true},
+    {"expert_id": "E5", "text": "离线编辑联网后自动同步冲突副本", "fr_id": "FR-2a", "priority": "P1", "match_keywords": ["离线", "同步"], "must_test": true},
+    {"expert_id": "E6", "text": "到点全屏提醒并循环响铃直到确认", "fr_id": "FR-5", "priority": "P0", "match_keywords": ["全屏提醒", "响铃"], "must_test": true},
+    {"expert_id": "E7", "text": "响铃确认前杀掉进程重启后不重复弹同一提醒", "fr_id": "FR-5", "priority": "P0", "match_keywords": ["杀掉进程", "重启"], "must_test": true},
+    {"expert_id": "E8", "text": "静音开关下自定义铃声遵守系统静音", "fr_id": "FR-6", "priority": "P2", "match_keywords": ["静音", "铃声"], "must_test": true},
+    {"expert_id": "E9", "text": "写操作串行化，同一备忘不产生重复提醒", "fr_id": "", "priority": "P1", "match_keywords": ["串行化", "重复提醒"], "must_test": true},
+    {"expert_id": "E10", "text": "关键链路结构化日志可按模块过滤", "fr_id": "", "priority": "P2", "match_keywords": ["结构化日志"], "must_test": true},
+    {"expert_id": "E11", "text": "断网下创建编辑不丢数据，联网后队列同步", "fr_id": "FR-1", "priority": "P1", "match_keywords": ["断网", "丢数据"], "must_test": true},
+    {"expert_id": "E12", "text": "列表支持按关键词过滤备忘", "fr_id": "FR-3", "priority": "P2", "match_keywords": ["关键词过滤"], "must_test": true},
+    {"expert_id": "E13", "text": "提醒设置支持自定义铃声", "fr_id": "FR-6", "priority": "P2", "match_keywords": ["自定义铃声"], "must_test": true},
+    {"expert_id": "E14", "text": "断网下编辑备忘不丢数据", "fr_id": "FR-2", "priority": "P1", "match_keywords": ["断网", "丢数据"], "must_test": true},
+    {"expert_id": "E15", "text": "重新联网后按队列同步离线改动", "fr_id": "FR-2a", "priority": "P1", "match_keywords": ["联网", "同步"], "must_test": true},
+    {"expert_id": "E16", "text": "自定义铃声的触达走统一全屏提醒与响铃通道", "fr_id": "FR-6", "priority": "P2", "match_keywords": ["全屏提醒", "响铃"], "must_test": true}
+  ]
+}

@@ -15,6 +15,7 @@ dependencies = [
 testpilot-ingest = "testpilot_workers.ingest:main"
 testpilot-ingest-cases = "testpilot_workers.ingest_cases:main"
 testpilot-extract-requirements = "testpilot_workers.ingest_requirements:main"
+testpilot-generate-testpoints = "testpilot_workers.generate_testpoints:main"
 testpilot-runner = "testpilot_workers.runner:main"
 testpilot-eval = "testpilot_workers.eval_worker:main"
 

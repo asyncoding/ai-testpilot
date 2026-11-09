@@ -263,23 +263,26 @@ def test_missing_recorded_key_degrades_to_deterministic_without_fabrication(tmp_
         store.close()
 
 
-def test_v8_database_bootstraps_requirement_skeletons_table(tmp_path):
-    """老库平滑升级：v8 库没有 requirement_skeletons 表，v9 bootstrap 幂等补建。"""
+def test_legacy_database_bootstraps_s2_tables(tmp_path):
+    """老库平滑升级：v8 库没有 S2 表，bootstrap 幂等补建 skeletons(v9)/test_points(v10)。"""
     db_dir = tmp_path / "data"
     store = bootstrap_store(db_dir)
     store.conn.execute("DROP TABLE requirement_skeletons")
+    store.conn.execute("DROP TABLE test_points")
     store.conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
     store.close()
 
     upgraded = bootstrap_store(db_dir)
     try:
-        assert upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "9"
+        assert upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "10"
         tables = {
             r["name"] for r in upgraded.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
         assert "requirement_skeletons" in tables
+        assert "test_points" in tables
         assert upgraded.count_requirement_skeletons() == 0
+        assert upgraded.count_test_points() == 0
     finally:
         upgraded.close()

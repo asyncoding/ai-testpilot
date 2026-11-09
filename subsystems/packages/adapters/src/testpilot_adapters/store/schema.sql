@@ -334,6 +334,27 @@ CREATE TABLE IF NOT EXISTS requirement_skeletons (
 CREATE INDEX IF NOT EXISTS idx_requirement_skeletons_external
     ON requirement_skeletons(external_id);
 
+-- 测试点（S2.3 FR-TD-002）：测试点生成 worker 的产物，草稿态数据，S2.5 HITL
+-- 批准前不进正式用例库。URN 内容寻址（external_id#fr_id/kind-hash），按 doc_urn
+-- 整组替换防幽灵；模型幻觉行不入库（进 dead_letters source=tp-gen）。
+CREATE TABLE IF NOT EXISTS test_points (
+    urn            TEXT PRIMARY KEY,
+    external_id    TEXT NOT NULL,
+    doc_urn        TEXT NOT NULL,
+    fr_id          TEXT NOT NULL DEFAULT '',
+    kind           TEXT NOT NULL,
+    priority       TEXT NOT NULL DEFAULT 'P2',
+    provenance     TEXT NOT NULL DEFAULT 'deterministic',
+    text           TEXT NOT NULL,
+    source_refs    TEXT NOT NULL DEFAULT '[]',
+    content_hash   TEXT NOT NULL,
+    branch         TEXT NOT NULL DEFAULT 'main',
+    raw_json       TEXT NOT NULL,
+    indexed_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_test_points_doc ON test_points(doc_urn);
+CREATE INDEX IF NOT EXISTS idx_test_points_fr ON test_points(fr_id);
+
 -- 任务队列（offline profile 的 QueuePort 实现）
 CREATE TABLE IF NOT EXISTS jobs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,

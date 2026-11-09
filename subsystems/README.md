@@ -40,13 +40,14 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（508 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（550 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
 # 意图免模型旁路）、S1.6 评测（golden 结构、hostless 裁判红→绿、runner 投影/双形态/
 # hermetic 备份/容器端到端）、S2.1 用例文档解析（双格式/缺预期/取消/死信/老库 v8 迁移）、
-# S2.2 需求骨架抽取（FR/NFR/AC/缺口/白名单链接/老库 v9 迁移）；
+# S2.2 需求骨架抽取（FR/NFR/AC/缺口/白名单链接/老库 v9 迁移）、
+# S2.3 测试点生成（确定性脊柱/白名单补点/幻觉死信/专家盲标/老库 v10 迁移）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -754,3 +755,57 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   报告 `out/eval/requirement-probe.{json,md}`（gitignore）。
 - 老库 v8→v9 平滑迁移有专门测试；全量 **508 passed**（S2.2 净增 28）、
   import-lint OK；A11 单跑通过，不触碰 8765 端口。
+
+## 测试点生成与专家盲标（S2.3，FR-TD-002）：确定性脊柱、白名单补点与 fail-closed 幻觉防线
+
+第三刀：需求骨架 + 影响面检索（相似用例/事故/符号）→ 每条带来源的测试点清单，
+并支持专家盲标评测。同一纪律第三次落地（问答引用、AC↔FR 链接之后）：
+**core 零依赖生成器产出完整测试点地板，LLM 只在封闭白名单上补增量点**。
+
+### 生成契约
+
+| 维度 | 行为 |
+|---|---|
+| 确定性脊柱 | 每个活跃 FR 一条 functional；每条 NFR 一条 rule（统一 P1）；每条 AC 按链接 FR 展开 acceptance（无链接挂 `fr_id=""` 不编造归属）；取消态 FR 不产点；无模型也能跑完整清单 |
+| 模型补点 | 仅允许 `boundary/negative/model_proposed` 三类，且 fr_id 必须是活跃 FR、source_refs 必须是「需求 URN ∪ 影响面证据 URN」白名单子集；脊柱保留类别伪装直接拒 |
+| 优先级强制 | 优先级只从 FR 映射（缺省 P2），模型载荷**没有 priority 字段**，P0/P1 指标无法被模型灌水 |
+| 幻觉台账 | 违规逐行拒入 `RejectedPoint`（unknown_fr/unknown_source/empty_text/bad_kind/bad_shape），worker 落 `dead_letters`（source=`tp-gen`），**绝不进 test_points 正式清单**；整包形状错抛异常 → 纯确定性降级；幻觉率 = 拒入 /（有效模型点 + 拒入），重复行去重不进分母 |
+| 影响面检索 | 相似用例走 `search_test_cases`（FR tag json_each 精确 + 标题 LIKE，仅活跃、P0→P3 排序）；事故/符号走现有检索适配器按 kind 分流；检索故障只计 `retrieval_degraded`，不编造证据 URN |
+| 盲标评测 | 专家清单先封存（规范 JSON sha256），空清单/跨文档评测抛 `BlindOrderError`，流程上杜绝「先看 AI 再补专家」；匹配 = fr_id 相同且关键词全命中（无关键词退 CJK-bigram/ASCII 词 Jaccard ≥0.5）；输出覆盖率/精确率/漏点，**P0/P1 漏点与幻觉点单列**（AC2） |
+| 幂等 | 测试点 URN 内容寻址（`point_urn`，TestPoint 无 urn 字段不污染 S0 模型）；meta hash 增量跳过，重灌按 doc_urn 整组替换不留幽灵；schema v10 新表 `test_points`，草稿不进正式用例库（留待 S2.5 HITL） |
+
+### 运行方式
+
+```bash
+# 自动门禁 A12（前置：A11 已产 requirement_skeletons；录制夹具含 2 投毒行 + 1 重复行）：
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python -m testpilot_workers.ingest_requirements --full
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python -m testpilot_workers.generate_testpoints --full
+
+# 真档探针（非 CI 门禁；语料仓只读、路径参数化、hermetic 不写业务库，报告落 out/eval/）：
+.venv/bin/python scripts/testpoint_probe.py \
+  ~/Documents/Code/app-calendar-alarm/docs/V1需求文档-强提醒闹钟.md
+# 附加本机 Ollama 补点（白名单校验在内存进行）：
+.venv/bin/python scripts/testpoint_probe.py <需求.md> --gen-model
+# 专家盲标（清单必须先于 AI 产出封存；真档清单只许落 out/eval，不入库）：
+.venv/bin/python scripts/testpoint_probe.py <需求.md> --gen-model --expert <expert.json>
+```
+
+### 验收证据（2026-11-09）
+
+- 合成夹具全链路（hermetic 临时库 + 录制模型）：**16 点 = 13 脊柱 + 3 模型补点**，
+  2 投毒行进 tp-gen 死信（unknown_fr/unknown_source）、1 重复行去重，幻觉率 0.4 如实入账；
+  增量重跑 `skipped_unchanged=1`；整文档替换无幽灵点；老库 v9→v10 幂等迁移。
+- 盲标（16 条专家点，先封存）：覆盖率 **0.9375**（15/16，唯一漏点 E8 为 P2）、
+  精确率 1.0、**P0/P1 漏点 = 0**；投毒夹具下幻觉门禁 fail-closed（`gate.passed=False`
+  是被断言的正确行为，另用干净载荷验证全绿路径）。
+- V1 真档确定性探针：33 活跃 FR + 9 NFR + 7 AC → **49 个脊柱点（P0=28/P1=13）**，
+  独立正则对账零漏点、零取消态泄漏（FR-7 行内取消正确识别）。
+- 真模型 hermetic 两个实证发现（探针价值，如实记录不修饰）：
+  1. 初版 prompt 只给裸 ID，qwen2.5:7b 12/12 回显 `FR-1` 短 ID 被白名单拒入；
+     修复为每行逐字给出 `URN=` 后，新采样 11/11 URN 全合法（含回归测试守卫）。
+  2. 33 FR 真档 prompt（约 1.1 万字符）在默认 60s 超时下降级，长超时实测 69.8s 成功；
+     降级时确定性脊柱 49 点完整兜底、零编造。7B 模型补点与专家盲标的门禁差距
+     （覆盖 0.69、精确率 0.67–0.70）作为 S2.4/S2.6 的提示词/证据增强输入，不松门禁。
+- 全量 **550 passed**（S2.3 净增 42）、import-lint OK；A12 单跑通过，不触碰 8765 端口。

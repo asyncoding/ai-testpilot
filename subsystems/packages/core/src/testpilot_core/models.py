@@ -156,6 +156,14 @@ class TestPoint(BaseModel):
     text: str
     priority: Literal["P0", "P1", "P2", "P3"] = "P2"
     source_refs: list[str] = Field(default_factory=list)  # 需求条目/事故/符号 URN
+    # S2.3 FR-TD-002 元数据（均带默认值，S0 既有 TestCaseDraft 构造不受影响）：
+    # fr_id 把测试点钉回白名单功能点（盲标 P0/P1 漏点统计的连接键）；
+    # kind 是封闭小词表；provenance 区分确定性脊柱与模型补点（幻觉追责到来源）。
+    fr_id: str = ""
+    kind: Literal[
+        "functional", "rule", "acceptance", "boundary", "negative", "model_proposed"
+    ] = "functional"
+    provenance: Literal["deterministic", "model"] = "deterministic"
 
 
 class Oracle(BaseModel):

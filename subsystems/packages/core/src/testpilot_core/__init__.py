@@ -14,6 +14,8 @@
 # dead_letters（source=fs-cases）。老库经 schema.sql CREATE IF NOT EXISTS 幂等补建。
 # v9（S2.2 FR-TD-001）：新增 requirement_skeletons 表承载需求骨架抽取结果；
 # 解析死信复用 dead_letters（source=fs-reqs），老库同样幂等补建。
-SCHEMA_VERSION = 9
+# v10（S2.3 FR-TD-002）：新增 test_points 表承载测试点生成结果（确定性脊柱 +
+# 模型白名单补点）；模型幻觉拒入复用 dead_letters（source=tp-gen），老库幂等补建。
+SCHEMA_VERSION = 10
 
 __all__ = ["SCHEMA_VERSION"]

@@ -12,6 +12,7 @@ from typing import Any, Sequence
 from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import OutboxStatus
 from testpilot_core.requirement import RequirementParseResult
+from testpilot_core.testpoint import point_urn
 from testpilot_core.models import (
     Approval,
     Entity,
@@ -24,6 +25,7 @@ from testpilot_core.models import (
     Relation,
     SourceDocument,
     TestCase,
+    TestPoint,
 )
 
 
@@ -766,6 +768,112 @@ class Store:
                 "SELECT COUNT(*) AS n FROM requirement_skeletons"
             ).fetchone()["n"]
         )
+
+    def list_requirement_skeleton_rows(self) -> list[dict[str, Any]]:
+        """生成 worker 的输入：骨架投影列 + 富结构 RequirementParseResult。"""
+        rows = self.conn.execute(
+            "SELECT urn, external_id, content_hash, branch, raw_json "
+            "FROM requirement_skeletons ORDER BY external_id"
+        ).fetchall()
+        return [
+            {
+                "doc_urn": r["urn"],
+                "external_id": r["external_id"],
+                "content_hash": r["content_hash"],
+                "branch": r["branch"],
+                "result": RequirementParseResult.model_validate_json(r["raw_json"]),
+            }
+            for r in rows
+        ]
+
+    # ── 测试点（S2.3 FR-TD-002）────────────────────────────────────────
+    def upsert_test_point(
+        self, doc_urn: str, external_id: str, point: TestPoint, *,
+        content_hash: str, branch: str = "main",
+    ) -> None:
+        """投影列供 SQL 盘点/过滤，完整模型以 raw_json 为唯一还原来源。"""
+        self.conn.execute(
+            """INSERT INTO test_points
+               (urn, external_id, doc_urn, fr_id, kind, priority, provenance,
+                text, source_refs, content_hash, branch, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(urn) DO UPDATE SET
+                 fr_id=excluded.fr_id, kind=excluded.kind, priority=excluded.priority,
+                 provenance=excluded.provenance, text=excluded.text,
+                 source_refs=excluded.source_refs, content_hash=excluded.content_hash,
+                 branch=excluded.branch, raw_json=excluded.raw_json""",
+            (
+                point_urn(external_id, point), external_id, doc_urn, point.fr_id,
+                point.kind, point.priority, point.provenance, point.text,
+                json.dumps(point.source_refs, ensure_ascii=False),
+                content_hash, branch, point.model_dump_json(),
+            ),
+        )
+        self.conn.commit()
+
+    def delete_test_points_for_doc(self, doc_urn: str) -> int:
+        """整文档替换前清旧（重灌幂等：文档内删除的测试点不残留）。"""
+        cur = self.conn.execute("DELETE FROM test_points WHERE doc_urn=?", (doc_urn,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def list_test_points(self) -> list[TestPoint]:
+        return [
+            TestPoint.model_validate_json(r["raw_json"])
+            for r in self.conn.execute(
+                "SELECT raw_json FROM test_points ORDER BY external_id, fr_id, kind"
+            ).fetchall()
+        ]
+
+    def count_test_points(self) -> int:
+        return int(
+            self.conn.execute("SELECT COUNT(*) AS n FROM test_points").fetchone()["n"]
+        )
+
+    def search_test_cases(
+        self, fr_ids: Sequence[str], like_terms: Sequence[str] = (), *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """影响面检索的相似用例一路（FR-TD-002）：FR 标签精确命中为主、标题
+        短词 LIKE 兜底。只返活跃用例；优先级 P0→P3 确定性排序，同名按 URN。"""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if fr_ids:
+            placeholders = ",".join("?" for _ in fr_ids)
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM json_each(json_extract(raw_json,'$.tags')) "
+                f"WHERE value IN ({placeholders}))"
+            )
+            params.extend(fr_ids)
+        like_clauses = []
+        for term in like_terms:
+            if not term:
+                continue
+            like_clauses.append("title LIKE ?")
+            params.append(f"%{term}%")
+        if like_clauses:
+            clauses.append("(" + " OR ".join(like_clauses) + ")")
+        if not clauses:
+            return []
+        sql = (
+            "SELECT urn, raw_json FROM test_cases WHERE lifecycle='active' AND ("
+            + " OR ".join(clauses)
+            + ") ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 "
+            "WHEN 'P2' THEN 2 ELSE 3 END, urn LIMIT ?"
+        )
+        params.append(limit)
+        out: list[dict[str, Any]] = []
+        for r in self.conn.execute(sql, params).fetchall():
+            case = TestCase.model_validate_json(r["raw_json"])
+            out.append({
+                "urn": case.urn,
+                "external_id": case.external_id,
+                "title": case.title,
+                "module": case.module,
+                "priority": case.priority,
+                "tags": case.tags,
+                "text": " ".join([case.title, *case.steps])[:300],
+            })
+        return out
 
     # ── 审批 ───────────────────────────────────────────────────────────
     def save_approval(self, approval: Approval) -> None:

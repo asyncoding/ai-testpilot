@@ -12,7 +12,9 @@
     "degraded": false,
     "structured": {
       "answer": "四层兜底：系统停钟/接管页/kill-backup/状态对账",
-      "citations": ["urn:testpilot:fs-docs:document:docs/kill-backup.md"]
+      "citations": [
+        "urn:testpilot:fs-docs:document:docs/kill-backup.md"
+      ]
     }
   },
   "qa_unanswerable": {
@@ -21,13 +23,14 @@
     "tokens_out": 24,
     "degraded": true
   },
-
   "qa_intent_stale_code": {
     "text": "",
     "tokens_in": 60,
     "tokens_out": 12,
     "degraded": false,
-    "structured": {"intent": "code"}
+    "structured": {
+      "intent": "code"
+    }
   },
   "qa_answer_stale_code": {
     "text": "C.keep() 在 HEAD 已改为打印 changed 与 interval。",
@@ -61,13 +64,14 @@
       ]
     }
   },
-
   "qa_intent_kill_backup": {
     "text": "",
     "tokens_in": 64,
     "tokens_out": 10,
     "degraded": false,
-    "structured": {"intent": "incident"}
+    "structured": {
+      "intent": "incident"
+    }
   },
   "qa_answer_kill_backup": {
     "text": "当前规范是 30 秒兜底；历史 90 秒版本属于事故复盘证词。",
@@ -85,13 +89,14 @@
       ]
     }
   },
-
   "qa_intent_unanswerable": {
     "text": "",
     "tokens_in": 58,
     "tokens_out": 9,
     "degraded": false,
-    "structured": {"intent": "howto"}
+    "structured": {
+      "intent": "howto"
+    }
   },
   "qa_answer_unanswerable": {
     "text": "未知：证据不足，拒绝生成无引用结论。",
@@ -99,21 +104,23 @@
     "tokens_out": 20,
     "degraded": true
   },
-
   "qa_intent_chitchat": {
     "text": "",
     "tokens_in": 40,
     "tokens_out": 8,
     "degraded": false,
-    "structured": {"intent": "out_of_scope"}
+    "structured": {
+      "intent": "out_of_scope"
+    }
   },
-
   "qa_intent_forged": {
     "text": "",
     "tokens_in": 55,
     "tokens_out": 10,
     "degraded": false,
-    "structured": {"intent": "howto"}
+    "structured": {
+      "intent": "howto"
+    }
   },
   "qa_answer_forged": {
     "text": "伪造引用稿（首次）。",
@@ -147,13 +154,14 @@
       ]
     }
   },
-
   "qa_intent_retry_ok": {
     "text": "",
     "tokens_in": 57,
     "tokens_out": 11,
     "degraded": false,
-    "structured": {"intent": "howto"}
+    "structured": {
+      "intent": "howto"
+    }
   },
   "qa_answer_retry_ok": {
     "text": "首稿伪造引用。",
@@ -194,8 +202,80 @@
     "degraded": false,
     "structured": {
       "links": [
-        {"ac_index": 0, "fr_ids": ["FR-1", "FR-2", "FR-2a"]},
-        {"ac_index": 1, "fr_ids": ["FR-5", "FR-6"]}
+        {
+          "ac_index": 0,
+          "fr_ids": [
+            "FR-1",
+            "FR-2",
+            "FR-2a"
+          ]
+        },
+        {
+          "ac_index": 1,
+          "fr_ids": [
+            "FR-5",
+            "FR-6"
+          ]
+        }
+      ]
+    }
+  },
+  "tp_gen:requirements/synthetic-requirements.md": {
+    "text": "",
+    "tokens_in": 820,
+    "tokens_out": 160,
+    "degraded": false,
+    "structured": {
+      "points": [
+        {
+          "fr_id": "FR-1",
+          "text": "磁盘空间不足时创建备忘应明确报错且不留半截记录",
+          "kind": "boundary",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-1"
+          ]
+        },
+        {
+          "fr_id": "FR-2",
+          "text": "并发编辑同一备忘时串行化处理，不得产生互相覆盖的修改历史",
+          "kind": "negative",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-2",
+            "urn:testpilot:fs-reqs:requirement_rule:requirements/synthetic-requirements.md#NFR-1"
+          ]
+        },
+        {
+          "fr_id": "FR-5",
+          "text": "响铃确认前杀掉进程，重启后不得重复弹出同一条提醒",
+          "kind": "negative",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-5"
+          ]
+        },
+        {
+          "fr_id": "FR-999",
+          "text": "幻觉行：引用不存在的功能点",
+          "kind": "boundary",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-1"
+          ]
+        },
+        {
+          "fr_id": "FR-3",
+          "text": "幻觉行：来源 URN 不在白名单",
+          "kind": "negative",
+          "source_refs": [
+            "urn:testpilot:made-up:requirement:requirements/synthetic-requirements.md#FR-3"
+          ]
+        },
+        {
+          "fr_id": "FR-5",
+          "text": "验证「到点弹出全屏提醒并循环响铃直到确认」主流程可用",
+          "kind": "boundary",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-5"
+          ]
+        }
       ]
     }
   }
