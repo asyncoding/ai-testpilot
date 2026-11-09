@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import OutboxStatus
+from testpilot_core.oracle_mining import MinedOracle, suggestion_urn
 from testpilot_core.requirement import RequirementParseResult
 from testpilot_core.testpoint import point_urn
 from testpilot_core.models import (
@@ -829,6 +830,88 @@ class Store:
         return int(
             self.conn.execute("SELECT COUNT(*) AS n FROM test_points").fetchone()["n"]
         )
+
+    # ── oracle 挖掘草稿（S2.4 FR-TD-003，schema v11）────────────────────
+    def upsert_oracle_suggestion(
+        self, doc_urn: str, case_urn: str, external_id: str, oracle: MinedOracle, *,
+        status: str = "pending", exploratory: bool = False,
+        content_hash: str, branch: str = "main",
+    ) -> None:
+        """投影列供 SQL 盘点/审批过滤，完整 MinedOracle 以 raw_json 还原。
+
+        草稿恒带 status=pending：本表不是正式用例库，S2.5 HITL 批准才回写
+        test_cases（FR-TD-004 AC1）。
+        """
+        self.conn.execute(
+            """INSERT INTO oracle_suggestions
+               (urn, doc_urn, case_urn, external_id, oracle_type, expectation,
+                source_kind, provenance, source_refs, confidence, status, exploratory,
+                content_hash, branch, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(urn) DO UPDATE SET
+                 doc_urn=excluded.doc_urn, oracle_type=excluded.oracle_type,
+                 expectation=excluded.expectation, source_kind=excluded.source_kind,
+                 provenance=excluded.provenance, source_refs=excluded.source_refs,
+                 confidence=excluded.confidence, status=excluded.status,
+                 exploratory=excluded.exploratory, content_hash=excluded.content_hash,
+                 branch=excluded.branch, raw_json=excluded.raw_json""",
+            (
+                suggestion_urn(external_id, oracle), doc_urn, case_urn, external_id,
+                oracle.type.value, oracle.expectation, oracle.source_kind,
+                oracle.provenance,
+                json.dumps(oracle.source_refs, ensure_ascii=False),
+                oracle.confidence, status, 1 if exploratory else 0,
+                content_hash, branch, oracle.model_dump_json(),
+            ),
+        )
+        self.conn.commit()
+
+    def delete_oracle_suggestions_for_doc(self, doc_urn: str) -> int:
+        """整文档替换前清旧（重灌幂等：文档内删除的用例草稿不残留，防幽灵）。"""
+        cur = self.conn.execute(
+            "DELETE FROM oracle_suggestions WHERE doc_urn=?", (doc_urn,)
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def delete_oracle_suggestions_for_case(self, case_urn: str) -> int:
+        """单用例草稿清理（取消态清理/S2.5 单点回滚预留）。"""
+        cur = self.conn.execute(
+            "DELETE FROM oracle_suggestions WHERE case_urn=?", (case_urn,)
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def list_oracle_suggestions(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT case_urn, external_id, status, exploratory, raw_json "
+            "FROM oracle_suggestions ORDER BY external_id, indexed_at"
+        ).fetchall()
+        return [
+            {
+                "case_urn": r["case_urn"],
+                "external_id": r["external_id"],
+                "status": r["status"],
+                "exploratory": bool(r["exploratory"]),
+                "oracle": MinedOracle.model_validate_json(r["raw_json"]),
+            }
+            for r in rows
+        ]
+
+    def count_oracle_suggestions(self) -> int:
+        return int(
+            self.conn.execute(
+                "SELECT COUNT(*) AS n FROM oracle_suggestions"
+            ).fetchone()["n"]
+        )
+
+    def list_case_doc_rows(self) -> list[dict[str, Any]]:
+        """oracle worker 的增量输入：用例→所属文档/hash/分支投影（含取消态）。"""
+        rows = self.conn.execute(
+            "SELECT urn, doc_urn, content_hash, branch, lifecycle "
+            "FROM test_cases ORDER BY doc_urn, source_line"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def search_test_cases(
         self, fr_ids: Sequence[str], like_terms: Sequence[str] = (), *, limit: int = 10

@@ -40,14 +40,16 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（550 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（580 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
 # 意图免模型旁路）、S1.6 评测（golden 结构、hostless 裁判红→绿、runner 投影/双形态/
 # hermetic 备份/容器端到端）、S2.1 用例文档解析（双格式/缺预期/取消/死信/老库 v8 迁移）、
 # S2.2 需求骨架抽取（FR/NFR/AC/缺口/白名单链接/老库 v9 迁移）、
-# S2.3 测试点生成（确定性脊柱/白名单补点/幻觉死信/专家盲标/老库 v10 迁移）；
+# S2.3 测试点生成（确定性脊柱/白名单补点/幻觉死信/专家盲标/老库 v10 迁移）、
+# S2.4 oracle 四源挖掘（AC/现有断言/事故义务句确定性三源、白名单模型补点、
+# AC3 探索性判定、草稿表/老库 v11 迁移）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -809,3 +811,55 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
      降级时确定性脊柱 49 点完整兜底、零编造。7B 模型补点与专家盲标的门禁差距
      （覆盖 0.69、精确率 0.67–0.70）作为 S2.4/S2.6 的提示词/证据增强输入，不松门禁。
 - 全量 **550 passed**（S2.3 净增 42）、import-lint OK；A12 单跑通过，不触碰 8765 端口。
+
+## oracle 四源挖掘（S2.4，FR-TD-003）：确定性三源地板、白名单模型补点与 AC3 探索性闸门
+
+第四刀：结构化用例 → 每条都能追溯来源的 oracle 草稿。同一纪律第四次落地：
+**core 零依赖挖掘器产出完整草稿地板，LLM 只对 oracle_missing 用例、只在封闭
+白名单内补点**；草稿恒为 pending，不回写正式用例库（S2.5 HITL 审批才转正）。
+
+### 挖掘契约
+
+| 维度 | 行为 |
+|---|---|
+| 源①需求 AC | 用例 FR tag 与骨架 AC 的 `linked_fr_ids` 确定性 join，一条 AC 一条 oracle，分类复用 S2.1 `classify_oracle`，需求是权威源置信度 **0.7**，source_refs 带 AC URN + FR URN；无 FR tag/无骨架时该源为空，不报错 |
+| 源②现有断言 | 用例自身 S2.1 oracle 原样保留（出处 URN 不丢）+ 相似活跃用例（`search_test_cases` FR/标题命中）断言平移，置信度 0.5；同文本跨源去重 |
+| 源③历史缺陷 | 只抽事故证据中含义务标记（必须/不得/严禁/确保/应该/不应/不可/禁止）的句子，**叙述句不升级为断言**（无断言效力，抽出来就是编造）；单证据上限 3 句防灌满，置信度 0.5 |
+| 源④当前代码 | code_symbol 证据**只作模型白名单锚点，确定性侧不编造 expectation 文本**；无中生有的断言即幻觉，符号 URN 随证据登记可观测 |
+| 模型补点 | 预算守卫：**仅 `oracle_missing` 用例调用**（报告 `model_calls` 可观测）；type 限四类枚举、source_refs 必须是「需求 URN ∪ 证据 URN ∪ 相似用例 URN」子集；违规逐行进 `RejectedOracle`（bad_type/unknown_source/empty_text/bad_shape），worker 落 `dead_letters`（source=`oracle-mine`）；整包形状错抛异常 → 确定性降级；模型置信度统一 **0.5**（S2.5 confirmed 才 +0.3，模型不能自标高置信） |
+| AC3 探索性 | 挖完仍无任何 ui/log/state 可执行 oracle（manual 不算可执行）→ `exploratory=True` 并回写正式 `test_cases`，原因单列（oracle_missing_no_executable_mined / manual_only / no_source_available / 模型补救失败）；探索性用例不进自动化执行链路 |
+| 幂等 | 草稿 URN 内容寻址（`suggestion_urn` = type|expectation 哈希）；meta hash 按用例文档增量跳过，重灌按 **doc_urn 文档级整组清扫**（被删用例的孤儿草稿也回收）；schema v11 新表 `oracle_suggestions`，status 恒 pending |
+
+### 运行方式
+
+```bash
+# 自动门禁 A13（前置：A10 用例入库 + A11 需求骨架；录制夹具含 2 合法 + 2 投毒行）：
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python -m testpilot_workers.mine_oracles --full
+
+# 真档探针（非 CI 门禁；语料仓只读、路径参数化、hermetic 不写业务库，报告落 out/eval/）：
+.venv/bin/python scripts/oracle_probe.py \
+  ~/Documents/Code/app-calendar-alarm/docs/V1测试用例文档.md \
+  --requirements ~/Documents/Code/app-calendar-alarm/docs/V1需求文档-强提醒闹钟.md
+# 附加本机 Ollama（仅对 oracle_missing 用例发单请求，白名单校验在内存进行）：
+.venv/bin/python scripts/oracle_probe.py <用例.md> --requirements <需求.md> --mine-model
+```
+
+### 验收证据（2026-11-09）
+
+- 合成夹具全链路（hermetic 临时库 + 录制模型）：**14 草稿 = 12 确定性 + 2 模型补点**，
+  2 投毒行进 oracle-mine 死信（bad_type/unknown_source），幻觉率 0.5 如实入账；
+  模型只对 1 条 oracle_missing 用例发起 1 次调用（预算守卫）；无录制键用例确定性
+  降级成功且 AC3 标记探索性；文档级清扫回收被删用例草稿（幽灵专项测试）；
+  老库 v10→v11 幂等迁移（五个迁移 pin 测试同步钉 11）。
+- V1 真档确定性探针（51 条活跃用例）：独立正则双向对账零分歧——缺预期用例 TC-A4
+  与解析器 `oracle_missing` 精确对齐，取消态 TC-B6（ID 无删除线、末列「取消」单元格，
+  探针补齐第二种表格取消识别）无泄漏；63 条现有断言四分类落位（ui 19/manual 23/
+  log 11/state 10），**16 条探索性用例**（manual-only 或无可用源）被 AC3 挡在
+  自动化链路外，零 AC3 违规。
+- 真模型 hermetic（qwen2.5:7b，仅 TC-A4 一次调用）：产出 1 条 ui_assertion
+  「应用前台接管全屏页面且声音不断响铃与震动」，source_refs 逐字命中白名单
+  FR-2 URN（可追溯到需求条目，AC2），零拒入，TC-A4 从探索性转为有可执行草稿
+  （草稿仍待 S2.5 人审，不自动转正）。
+- 全量 **580 passed**（S2.4 净增 30：core 22 + worker 8）、import-lint OK；
+  A13 单跑通过，不触碰 8765 端口。

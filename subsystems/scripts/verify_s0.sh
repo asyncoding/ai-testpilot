@@ -4,7 +4,9 @@
 # （golden smoke 题集 + 录制模型，确定性验证评测 runner 全链路），A10 为 S2.1
 # 用例文档连接器探针（合成夹具全链路入库，含损坏行死信与取消/缺预期标记），
 # A11 为 S2.2 需求骨架抽取探针（合成夹具 + 录制模型 AC↔FR 链接，白名单 fail-closed），
-# A12 为 S2.3 测试点生成探针（确定性脊柱 13 点 + 录制模型补点，2 投毒行进 tp-gen 死信）。
+# A12 为 S2.3 测试点生成探针（确定性脊柱 13 点 + 录制模型补点，2 投毒行进 tp-gen 死信），
+# A13 为 S2.4 oracle 四源挖掘探针（确定性三源 12 草稿 + 录制模型补 TC-N2，2 投毒行进
+# oracle-mine 死信；v11 oracle_suggestions 草稿表不碰正式用例库）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -164,7 +166,30 @@ else
   echo "FAIL  见 /tmp/tp_tps_a12.log"; fail_n=$((fail_n+1))
 fi
 
+echo "=== A13. oracle 四源挖掘（S2.4 FR-TD-003：A10/A11 为前置，确定性三源+录制模型白名单补点） ==="
+# 前置依赖：A10 用例（7 入库/2 取消/1 缺预期）与 A11 骨架在同一 offline 库。
+# 录制 oracle_mine 夹具含 4 行：2 合法补点 + 2 投毒（bad_type/unknown_source）。
+# 不断言证据计数：FTS 语料状态随 A5/A7/A9 变化，检索降级只计数不阻断（单测已钉死该口径）。
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  $PY -m testpilot_workers.mine_oracles --full > /tmp/tp_oracle_a13.log 2>&1 || true
+if grep -q '"status": "succeeded"' /tmp/tp_oracle_a13.log \
+  && grep -q '"cases_seen": 7' /tmp/tp_oracle_a13.log \
+  && grep -q '"cases_rebuilt": 5' /tmp/tp_oracle_a13.log \
+  && grep -q '"cases_cancelled": 2' /tmp/tp_oracle_a13.log \
+  && grep -q '"suggestions_total": 14' /tmp/tp_oracle_a13.log \
+  && grep -q '"deterministic_oracles": 12' /tmp/tp_oracle_a13.log \
+  && grep -q '"model_oracles": 2' /tmp/tp_oracle_a13.log \
+  && grep -q '"model_rejected": 2' /tmp/tp_oracle_a13.log \
+  && grep -q '"model_calls": 1' /tmp/tp_oracle_a13.log \
+  && grep -q '"hallucination_rate": 0.5' /tmp/tp_oracle_a13.log \
+  && grep -q '"degraded_cases": 0' /tmp/tp_oracle_a13.log; then
+  echo "PASS  14 草稿（12 确定性+2 模型）/2 幻觉拒入 oracle-mine 死信/取消 2 用例不挖掘"
+  pass_n=$((pass_n+1))
+else
+  echo "FAIL  见 /tmp/tp_oracle_a13.log"; fail_n=$((fail_n+1))
+fi
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

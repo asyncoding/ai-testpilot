@@ -278,5 +278,43 @@
         }
       ]
     }
+  },
+  "oracle_mine:cases/synthetic-cases.md#TC-N2": {
+    "text": "",
+    "tokens_in": 900,
+    "tokens_out": 180,
+    "degraded": false,
+    "structured": {
+      "oracles": [
+        {
+          "type": "state_assertion",
+          "expectation": "操作后目标记录落库且字段完整可回查",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-1"
+          ]
+        },
+        {
+          "type": "log_assertion",
+          "expectation": "日志出现可归因的操作事件标记",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#AC-1"
+          ]
+        },
+        {
+          "type": "snapshot_assertion",
+          "expectation": "投毒：四类枚举之外的 type",
+          "source_refs": [
+            "urn:testpilot:fs-reqs:requirement:requirements/synthetic-requirements.md#FR-1"
+          ]
+        },
+        {
+          "type": "ui_assertion",
+          "expectation": "投毒：来源 URN 不在白名单",
+          "source_refs": [
+            "urn:testpilot:made-up:requirement:x#FR-999"
+          ]
+        }
+      ]
+    }
   }
 }

@@ -355,6 +355,33 @@ CREATE TABLE IF NOT EXISTS test_points (
 CREATE INDEX IF NOT EXISTS idx_test_points_doc ON test_points(doc_urn);
 CREATE INDEX IF NOT EXISTS idx_test_points_fr ON test_points(fr_id);
 
+-- oracle 挖掘草稿（S2.4 FR-TD-003，schema v11）：四源挖掘的产物，status 恒为
+-- pending 草稿，**不回写正式 test_cases.oracles**，S2.5 HITL 审批后才转正（FR-TD-004）。
+-- URN 内容寻址（case external_id + type|expectation 哈希），按 case_urn 整案替换防幽灵；
+-- 被白名单拒入的模型行进 dead_letters(source=oracle-mine)，不进本表。
+-- exploratory=1 表示该用例挖完仍无可执行 oracle（AC3），自动化链路据此排除。
+CREATE TABLE IF NOT EXISTS oracle_suggestions (
+    urn            TEXT PRIMARY KEY,
+    doc_urn        TEXT NOT NULL,
+    case_urn       TEXT NOT NULL,
+    external_id    TEXT NOT NULL,
+    oracle_type    TEXT NOT NULL,
+    expectation    TEXT NOT NULL,
+    source_kind    TEXT NOT NULL,
+    provenance     TEXT NOT NULL DEFAULT 'deterministic',
+    source_refs    TEXT NOT NULL DEFAULT '[]',
+    confidence     REAL NOT NULL DEFAULT 0.5,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    exploratory    INTEGER NOT NULL DEFAULT 0,
+    content_hash   TEXT NOT NULL,
+    branch         TEXT NOT NULL DEFAULT 'main',
+    raw_json       TEXT NOT NULL,
+    indexed_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_oracle_suggestions_doc ON oracle_suggestions(doc_urn);
+CREATE INDEX IF NOT EXISTS idx_oracle_suggestions_case ON oracle_suggestions(case_urn);
+CREATE INDEX IF NOT EXISTS idx_oracle_suggestions_status ON oracle_suggestions(status);
+
 -- 任务队列（offline profile 的 QueuePort 实现）
 CREATE TABLE IF NOT EXISTS jobs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
