@@ -47,7 +47,10 @@ adapters:
       authority_overrides:
         - glob: "docs/kill-backup.md"
           level: L1_authoritative
-  cases:      {type: stub}          # S2: markdown
+  cases:                          # S2.1 FR-CON-003：用例 Markdown 连接器
+    type: fs-cases
+    settings:
+      roots: [tests/fixtures/cases]
   tickets:
     type: json
     settings: {}

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 自动门禁一键验收（docs/07 §10）：A1–A6 为 S0 骨架门禁，A7 为 S1.4 离线问答探针，
 # A8 为 S1.5 问答 HTTP API 冒烟（真实 uvicorn + curl），A9 为 S1.6 离线评测探针
-# （golden smoke 题集 + 录制模型，确定性验证评测 runner 全链路）。
+# （golden smoke 题集 + 录制模型，确定性验证评测 runner 全链路），A10 为 S2.1
+# 用例文档连接器探针（合成夹具全链路入库，含损坏行死信与取消/缺预期标记）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -104,7 +105,23 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   && { echo "PASS  $(grep '通过' /tmp/tp_eval_probe.log | tail -1)"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_eval_probe.log"; fail_n=$((fail_n+1)); }
 
+echo "=== A10. 用例文档连接器（S2.1 FR-CON-003：合成夹具 --full 入库，partial 形状确定性断言） ==="
+# 夹具故意含 1 条列数损坏行，worker 按设计 exit 1；门禁断言 JSON 形状而非退出码。
+# --full 强制整组重建，避免增量跳过导致 cases_upserted 不确定。
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  $PY -m testpilot_workers.ingest_cases --full > /tmp/tp_cases_a10.log 2>&1 || true
+if grep -q '"status": "partial"' /tmp/tp_cases_a10.log \
+  && grep -q '"cases_upserted": 7' /tmp/tp_cases_a10.log \
+  && grep -q '"parse_dead_letters": 1' /tmp/tp_cases_a10.log \
+  && grep -q '"cancelled": 2' /tmp/tp_cases_a10.log \
+  && grep -q '"oracle_missing": 1' /tmp/tp_cases_a10.log; then
+  echo "PASS  7 用例入库 / 1 死信 / 2 取消 / 1 缺预期（FR-CON-003 双格式+隔离全链路）"
+  pass_n=$((pass_n+1))
+else
+  echo "FAIL  见 /tmp/tp_cases_a10.log"; fail_n=$((fail_n+1))
+fi
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

@@ -58,7 +58,7 @@ def test_v4_store_upgrades_to_current_with_qa_runs(tmp_path):
     # 重开：幂等补建 + 版本升到当前版本，新表直接带 v6 列
     store2 = bootstrap_store(tmp_path)
     try:
-        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "7"
+        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "8"
         assert "qa_runs" in _table_names(store2.conn)
         assert {"idx_qa_runs_ts", "idx_qa_runs_status", "idx_feedback_run_id"} <= _index_names(store2.conn)
         assert "citation_errors" in _column_names(store2.conn, "qa_runs")
@@ -143,7 +143,7 @@ def test_v5_qa_runs_alter_adds_citation_errors_with_default(tmp_path):
 
     store2 = bootstrap_store(tmp_path)
     try:
-        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "7"
+        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "8"
         assert "citation_errors" in _column_names(store2.conn, "qa_runs")
         # v7 的 intent_source 随同一轮迁移链补上，老行吃 DEFAULT ''（legacy 不造数）
         assert "intent_source" in _column_names(store2.conn, "qa_runs")
@@ -236,7 +236,7 @@ def test_v6_qa_runs_alter_adds_intent_source_with_default(tmp_path):
 
     store2 = bootstrap_store(tmp_path)
     try:
-        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "7"
+        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "8"
         assert "intent_source" in _column_names(store2.conn, "qa_runs")
         # 老行无损：intent_source 吃 DEFAULT ''，既有 v6 列原样可读
         old = store2.get_qa_run("run-1")

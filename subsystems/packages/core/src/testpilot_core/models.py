@@ -177,6 +177,12 @@ class TestCase(BaseModel):
     tags: list[str] = Field(default_factory=list)
     requirement_urn: str | None = None
     version: str | None = None
+    # S2.1 文档解析期元数据（FR-CON-003）：模块归属/优先级/生命周期/原文行号，
+    # 均带默认值，AI 草稿与执行链路构造 TestCase 时不受影响
+    module: str = ""
+    priority: Literal["P0", "P1", "P2", "P3", ""] = ""
+    lifecycle: Literal["active", "cancelled"] = "active"
+    source_line: int | None = None  # 1-based，标题行或表格行，供证据反查
 
 
 class TestCaseDraft(BaseModel):

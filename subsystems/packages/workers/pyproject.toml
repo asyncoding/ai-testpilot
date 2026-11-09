@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 testpilot-ingest = "testpilot_workers.ingest:main"
+testpilot-ingest-cases = "testpilot_workers.ingest_cases:main"
 testpilot-runner = "testpilot_workers.runner:main"
 testpilot-eval = "testpilot_workers.eval_worker:main"
 

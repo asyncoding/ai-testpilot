@@ -109,6 +109,20 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif swift_chunker_kind != "lexical":
         raise ValueError(f"未知 swift_chunker 配置: {swift_chunker_kind}")
 
+    # ── 用例文档连接器（S2.1 FR-CON-003：fs-cases 只读扫描 + core 解析）──
+    if a.cases.type == "fs-cases":
+        from testpilot_adapters.case_docs import CaseDocumentAdapter
+
+        cs = a.cases.settings
+        case_roots = [_resolve(r) for r in cs.get("roots", [])] or [fixtures_dir / "cases"]
+        container.adapters["cases"] = CaseDocumentAdapter(
+            case_roots,
+            excludes=cs.get("excludes", []),
+            branch=config.project.default_branch,
+        )
+    elif a.cases.type != "stub":
+        raise ValueError(f"未知 cases 适配器类型: {a.cases.type}")
+
     # ── 工单 ──
     if a.tickets.type == "json":
         ticket_fixtures = _p(fixtures_dir, "tickets")
@@ -257,8 +271,8 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.search.type != "stub":
         raise ValueError(f"未知 search 适配器类型: {a.search.type}")
 
-    # stub 位（后续里程碑实现）：cases / environment / logs
-    for name in ("cases", "environment", "logs"):
+    # stub 位（后续里程碑实现）：environment / logs
+    for name in ("environment", "logs"):
         ref = getattr(a, name)
         if ref.type != "stub":
             raise ValueError(f"适配器 {name} 的类型 {ref.type} 将在后续里程碑实现")

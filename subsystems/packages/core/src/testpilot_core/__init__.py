@@ -10,6 +10,8 @@
 # （quote_not_verbatim/urn_not_in_evidence/no_citations），老库经 _COLUMN_MIGRATIONS ALTER 补列。
 # v7（P4 延迟治理）：qa_runs 增 intent_source 列，区分意图来源 regex_bypass（确定性
 # 免模型）/ model / fallback，支撑两类 run 的延迟 SQL 切片对比。
-SCHEMA_VERSION = 7
+# v8（S2.1 FR-CON-003）：新增 test_cases 表承载用例文档解析结果；解析死信复用
+# dead_letters（source=fs-cases）。老库经 schema.sql CREATE IF NOT EXISTS 幂等补建。
+SCHEMA_VERSION = 8
 
 __all__ = ["SCHEMA_VERSION"]

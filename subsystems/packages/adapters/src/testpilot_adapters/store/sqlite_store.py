@@ -22,6 +22,7 @@ from testpilot_core.models import (
     OutboxRecord,
     Relation,
     SourceDocument,
+    TestCase,
 )
 
 
@@ -106,6 +107,14 @@ class Store:
     def get_meta(self, key: str) -> str | None:
         row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute(
+            """INSERT INTO meta(key,value) VALUES(?,?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+            (key, value),
+        )
+        self.conn.commit()
 
     # ── 文档/切块 + FTS5 ────────────────────────────────────────────────
     def upsert_document(self, doc: SourceDocument) -> None:
@@ -657,6 +666,51 @@ class Store:
             (source, json.dumps(payload, ensure_ascii=False), error, _now_iso()),
         )
         self.conn.commit()
+
+    # ── 结构化用例（S2.1 FR-CON-003）────────────────────────────────────
+    def upsert_test_case(
+        self, doc_urn: str, case: TestCase, *, content_hash: str, branch: str = "main"
+    ) -> None:
+        """投影列供 SQL 盘点/过滤，完整模型以 raw_json 为唯一还原来源。"""
+        self.conn.execute(
+            """INSERT INTO test_cases
+               (urn, external_id, case_id, doc_urn, module, title, priority, lifecycle,
+                oracle_missing, step_count, oracle_count, source_line, content_hash,
+                branch, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(urn) DO UPDATE SET
+                 module=excluded.module, title=excluded.title, priority=excluded.priority,
+                 lifecycle=excluded.lifecycle, oracle_missing=excluded.oracle_missing,
+                 step_count=excluded.step_count, oracle_count=excluded.oracle_count,
+                 source_line=excluded.source_line, content_hash=excluded.content_hash,
+                 branch=excluded.branch, raw_json=excluded.raw_json""",
+            (
+                case.urn, case.external_id, case.external_id, doc_urn, case.module,
+                case.title, case.priority, case.lifecycle,
+                1 if case.oracle_missing else 0, len(case.steps), len(case.oracles),
+                case.source_line, content_hash, branch, case.model_dump_json(),
+            ),
+        )
+        self.conn.commit()
+
+    def delete_test_cases_for_doc(self, doc_urn: str) -> int:
+        """整文档替换前清旧（重灌幂等：文档内删除的用例不残留）。"""
+        cur = self.conn.execute("DELETE FROM test_cases WHERE doc_urn=?", (doc_urn,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def list_test_cases(self, *, include_cancelled: bool = True) -> list[TestCase]:
+        sql = "SELECT raw_json FROM test_cases"
+        if not include_cancelled:
+            sql += " WHERE lifecycle != 'cancelled'"
+        sql += " ORDER BY doc_urn, source_line"
+        return [TestCase.model_validate_json(r["raw_json"])
+                for r in self.conn.execute(sql).fetchall()]
+
+    def count_test_cases(self) -> int:
+        return int(
+            self.conn.execute("SELECT COUNT(*) AS n FROM test_cases").fetchone()["n"]
+        )
 
     # ── 审批 ───────────────────────────────────────────────────────────
     def save_approval(self, approval: Approval) -> None:

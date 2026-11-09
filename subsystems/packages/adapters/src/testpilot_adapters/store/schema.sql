@@ -290,6 +290,29 @@ CREATE TABLE IF NOT EXISTS dead_letters (
     created_at  TEXT NOT NULL
 );
 
+-- 结构化用例（S2.1 FR-CON-003）：用例 Markdown 连接器的解析产物。
+-- 死信不另起表：解析失败统一进 dead_letters（source='fs-cases'），UI 可查。
+-- 重灌幂等：URN 稳定（文档 external_id + TC ID），按 doc_urn 整组替换。
+CREATE TABLE IF NOT EXISTS test_cases (
+    urn            TEXT PRIMARY KEY,
+    external_id    TEXT NOT NULL,
+    case_id        TEXT NOT NULL,
+    doc_urn        TEXT NOT NULL,
+    module         TEXT NOT NULL DEFAULT '',
+    title          TEXT NOT NULL DEFAULT '',
+    priority       TEXT NOT NULL DEFAULT '',
+    lifecycle      TEXT NOT NULL DEFAULT 'active',
+    oracle_missing INTEGER NOT NULL DEFAULT 0,
+    step_count     INTEGER NOT NULL DEFAULT 0,
+    oracle_count   INTEGER NOT NULL DEFAULT 0,
+    source_line    INTEGER,
+    content_hash   TEXT NOT NULL,
+    branch         TEXT NOT NULL DEFAULT 'main',
+    raw_json       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_test_cases_doc ON test_cases(doc_urn);
+CREATE INDEX IF NOT EXISTS idx_test_cases_module ON test_cases(module);
+
 -- 任务队列（offline profile 的 QueuePort 实现）
 CREATE TABLE IF NOT EXISTS jobs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,

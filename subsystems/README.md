@@ -40,12 +40,13 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（413 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（480 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
 # 意图免模型旁路）、S1.6 评测（golden 结构、hostless 裁判红→绿、runner 投影/双形态/
-# hermetic 备份/容器端到端）；3 个 Chroma 真容器集成例在容器未起时自动 skip）
+# hermetic 备份/容器端到端）、S2.1 用例文档解析（双格式/缺预期/取消/死信/老库 v8 迁移）；
+# 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
 # 核心层防腐门禁（core 禁止 import fastapi/sqlite/yaml/各兄弟包等）
@@ -658,3 +659,50 @@ TESTPILOT_TRACER=langfuse \
 所有 profile 默认 `external_write_enabled: false`；JSON 工单适配器的写操作经
 `policy.assert_writable` 守卫（R2/R3 需审批、R4 禁止、全局 kill switch），
 outbox 先落库后外发。这是演示环境的安全底线，换真实适配器时不得绕过。
+
+## 用例文档连接器（S2.1，FR-CON-003）：双格式 Markdown 解析、缺预期标记与死信隔离
+
+测试设计纵切的第一块基石：把自由格式用例文档变成可检索、可评测的结构化用例。
+**core 解析器是零依赖纯函数**（`testpilot_core.testcase`，只依赖 stdlib + pydantic，
+import-lint 守卫），适配/落库在 adapters/workers 层，遵循既有分层。
+
+### 解析契约（V1 用例文档两种形态都覆盖）
+
+| 维度 | 行为 |
+|---|---|
+| 叙事体 | `## 模块` + `### TC-Xn 标题（FR 引用）P0` → 顶格编号步骤 → `**预期**：` 子弹（支持 `**预期**（备注）：` 夹注形态，TC-A7 实证）；嵌套缩进子弹/编号子项挂同一条 oracle |
+| 表格体 | 含 `ID` 列的表格按表头语义映射（步骤要点/步骤、预期、优先级/级、环境），列名不统一也能识别；无 ID 列的表（自动化现状/缺陷定级）整体跳过 |
+| 缺预期 | 有步骤无预期 → `oracle_missing=true` 但**不丢弃**（真档仅 TC-A4：无独立预期段，"预期"散文嵌在步骤里，原文不丢，留 S2.4 oracle 挖掘复评） |
+| 取消态 | 删除线标题/行或优先级=取消 → `lifecycle=cancelled`（真档 TC-B6），留存不参与漏报统计 |
+| 死信 | 空壳用例/列数损坏行进 `CaseParseError`，单条失败不阻断整批；代码围栏内的标题/表格不是结构 |
+| oracle 四分类 | 确定性关键词规则分到 UI/日志/状态/人工四类，拿不准归 manual；每条回链来源文档 URN，置信度统一 0.5 待 S2.4 复评 |
+| 幂等 | URN = 文档 external_id + TC ID，同文档重解析 URN 不变；重灌按 doc_urn 整组替换，删用例不留幽灵 |
+
+### 运行方式
+
+```bash
+# 自动门禁 A10：合成夹具 --full 全链路入库（离线 profile，确定性断言 partial 形状：
+# 7 用例/1 死信/2 取消/1 缺预期；夹具故意带损坏行，worker 按设计 exit 1，门检验 JSON 形状）
+# 单跑（不与 A4/A8 的 8765 端口冲突）：
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python -m testpilot_workers.ingest_cases --full
+
+# 真档验证（非 CI 门禁；语料仓是另一个只读仓，路径参数化、不写死、不拷贝原文）：
+.venv/bin/python scripts/case_parse_probe.py \
+  ~/Documents/Code/app-calendar-alarm/docs/V1测试用例文档.md
+# 报告落 out/eval/case-parse-probe.{json,md}（gitignore），独立正则反查原文
+# TC 标记与解析结果一一对应，不一致/有死信 exit 1
+```
+
+### 验收证据（2026-11-09，V1 真档）
+
+- **52 个 TC 标记 → 52 解析成功，零死信、零漏解析**（探针独立计数对账）；
+  active 51 / cancelled 1（TC-B6）；P0 44 / P1 7 / 取消行无优先级 1；
+  oracle 分布 UI 20 / 人工 23 / 日志 11 / 状态 10；缺预期仅 TC-A4。
+- **红→绿实证一个真 bug**：TC-A7 的 `**预期**（回归说明）：` 夹注形态曾让旧正则
+  失配、整段预期丢失并误标 oracle_missing；先证旧正则失配（红），修复后探针
+  缺预期 2→1（TC-A7 收回 4 条 oracle），新增回归测试锁定（绿）。
+- 老库 v7→v8 平滑迁移（`test_cases` 表 IF NOT EXISTS 幂等补建）；
+  全量 **480 passed**、import-lint OK；A10 单跑通过。
+- 注意：ios-local-poc 活库（PID 64634 持有的 v7 库）下次进程重启时才会跑 v8 迁移，
+  当前运行进程不受影响；test_cases 是新表，对既有表零影响。

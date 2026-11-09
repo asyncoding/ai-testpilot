@@ -48,6 +48,9 @@ def test_container_wires_every_adapter(tmp_path, monkeypatch):
         assert isinstance(container.get("tracer"), NoopTracer)
         # S1.3：离线 profile 装录制型 scm（不访问任何真实 git 仓）
         assert isinstance(container.get("scm"), RecordedGitRepository)
+        # S2.1：离线 profile 装用例 Markdown 连接器（夹具根 tests/fixtures/cases）
+        from testpilot_adapters.case_docs import CaseDocumentAdapter
+        assert isinstance(container.get("cases"), CaseDocumentAdapter)
         # 离线 profile 不装向量适配器：入库跳过 embed、检索为 FTS-only
         assert container.get("vectors") is None
         # 文档/检索默认分支来自 project.default_branch（branch 一致性修复）
