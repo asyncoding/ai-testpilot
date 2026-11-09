@@ -410,3 +410,237 @@ button.primary:disabled {
   padding: 8px 12px;
   margin-bottom: 12px;
 }
+
+/* ── S2.5 人审/回写审批页（FR-UI-002 / FR-WR-001）────────────────────────── */
+.top-nav {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.top-nav a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.top-nav a:hover {
+  text-decoration: underline;
+}
+.ap-section-title {
+  font-size: 16px;
+  margin: 24px 0 10px;
+}
+.ap-notice {
+  background: var(--green-bg);
+  color: var(--green);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+/* kill switch 横幅：启用态用琥珀色提醒真实外写风险，停用态用灰色 */
+.kill-on {
+  border-left: 4px solid var(--amber);
+  background: var(--amber-bg);
+}
+.kill-off {
+  border-left: 4px solid var(--green);
+  background: var(--green-bg);
+}
+button.danger {
+  background: var(--red);
+  color: #fff;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+button.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ap-reviewer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+.ap-reviewer input {
+  flex: 1;
+  min-width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.ap-card {
+  padding: 14px 16px;
+}
+.ap-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ap-urn {
+  display: block;
+  margin-top: 2px;
+}
+.ap-badges {
+  white-space: nowrap;
+}
+.tag-amber {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.ap-suggestion {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: #fbfcfd;
+}
+.ap-sg-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ap-oracle {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ap-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ap-field-grow {
+  flex: 1;
+  min-width: 280px;
+}
+.ap-field select,
+.ap-field textarea {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+}
+.ap-field textarea[readonly],
+.ap-field select:disabled {
+  background: var(--gray-bg);
+  color: var(--text);
+}
+.ap-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ap-meta em {
+  color: var(--green);
+  font-style: normal;
+}
+.ap-refs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ap-refs code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.ap-actions {
+  display: flex;
+  gap: 8px;
+}
+.ap-actions button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 16px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+.ap-actions button.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.ap-footer {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.ap-reason {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.ap-outbox-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ap-outbox-table th,
+.ap-outbox-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.ap-details {
+  margin-top: 6px;
+}
+.ap-details summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+.ap-pre {
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 8px;
+  overflow-x: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 4px 0;
+}
+.ap-error {
+  color: var(--red);
+}
+/* 状态徽章：outbox 与审批结论共用前缀 st- */
+.st {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  background: var(--gray-bg);
+  color: var(--muted);
+}
+.st-confirmed,
+.st-approved {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.st-failed,
+.st-rejected {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.st-pending {
+  background: var(--amber-bg);
+  color: var(--amber);
+}

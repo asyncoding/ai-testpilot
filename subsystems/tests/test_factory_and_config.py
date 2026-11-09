@@ -63,6 +63,89 @@ def test_container_wires_every_adapter(tmp_path, monkeypatch):
         container.get("store").close()
 
 
+def test_case_repo_wired_with_write_root_and_kill_switch(tmp_path):
+    # S2.5：offline profile 装配 MarkdownCaseRepository，写根在 data_dir 下、
+    # 与只读 fs-cases 夹具根物理隔离；kill switch 跟随 external_write_enabled
+    import asyncio
+    from datetime import datetime, timezone
+
+    from testpilot_adapters.case_repo import MarkdownCaseRepository
+    from testpilot_core.approval import CASE_REPO_TARGET_SYSTEM
+    from testpilot_core.enums import ActionLevel, ApprovalDecision
+    from testpilot_core.errors import PolicyDeniedError
+    from testpilot_core.models import Approval, OutboxRecord
+
+    config = load_profile(PROFILE)
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        repo = container.get("case_repo")
+        assert isinstance(repo, MarkdownCaseRepository)
+        assert repo.write_root == tmp_path / "data" / "case-writeback"
+
+        approval = Approval(
+            approval_id="ap-wb-1",
+            action_level=ActionLevel.R2_REVIEWED_WRITE,
+            target_system=CASE_REPO_TARGET_SYSTEM,
+            request_summary="用例回写接线测试",
+            decision=ApprovalDecision.APPROVED,
+            reviewer="expert-zhang",
+            decided_at=datetime(2026, 11, 9, tzinfo=timezone.utc),
+        )
+        container.get("store").save_approval(approval)
+        record = OutboxRecord(
+            idempotency_key="case-writeback:cases/x.md#TC-1#abc123def000",
+            action_level=ActionLevel.R2_REVIEWED_WRITE,
+            target_system=CASE_REPO_TARGET_SYSTEM,
+            request_body={
+                "doc_external_id": "cases/x.md",
+                "case_external_id": "TC-1",
+                "markdown": "## 模块\n\n### TC-1 标题 P1\n",
+            },
+            approval_id="ap-wb-1",
+        )
+        # profile 默认 external_write_enabled=false：策略层拦截，目录内零产物
+        with pytest.raises(PolicyDeniedError, match="kill switch"):
+            asyncio.run(repo.write_approved_record(record))
+        assert list(repo.write_root.rglob("*")) == []
+        assert container.write_policy.writes_enabled is False
+
+        # 模拟 profile 开启外写（运行期策略状态翻转）：同一适配器立即放行
+        container.write_policy.profile_enabled = True
+        assert container.write_policy.writes_enabled is True
+        ref = asyncio.run(repo.write_approved_record(record))
+        assert ref == f"{CASE_REPO_TARGET_SYSTEM}:cases/x/TC-1.md"
+        assert (repo.write_root / "cases/x/TC-1.md").read_text(
+            encoding="utf-8").startswith("## 模块")
+    finally:
+        container.get("store").close()
+
+
+def test_ios_profile_without_case_repo_stays_stub(tmp_path, monkeypatch):
+    # 向后兼容：ios-local-poc.yaml 未配 case_repo，stub 默认值保证零改动加载
+    monkeypatch.setenv("TESTPILOT_REPO_PATH", "/tmp/fake-repo")
+    config = load_profile(IOS_PROFILE)
+    assert config.adapters.case_repo.type == "stub"
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        assert container.get("case_repo") is None
+    finally:
+        container.get("store").close()
+
+
+def test_unknown_case_repo_type_rejected(tmp_path):
+    config = load_profile(PROFILE)
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    config.adapters.case_repo = config.adapters.case_repo.model_copy(
+        update={"type": "testrail-cloud"})
+    with pytest.raises(ValueError, match="未知 case_repo"):
+        build_container(config, SUBSYSTEMS)
+
+
 def test_ios_profile_wires_real_ollama_chroma_hybrid(tmp_path, monkeypatch):
     # 装配是纯构造（httpx 客户端懒连接），不起 ollama/chroma 也能验证接线
     monkeypatch.setenv("TESTPILOT_REPO_PATH", "/tmp/fake-repo")

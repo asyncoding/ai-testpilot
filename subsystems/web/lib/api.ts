@@ -1,14 +1,21 @@
 // 同源 fetch 封装：静态导出由 FastAPI 同端口托管，开发态经 next.config rewrites 代理。
 import type {
+  ApprovalRecord,
   AskRequest,
   AskResponse,
+  CaseDecisionHttpBody,
+  CaseDecisionPlan,
   ConfigResponse,
+  DispatchReport,
   FeedbackKind,
   FeedbackReason,
   FeedbackSummaryRow,
+  OutboxRecordView,
+  ReviewQueueItem,
   RunListItem,
   SourceEnvelope,
   TraceData,
+  WritePolicyView,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -74,4 +81,51 @@ export function submitFeedback(
 
 export function fetchFeedbackSummary(): Promise<FeedbackSummaryRow[]> {
   return request<FeedbackSummaryRow[]>("/api/qa/feedback/summary");
+}
+
+// ── S2.5 人审/回写（/api/approvals/*）────────────────────────────────────────
+
+export function fetchReviewQueue(): Promise<{ queue: ReviewQueueItem[] }> {
+  return request<{ queue: ReviewQueueItem[] }>("/api/approvals/queue");
+}
+
+export function decideCase(
+  caseUrn: string,
+  body: CaseDecisionHttpBody,
+): Promise<CaseDecisionPlan> {
+  // URN 含 '/' 与 '#'，必须全量百分号编码（'#' 否则被当 fragment 截断 → 404）
+  return request<CaseDecisionPlan>(
+    `/api/approvals/cases/${encodeURIComponent(caseUrn)}/decide`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function listApprovalRecords(
+  limit = 100,
+): Promise<{ records: ApprovalRecord[] }> {
+  return request<{ records: ApprovalRecord[] }>(
+    `/api/approvals/records?limit=${limit}`,
+  );
+}
+
+export function listOutboxRecords(): Promise<{ records: OutboxRecordView[] }> {
+  return request<{ records: OutboxRecordView[] }>("/api/approvals/outbox");
+}
+
+export function dispatchOutbox(): Promise<DispatchReport> {
+  return request<DispatchReport>("/api/approvals/outbox/dispatch", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function getWritePolicy(): Promise<WritePolicyView> {
+  return request<WritePolicyView>("/api/approvals/write-policy");
+}
+
+export function setWritePolicy(runtimeDisabled: boolean): Promise<WritePolicyView> {
+  return request<WritePolicyView>("/api/approvals/write-policy", {
+    method: "POST",
+    body: JSON.stringify({ runtime_disabled: runtimeDisabled }),
+  });
 }

@@ -58,6 +58,9 @@ adapters:
   tickets:
     type: json
     settings: {}
+  case_repo:                     # S2.5 FR-TD-004：人审回写 Markdown，写根 store/offline-demo/case-writeback
+    type: markdown-fs            # 与只读 fs-cases 物理隔离；external_write_enabled=false 时写入被策略层拦截
+    settings: {}
   ci_events:
     type: json-replay
     settings: {}

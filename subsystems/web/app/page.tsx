@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import AnswerCard from "@/components/AnswerCard";
 import Banner from "@/components/Banner";
@@ -63,6 +64,9 @@ export default function Home() {
     <main className="container">
       <h1>TestPilot 智能研发测试助手</h1>
       <p className="subtitle">对话页雏形（FR-UI-001）：问答 · 可溯源引用 · 三态版本标注 · 反馈 · trace</p>
+      <nav className="top-nav">
+        <Link href="/approvals">用例草稿人审与回写审批页（FR-UI-002）→</Link>
+      </nav>
 
       <Banner config={config} />
       {error && <div className="error-banner">请求失败：{error}</div>}

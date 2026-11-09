@@ -376,11 +376,34 @@ CREATE TABLE IF NOT EXISTS oracle_suggestions (
     content_hash   TEXT NOT NULL,
     branch         TEXT NOT NULL DEFAULT 'main',
     raw_json       TEXT NOT NULL,
+    -- S2.5 人审留痕（v12 老库 ALTER 补列）：评审后关联审批记录与评审人/时间/理由，
+    -- pending 草稿四列均为 NULL/空；重新挖掘的文档级清扫会整组回收后重建为 pending。
+    approval_id    TEXT,
+    reviewed_by    TEXT,
+    reviewed_at    TEXT,
+    decision_reason TEXT NOT NULL DEFAULT '',
     indexed_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_oracle_suggestions_doc ON oracle_suggestions(doc_urn);
 CREATE INDEX IF NOT EXISTS idx_oracle_suggestions_case ON oracle_suggestions(case_urn);
 CREATE INDEX IF NOT EXISTS idx_oracle_suggestions_status ON oracle_suggestions(status);
+
+-- 人工修改 diff 偏好样本（S2.5 FR-TD-004，schema v12）：仅 reviewer 选择 modify 时
+-- 产生，original/revised 双版本 + 字段级 diff 忠实留痕；S2.6 KNO-002 再做 L3 资产
+-- 版本化与 few-shot 回流。与 approvals 并列而非并入：审批是动作账本，样本是学习素材。
+CREATE TABLE IF NOT EXISTS preference_samples (
+    sample_id      TEXT PRIMARY KEY,
+    case_urn       TEXT NOT NULL,
+    suggestion_urn TEXT NOT NULL,
+    reviewer       TEXT NOT NULL,
+    reason         TEXT NOT NULL DEFAULT '',
+    original_json  TEXT NOT NULL,
+    revised_json   TEXT NOT NULL,
+    diff_json      TEXT NOT NULL DEFAULT '{}',
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_preference_samples_case ON preference_samples(case_urn);
+CREATE INDEX IF NOT EXISTS idx_preference_samples_suggestion ON preference_samples(suggestion_urn);
 
 -- 任务队列（offline profile 的 QueuePort 实现）
 CREATE TABLE IF NOT EXISTS jobs (

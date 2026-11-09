@@ -6,7 +6,9 @@
 # A11 为 S2.2 需求骨架抽取探针（合成夹具 + 录制模型 AC↔FR 链接，白名单 fail-closed），
 # A12 为 S2.3 测试点生成探针（确定性脊柱 13 点 + 录制模型补点，2 投毒行进 tp-gen 死信），
 # A13 为 S2.4 oracle 四源挖掘探针（确定性三源 12 草稿 + 录制模型补 TC-N2，2 投毒行进
-# oracle-mine 死信；v11 oracle_suggestions 草稿表不碰正式用例库）。
+# oracle-mine 死信；v11 oracle_suggestions 草稿表不碰正式用例库），A14 为 S2.5
+# 人审回写探针（tmp 库 hermetic：kill switch 拦截→开启→dispatch 落盘→解析器
+# round-trip→重放幂等→AC1 正式库零变更，全程不起端口、不碰 store/offline-demo）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -189,7 +191,15 @@ else
   echo "FAIL  见 /tmp/tp_oracle_a13.log"; fail_n=$((fail_n+1))
 fi
 
+echo "=== A14. 人审回写（S2.5 FR-TD-004/WR-001：tmp 库 hermetic 全流程，不起端口、不碰 offline 库） ==="
+# 探针内部用 tempfile 工作目录 + 独立写根，重复执行幂等；报告与样例落 out/eval（gitignore）。
+$PY scripts/approval_probe.py > /tmp/tp_approval_a14.log 2>&1 \
+  && grep -q '✅ approval_probe 全部通过' /tmp/tp_approval_a14.log \
+  && grep -q '③ AC1 正式 test_cases 零触碰' /tmp/tp_approval_a14.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_approval_a14.log) 项检查全绿（AC1 零触碰/blocked→confirmed/round-trip/重放幂等）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_approval_a14.log 与 out/eval/approval-probe.json"; fail_n=$((fail_n+1)); }
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

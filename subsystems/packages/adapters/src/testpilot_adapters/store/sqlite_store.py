@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from testpilot_core import SCHEMA_VERSION
+from testpilot_core.approval import CaseDecisionPlan
 from testpilot_core.enums import OutboxStatus
 from testpilot_core.oracle_mining import MinedOracle, suggestion_urn
 from testpilot_core.requirement import RequirementParseResult
@@ -23,6 +24,7 @@ from testpilot_core.models import (
     Feedback,
     KnowledgeChunk,
     OutboxRecord,
+    PreferenceSample,
     Relation,
     SourceDocument,
     TestCase,
@@ -52,6 +54,14 @@ _COLUMN_MIGRATIONS = {
         "embed_latency_ms": "INTEGER NOT NULL DEFAULT 0",
         "embed_error": "TEXT NOT NULL DEFAULT ''",
         "embedded_at": "TEXT",
+    },
+    # v12（S2.5 FR-TD-004）：oracle 草稿人审留痕四列，老库 ALTER 补列，
+    # pending 草稿默认 NULL/空串，与新库 CREATE TABLE 默认值对齐
+    "oracle_suggestions": {
+        "approval_id": "TEXT",
+        "reviewed_by": "TEXT",
+        "reviewed_at": "TEXT",
+        "decision_reason": "TEXT NOT NULL DEFAULT ''",
     },
 }
 
@@ -711,6 +721,13 @@ class Store:
         return [TestCase.model_validate_json(r["raw_json"])
                 for r in self.conn.execute(sql).fetchall()]
 
+    def get_test_case(self, case_urn: str) -> TestCase | None:
+        """单用例读取（S2.5 人审服务输入）；URN 不存在返回 None 由上层映射 404。"""
+        row = self.conn.execute(
+            "SELECT raw_json FROM test_cases WHERE urn=?", (case_urn,)
+        ).fetchone()
+        return TestCase.model_validate_json(row["raw_json"]) if row else None
+
     def count_test_cases(self) -> int:
         return int(
             self.conn.execute("SELECT COUNT(*) AS n FROM test_cases").fetchone()["n"]
@@ -913,6 +930,181 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    # ── S2.5 人审留痕（FR-TD-004 / FR-WR-001）────────────────────────────
+    @staticmethod
+    def _suggestion_row_to_dict(r: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "urn": r["urn"],
+            "doc_urn": r["doc_urn"],
+            "case_urn": r["case_urn"],
+            "external_id": r["external_id"],
+            "status": r["status"],
+            "exploratory": bool(r["exploratory"]),
+            "approval_id": r["approval_id"],
+            "reviewed_by": r["reviewed_by"],
+            "reviewed_at": r["reviewed_at"],
+            "decision_reason": r["decision_reason"],
+            "oracle": MinedOracle.model_validate_json(r["raw_json"]),
+        }
+
+    def list_pending_suggestions_for_case(self, case_urn: str) -> list[dict[str, Any]]:
+        """单用例待审草稿（审批服务的输入）；已评审草稿不返回。"""
+        rows = self.conn.execute(
+            "SELECT * FROM oracle_suggestions WHERE case_urn=? AND status='pending' "
+            "ORDER BY urn",
+            (case_urn,),
+        ).fetchall()
+        return [self._suggestion_row_to_dict(r) for r in rows]
+
+    def list_review_queue_rows(self) -> list[dict[str, Any]]:
+        """全库待审草稿（审批 API 队列端点），按用例 URN + 草稿 URN 排序。"""
+        rows = self.conn.execute(
+            "SELECT * FROM oracle_suggestions WHERE status='pending' "
+            "ORDER BY case_urn, urn"
+        ).fetchall()
+        return [self._suggestion_row_to_dict(r) for r in rows]
+
+    def mark_suggestion_reviewed(
+        self, urn: str, *, status: str, approval_id: str,
+        reviewer: str, reason: str, reviewed_at: str,
+    ) -> None:
+        """评审落账：status 翻 approved/rejected 并补四人审列。
+
+        只允许从 pending 翻转——对已评审草稿重复决策是接线 bug，响亮失败而非
+        静默覆盖（审批页并发双击由本守卫挡住）。
+        """
+        cur = self.conn.execute(
+            """UPDATE oracle_suggestions
+               SET status=?, approval_id=?, reviewed_by=?, reviewed_at=?,
+                   decision_reason=?
+               WHERE urn=? AND status='pending'""",
+            (status, approval_id, reviewer, reviewed_at, reason, urn),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"草稿不存在或已评审，无法落账: {urn}")
+        self.conn.commit()
+
+    def save_preference_sample(self, sample: PreferenceSample) -> None:
+        """人工修改 diff 偏好样本（仅 modify 产生）；sample_id 内容寻址，重放不翻倍。"""
+        self.conn.execute(
+            """INSERT INTO preference_samples
+               (sample_id, case_urn, suggestion_urn, reviewer, reason,
+                original_json, revised_json, diff_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(sample_id) DO NOTHING""",
+            (
+                sample.sample_id, sample.case_urn, sample.suggestion_urn,
+                sample.reviewer, sample.reason,
+                json.dumps(sample.original, ensure_ascii=False),
+                json.dumps(sample.revised, ensure_ascii=False),
+                json.dumps(sample.diff, ensure_ascii=False),
+                sample.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def list_preference_samples(self) -> list[PreferenceSample]:
+        rows = self.conn.execute(
+            "SELECT * FROM preference_samples ORDER BY created_at, sample_id"
+        ).fetchall()
+        return [
+            PreferenceSample(
+                sample_id=r["sample_id"],
+                case_urn=r["case_urn"],
+                suggestion_urn=r["suggestion_urn"],
+                reviewer=r["reviewer"],
+                reason=r["reason"],
+                original=json.loads(r["original_json"]),
+                revised=json.loads(r["revised_json"]),
+                diff=json.loads(r["diff_json"]),
+                created_at=datetime.fromisoformat(r["created_at"]),
+            )
+            for r in rows
+        ]
+
+    def persist_case_decision(self, plan: CaseDecisionPlan, *, reviewed_at: str) -> None:
+        """单事务落人审四件套：Approval + outbox + 偏好样本 + 草稿状态翻转。
+
+        任一步失败整体回滚（含并发双击撞上 pending 守卫时），绝不留「outbox
+        已记账但草稿仍 pending」的交错态。注意本方法**不写 test_cases**——
+        正式用例库只由摄入管线改写（FR-TD-004 AC1），回写走 outbox 派发落独立写根。
+        """
+        try:
+            self.conn.execute("BEGIN")
+            self.conn.execute(
+                """INSERT INTO approvals
+                   (approval_id, action_level, target_system, request_summary,
+                    request_diff, decision, reviewer, reason, based_on,
+                    created_at, decided_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(approval_id) DO UPDATE SET
+                     decision=excluded.decision, reviewer=excluded.reviewer,
+                     reason=excluded.reason, decided_at=excluded.decided_at""",
+                (
+                    plan.approval.approval_id, str(plan.approval.action_level),
+                    plan.approval.target_system, plan.approval.request_summary,
+                    json.dumps(plan.approval.request_diff, ensure_ascii=False),
+                    str(plan.approval.decision), plan.approval.reviewer,
+                    plan.approval.reason,
+                    json.dumps(plan.approval.based_on_versions, ensure_ascii=False),
+                    plan.approval.created_at.isoformat(),
+                    plan.approval.decided_at.isoformat()
+                    if plan.approval.decided_at else None,
+                ),
+            )
+            if plan.outbox is not None:
+                # 内容寻址幂等键：同内容重复评审不产生第二条 outbox（DO NOTHING）
+                self.conn.execute(
+                    """INSERT INTO outbox
+                       (idempotency_key, action_level, target_system, request_body,
+                        status, external_ref, approval_id, attempts, rollback_note,
+                        error, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(idempotency_key) DO NOTHING""",
+                    (
+                        plan.outbox.idempotency_key, str(plan.outbox.action_level),
+                        plan.outbox.target_system,
+                        json.dumps(plan.outbox.request_body, ensure_ascii=False),
+                        str(plan.outbox.status), plan.outbox.external_ref,
+                        plan.outbox.approval_id, plan.outbox.attempts,
+                        plan.outbox.rollback_note, plan.outbox.error,
+                        plan.outbox.created_at.isoformat(),
+                        plan.outbox.updated_at.isoformat(),
+                    ),
+                )
+            for sample in plan.preference_samples:
+                self.conn.execute(
+                    """INSERT INTO preference_samples
+                       (sample_id, case_urn, suggestion_urn, reviewer, reason,
+                        original_json, revised_json, diff_json, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(sample_id) DO NOTHING""",
+                    (
+                        sample.sample_id, sample.case_urn, sample.suggestion_urn,
+                        sample.reviewer, sample.reason,
+                        json.dumps(sample.original, ensure_ascii=False),
+                        json.dumps(sample.revised, ensure_ascii=False),
+                        json.dumps(sample.diff, ensure_ascii=False),
+                        sample.created_at.isoformat(),
+                    ),
+                )
+            for update in plan.suggestion_updates:
+                cur = self.conn.execute(
+                    """UPDATE oracle_suggestions
+                       SET status=?, approval_id=?, reviewed_by=?, reviewed_at=?,
+                           decision_reason=?
+                       WHERE urn=? AND status='pending'""",
+                    (update.status, plan.approval.approval_id,
+                     plan.approval.reviewer, reviewed_at, update.reason, update.urn),
+                )
+                if cur.rowcount == 0:
+                    # 双击/并发评审：整条事务回滚，前序审批/outbox 一并撤销
+                    raise ValueError(f"草稿不存在或已评审，无法落账: {update.urn}")
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+
     def search_test_cases(
         self, fr_ids: Sequence[str], like_terms: Sequence[str] = (), *, limit: int = 10
     ) -> list[dict[str, Any]]:
@@ -979,12 +1171,8 @@ class Store:
         )
         self.conn.commit()
 
-    def get_approval(self, approval_id: str) -> Approval | None:
-        row = self.conn.execute(
-            "SELECT * FROM approvals WHERE approval_id=?", (approval_id,)
-        ).fetchone()
-        if not row:
-            return None
+    @staticmethod
+    def _row_to_approval(row: sqlite3.Row) -> Approval:
         return Approval(
             approval_id=row["approval_id"],
             action_level=row["action_level"],
@@ -998,6 +1186,19 @@ class Store:
             created_at=datetime.fromisoformat(row["created_at"]),
             decided_at=datetime.fromisoformat(row["decided_at"]) if row["decided_at"] else None,
         )
+
+    def get_approval(self, approval_id: str) -> Approval | None:
+        row = self.conn.execute(
+            "SELECT * FROM approvals WHERE approval_id=?", (approval_id,)
+        ).fetchone()
+        return self._row_to_approval(row) if row else None
+
+    def list_approvals(self, *, limit: int = 100) -> list[Approval]:
+        """审批动作账本（FR-WR-001 AC2：评审人/时间/结论可浏览），新审批在前。"""
+        rows = self.conn.execute(
+            "SELECT * FROM approvals ORDER BY rowid DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_approval(r) for r in rows]
 
     # ── Outbox（先账后事）──────────────────────────────────────────────
     def add_outbox(self, record: OutboxRecord) -> int:
@@ -1026,6 +1227,10 @@ class Store:
             ).fetchall()
         )
 
+    def pending_outbox_records(self) -> list[OutboxRecord]:
+        """待派发队列（pending+failed）的模型化读口，S2.5 派发 worker 使用。"""
+        return [self._row_to_outbox(r) for r in self.list_pending_outbox()]
+
     def mark_outbox(self, idempotency_key: str, status: OutboxStatus, *, external_ref: str | None = None,
                     error: str = "") -> None:
         self.conn.execute(
@@ -1034,6 +1239,34 @@ class Store:
             (str(status), external_ref, error, _now_iso(), idempotency_key),
         )
         self.conn.commit()
+
+    def _row_to_outbox(self, r: sqlite3.Row) -> OutboxRecord:
+        return OutboxRecord(
+            id=r["id"],
+            idempotency_key=r["idempotency_key"],
+            action_level=r["action_level"],
+            target_system=r["target_system"],
+            request_body=json.loads(r["request_body"]),
+            status=OutboxStatus(r["status"]),
+            external_ref=r["external_ref"],
+            approval_id=r["approval_id"],
+            attempts=r["attempts"],
+            rollback_note=r["rollback_note"],
+            error=r["error"],
+            created_at=datetime.fromisoformat(r["created_at"]),
+            updated_at=datetime.fromisoformat(r["updated_at"]),
+        )
+
+    def list_outbox_records(self) -> list[OutboxRecord]:
+        """全量 outbox（审批页审计面板，FR-WR-001 AC1 四要素可浏览）。"""
+        rows = self.conn.execute("SELECT * FROM outbox ORDER BY id").fetchall()
+        return [self._row_to_outbox(r) for r in rows]
+
+    def get_outbox_record(self, idempotency_key: str) -> OutboxRecord | None:
+        r = self.conn.execute(
+            "SELECT * FROM outbox WHERE idempotency_key=?", (idempotency_key,)
+        ).fetchone()
+        return self._row_to_outbox(r) if r else None
 
     # ── 反馈 / 评测 ────────────────────────────────────────────────────
     def add_feedback(self, feedback: Feedback) -> int:

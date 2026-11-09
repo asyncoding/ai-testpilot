@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from .approval_api import approval_router
 from .config_loader import load_profile
 from .factory import Container, build_container
 from .qa_api import api_router, register_exception_handlers
@@ -96,6 +97,7 @@ def create_app(
     app = FastAPI(title="TestPilot Orchestrator", version="0.1.0", lifespan=lifespan)
     register_exception_handlers(app)
     app.include_router(api_router)
+    app.include_router(approval_router)
 
     @app.get("/health")
     async def health() -> dict:

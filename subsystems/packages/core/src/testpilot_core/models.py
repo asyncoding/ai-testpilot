@@ -425,6 +425,24 @@ class OutboxRecord(BaseModel):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class PreferenceSample(BaseModel):
+    """人工修改 diff 偏好样本（docs/08 FR-TD-004：diff 即偏好样本）。
+
+    只在 reviewer 选择 modify 时产生；original/revised 双版本 + 字段级 diff 留痕，
+    S2.6 KNO-002 再做 L3 资产版本化与 few-shot 回流，本里程碑只负责忠实落库。
+    """
+
+    sample_id: str
+    case_urn: str
+    suggestion_urn: str
+    reviewer: str
+    reason: str = ""
+    original: dict[str, Any]
+    revised: dict[str, Any]
+    diff: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 # ── 反馈 ──────────────────────────────────────────────────────────────────
 
 class Feedback(BaseModel):

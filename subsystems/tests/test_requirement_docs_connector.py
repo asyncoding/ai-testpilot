@@ -274,7 +274,7 @@ def test_legacy_database_bootstraps_s2_tables(tmp_path):
 
     upgraded = bootstrap_store(db_dir)
     try:
-        assert upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "11"
+        assert upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "12"
         tables = {
             r["name"] for r in upgraded.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"

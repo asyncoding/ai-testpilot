@@ -146,3 +146,131 @@ export interface FeedbackSummaryRow {
 export interface ApiError {
   error: { type: string; message: string };
 }
+
+// ── S2.5 用例草稿人审与回写（FR-TD-004 / FR-WR-001 / FR-UI-002）──────────────
+// 镜像后端 approval_api 的 model_dump(mode="json") 载荷；枚举均为字符串字面量。
+
+export type OracleTypeStr =
+  | "ui_assertion"
+  | "log_assertion"
+  | "state_assertion"
+  | "manual";
+export type SuggestionStatus = "pending" | "approved" | "rejected";
+export type ReviewAction = "adopt" | "modify" | "reject";
+export type ApprovalDecisionStr = "pending" | "approved" | "rejected";
+export type OutboxStatusStr = "pending" | "sent" | "confirmed" | "failed";
+export type SuggestionSourceKind =
+  | "requirement_ac"
+  | "existing_assertion"
+  | "incident"
+  | "code_symbol"
+  | "model_proposed";
+export type SuggestionProvenance = "deterministic" | "model";
+
+export interface MinedOracleView {
+  type: OracleTypeStr;
+  expectation: string;
+  source_refs: string[];
+  confidence: number;
+  source_kind: SuggestionSourceKind;
+  provenance: SuggestionProvenance;
+}
+
+export interface SuggestionView {
+  urn: string;
+  case_urn: string;
+  external_id: string;
+  status: SuggestionStatus | string;
+  exploratory: boolean;
+  oracle: MinedOracleView;
+}
+
+export interface ReviewQueueItem {
+  case_urn: string;
+  external_id: string;
+  title: string;
+  priority: string;
+  module: string;
+  exploratory: boolean;
+  oracle_missing: boolean;
+  suggestions: SuggestionView[];
+}
+
+export interface SuggestionDecisionHttp {
+  suggestion_urn: string;
+  action: ReviewAction;
+  // modify 时可改类型/期望；adopt/reject 留 null（携带会被 core fail-closed 拒绝）
+  oracle_type?: OracleTypeStr | null;
+  expectation?: string | null;
+}
+
+export interface CaseDecisionHttpBody {
+  decision: Exclude<ApprovalDecisionStr, "pending">;
+  reviewer: string;
+  reason?: string;
+  items: SuggestionDecisionHttp[];
+}
+
+export interface ApprovalRecord {
+  approval_id: string;
+  action_level: string; // 序列化值如 "R2"
+  target_system: string;
+  request_summary: string;
+  request_diff: Record<string, unknown>;
+  decision: ApprovalDecisionStr;
+  reviewer: string | null;
+  reason: string;
+  based_on_versions: Record<string, string>;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface OutboxRecordView {
+  id: number | null;
+  idempotency_key: string;
+  action_level: string;
+  target_system: string;
+  // 回写场景含 markdown/oracles/case_external_id 等；保持开放索引以便 details 直出
+  request_body: Record<string, string>;
+  status: OutboxStatusStr | string;
+  external_ref: string | null;
+  approval_id: string;
+  attempts: number;
+  rollback_note: string;
+  error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SuggestionUpdateView {
+  urn: string;
+  status: string;
+  reason: string;
+}
+
+export interface CaseDecisionPlan {
+  approval: ApprovalRecord;
+  outbox: OutboxRecordView | null; // 整案拒绝时为 null（无外部副作用）
+  preference_samples: unknown[];
+  suggestion_updates: SuggestionUpdateView[];
+  final_oracles: unknown[];
+  markdown: string;
+  idempotency_key: string;
+}
+
+export interface WritePolicyView {
+  profile_external_write_enabled: boolean;
+  runtime_disabled: boolean;
+  effective_writes_enabled: boolean;
+}
+
+export interface DispatchReport {
+  status: "succeeded" | "partial" | string;
+  scanned: number;
+  dispatched: number;
+  confirmed: number;
+  blocked: number;
+  failed: number;
+  skipped_unsupported: number;
+  results: unknown[];
+}

@@ -27,6 +27,9 @@ class AdapterSet(BaseModel):
     # S2.2 FR-TD-001：需求文档连接器；带 stub 默认值，老 profile 不配也能加载
     requirements: AdapterRef = Field(default_factory=lambda: AdapterRef(type="stub"))
     tickets: AdapterRef
+    # S2.5 FR-TD-004：人审回写用例库（markdown-fs 写独立写根 / stub 不装配）；
+    # 带 stub 默认值，老 profile（含 ios-local-poc）不配也能加载，零改动
+    case_repo: AdapterRef = Field(default_factory=lambda: AdapterRef(type="stub"))
     ci_events: AdapterRef
     runner: AdapterRef
     environment: AdapterRef

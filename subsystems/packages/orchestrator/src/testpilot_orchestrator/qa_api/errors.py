@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from testpilot_core.approval import ApprovalValidationError
 from testpilot_core.errors import (
     AdapterUnavailableError,
     EvidenceInsufficientError,
@@ -30,7 +31,7 @@ _STATUS_MAP: dict[type[TestPilotError], int] = {
 }
 
 
-def _error_body(exc: TestPilotError) -> dict:
+def _error_body(exc: Exception) -> dict:
     return {"error": {"type": type(exc).__name__, "message": str(exc)}}
 
 
@@ -51,3 +52,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=500, content=_error_body(exc))
 
     app.add_exception_handler(TestPilotError, fallback)
+
+    # S2.5：人审语义错误（幽灵 URN/覆盖不全/动作矛盾）是 ValueError 子类，
+    # 不在 TestPilotError 体系内，单独映射 422（与 EvidenceInsufficient 同位）
+    async def approval_validation_handler(
+        _request: Request, exc: ApprovalValidationError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content=_error_body(exc))
+
+    app.add_exception_handler(ApprovalValidationError, approval_validation_handler)

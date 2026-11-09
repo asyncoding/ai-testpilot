@@ -96,6 +96,30 @@ def classify_oracle(text: str) -> OracleType:
     return OracleType.MANUAL
 
 
+# S2.5 人审回写的显式类型标签：Markdown 预期子弹以「【UI 断言】…」开头时，
+# 类型由标签权威给定（不再走关键词猜测），保证回写文档被重新摄入时类型无损
+# round-trip；无标签的历史文档行为完全不变，仍走 classify_oracle。
+EXPLICIT_TYPE_LABELS: dict[OracleType, str] = {
+    OracleType.UI_ASSERTION: "UI 断言",
+    OracleType.LOG_ASSERTION: "日志断言",
+    OracleType.STATE_ASSERTION: "状态断言",
+    OracleType.MANUAL: "人工确认",
+}
+_EXPLICIT_TAG_RE = re.compile(r"^【(?P<label>[^】]+)】\s*(?P<rest>.*)$")
+
+
+def split_explicit_type(text: str) -> tuple[OracleType | None, str]:
+    """拆分显式类型标签；无标签/未知标签返回 (None, 原文)，调用方回退分类器。"""
+    match = _EXPLICIT_TAG_RE.match(text.strip())
+    if not match:
+        return None, text
+    label = match.group("label").strip()
+    for oracle_type, name in EXPLICIT_TYPE_LABELS.items():
+        if label == name:
+            return oracle_type, match.group("rest").strip()
+    return None, text
+
+
 # ── 叙事体解析 ──────────────────────────────────────────────────────────────
 
 class _NarrativeBuilder:
@@ -131,15 +155,18 @@ class _NarrativeBuilder:
                 case_id_hint=self.case_id, snippet=self.title,
                 error="用例块既无步骤也无预期，无法结构化",
             )
-        oracles = [
-            Oracle(
-                type=classify_oracle(text),
-                expectation=text,
-                source_refs=[make_urn(source_system, "document", doc_external_id)],
-                confidence=0.5,  # 文档解析只做确定性归类，置信度留给 S2.4 oracle 挖掘复评
+        oracles = []
+        for text in self.oracle_texts:
+            # 显式标签优先（S2.5 人审回写文档）；无标签回退关键词分类，历史行为不变
+            explicit_type, expectation = split_explicit_type(text)
+            oracles.append(
+                Oracle(
+                    type=explicit_type or classify_oracle(text),
+                    expectation=expectation,
+                    source_refs=[make_urn(source_system, "document", doc_external_id)],
+                    confidence=0.5,  # 文档解析只做确定性归类，置信度留给 S2.4 oracle 挖掘复评
+                )
             )
-            for text in self.oracle_texts
-        ]
         case = TestCase(
             urn=make_urn(source_system, "test_case", f"{doc_external_id}#{self.case_id}"),
             external_id=_strip_inline(self.case_id),

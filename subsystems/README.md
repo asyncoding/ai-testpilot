@@ -14,7 +14,7 @@ subsystems/
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
 ├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml
 ├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
-├── web/               # S1.5 对话页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
+├── web/               # S1.5 对话页 + S2.5 审批页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
 └── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify/qa_probe 探针、build_web
 ```
@@ -40,7 +40,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（580 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（632 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -49,7 +49,9 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # S2.2 需求骨架抽取（FR/NFR/AC/缺口/白名单链接/老库 v9 迁移）、
 # S2.3 测试点生成（确定性脊柱/白名单补点/幻觉死信/专家盲标/老库 v10 迁移）、
 # S2.4 oracle 四源挖掘（AC/现有断言/事故义务句确定性三源、白名单模型补点、
-# AC3 探索性判定、草稿表/老库 v11 迁移）；
+# AC3 探索性判定、草稿表/老库 v11 迁移）、
+# S2.5 人审回写（approval 纯逻辑/v12 迁移/MarkdownCaseRepository 策略守卫与
+# 内容寻址幂等/worker 单事务/outbox 派发/approval_api 七端点/审批页契约）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -377,8 +379,9 @@ FR-UI-001 AC 对照（均有后端测试或构建期 TypeScript 检查守着）�
 
 工程约束：前端只经同源 `/api` 通信，URN 全量 `encodeURIComponent`（`#` 否则被当
 fragment）；不引 openapi 生成与 UI 框架，类型手写镜像后端契约；`node_modules/.next/out`
-均不入库。已知缺口：仅对话页一页（其余四个控制台页在 S2–S5）、无 SSE（ask 同步）、
-无 HTTP 认证/多用户（POC 单用户，acl_scope 走请求体）。
+均不入库。第二页 **S2.5 审批页 `/approvals`（FR-UI-002）**见下文「草稿人审与 Markdown
+回写」节：首页 top-nav 入口，同源 `/api/approvals/*` 七端点。已知缺口：其余三个控制台页
+在 S3–S5、无 SSE（ask 同步）、无 HTTP 认证/多用户（POC 单用户，acl_scope 走请求体）。
 
 ## 引用失败 / 低分观感 / 慢响应专项治理（P1–P4，2026-11-07）
 
@@ -556,22 +559,27 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（11 个自动门禁）
+## 一键验收（14 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 11 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 14 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、508 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、632 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
 A9 离线评测探针（FR-EV-001～003：golden smoke 4 题 + hostless 裁判 + eval 账本/报告）、
 A10 用例文档连接器（FR-CON-003：双格式解析 + 死信/取消/缺预期形状断言）、
-A11 需求骨架抽取（FR-TD-001：确定性解析 + 录制模型 AC↔FR 白名单链接）。
+A11 需求骨架抽取（FR-TD-001：确定性解析 + 录制模型 AC↔FR 白名单链接）、
+A12 测试点生成（FR-TD-002：确定性脊柱 + 白名单补点 + 幻觉死信形状断言）、
+A13 oracle 四源挖掘（FR-TD-003：确定性三源 + 录制模型补点，草稿不碰正式库）、
+A14 人审回写（FR-TD-004/WR-001：tmp 库 hermetic 全流程，不起端口，
+kill switch 拦截→开启→dispatch 落盘→解析器 round-trip→重放幂等→AC1 正式库零变更）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14 为纯进程内探针，可脱离整脚本单跑：
+`.venv/bin/python scripts/approval_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -863,3 +871,71 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   （草稿仍待 S2.5 人审，不自动转正）。
 - 全量 **580 passed**（S2.4 净增 30：core 22 + worker 8）、import-lint OK；
   A13 单跑通过，不触碰 8765 端口。
+
+## 草稿人审与 Markdown 回写（S2.5，FR-TD-004 / FR-WR-001 / FR-UI-002）：单事务四件套、outbox 幂等与只收紧写策略
+
+S2.4 的 pending 草稿在本切片转正：专家在审批页对每条草稿**采纳 / 行内修改 / 拒绝**，
+批准的用例经 outbox 派发到独立 Markdown 写根。延续 S2.1～S2.4 的纪律——core 纯函数
+把一次人审算成完整落库计划，worker 在**单事务**内落库，适配器只在策略守卫后做 IO。
+
+| 防线 | 机制 |
+|---|---|
+| AC1 未审批不进正式库 | 正式 `test_cases` 表只由摄入管线写入；审批流仅触碰 approvals/outbox/oracle_suggestions/preference_samples，worker 测试用 raw_json 前后快照机器断言零变更 |
+| AC2 回写幂等 | 三层：core 内容寻址幂等键 `case-writeback:<doc>#<case>#sha1(markdown)[:12]` → DB outbox UNIQUE + `ON CONFLICT DO NOTHING` → 适配器 `_manifest.json` 同键命中返回同 external_ref；先文件后 manifest 原子落盘，崩溃重放自愈 |
+| 写隔离 | 回写文件只进配置化写根（默认 `data_dir/case-writeback`），与只读 `fs-cases` 语料物理隔离；路径穿越守卫拒绝逃逸写根 |
+| 策略分级 | 复用 S0 `assert_writable`：回写是 R2  reviewed write，须 Approval=approved 且 kill switch 放行；profile `external_write_enabled` 是硬边界，运行期 `WritePolicyState.runtime_disabled` 只能收紧，API 越权放开直接 403 |
+| 置信度纪律 | 模型/确定性草稿置信度不自标高；只有人审 confirmed（采纳或修改接受）才 +0.3 封顶 1.0，拒绝不加成 |
+| 偏好沉淀 | 行内修改的 original/revised/字段级 diff 落 `preference_samples`（sample_id 内容寻址，ON CONFLICT 幂等），供 S2.6 KNO-002 L3 资产回流 |
+| 回滚可执行 | 每条 outbox 记录带 `rollback_note`（删除写根文件+manifest 条目的具体步骤；正式库无需回滚） |
+
+分层产出：
+
+- **core（零三方零 IO）`approval.py`**：`build_review_queue`（pending 按用例分组，
+  幽灵引用 fail-closed）、`plan_case_decision`（覆盖完整性/动作矛盾/adopt 禁带修改字段/
+  modify 期望非空全套校验，产出 Approval+Outbox+偏好样本+建议状态四件套）、
+  `render_case_markdown`（叙事体渲染，【UI 断言】等显式类型标签让 S2.1 解析器无损
+  round-trip，夹注内禁冒号防解析分段）、`ApprovalValidationError`（ValueError 系，
+  HTTP 显式映射 422）。
+- **schema v11→v12**：`oracle_suggestions` 补四个评审列（PRAGMA+ALTER 平滑迁移，
+  老行默认 NULL/空串可写）、新表 `preference_samples`；store 增 `persist_case_decision`
+  （显式 BEGIN/异常 rollback，建议更新带 rowcount 双击守卫）、队列查询、outbox 列举/get、
+  `list_approvals` 审计账本。
+- **adapters `case_repo.py` MarkdownCaseRepository**：实现 `TestCaseRepositoryPort`，
+  tmp+fsync+os.replace 原子写，manifest 账本防重复，`list_cases` 走 S2.1 解析器回读，
+  target_system 不匹配在策略检查前拒掉。
+- **workers**：`approval_service.review_case/get_review_queue`、`outbox_dispatch`
+  （kill switch 拦截计 blocked 不烧 attempts；真实失败计 failed 沿用同键可重试；
+  未知 target/未装适配器 skipped 保留 pending；报告八键固定）+ CLI
+  `testpilot-dispatch-outbox`（partial 时非零退出）。
+- **orchestrator `/api/approvals/*` 七端点**：queue / cases/{urn}/decide / records /
+  outbox / outbox/dispatch / write-policy GET+POST；错误映射复用 qa_api/errors.py
+  （ApprovalValidationError→422、NotFound→404、PolicyDenied→403）。
+- **Web 审批页 `/approvals`（FR-UI-002）**：队列卡片展示断言类型/期望/来源 URN/
+  置信度（含 +0.3 提示）/出处与确定性标记，逐草稿采纳/行内修改/拒绝，评审人+理由，
+  动作即时落库后队列排空；审批动作账本与 outbox 面板（目标系统/请求体 diff/幂等键/
+  回滚说明四要素齐）；kill switch 横幅一键停用。Next 15 静态导出，FastAPI 同端口托管。
+
+```bash
+# outbox 派发 CLI（profile 关写时全部 blocked，不产生任何文件）
+.venv/bin/testpilot-dispatch-outbox
+
+# hermetic 全流程探针（tempfile 工作目录，不碰 store/offline-demo 与语料仓，不起端口）
+.venv/bin/python scripts/approval_probe.py
+# 报告 out/eval/approval-probe.{json,md}，回写样例 out/eval/approval-probe-writeback-sample.md
+```
+
+### 验收证据（2026-11-09）
+
+- 探针 13 项检查全绿（A14 门禁）：队列分组→采纳+修改四件套→偏好 diff→+0.3 封顶
+  （0.7→1.0、0.5→0.8）→**AC1 正式库 raw_json 快照逐行一致**→停用态 blocked 且
+  attempts=0 写根零文件→开启后同 outbox confirmed 落盘→S2.1 解析器 round-trip
+  类型/期望/步骤无损零死信→重放零扫描、manifest 不增生→整案拒绝无 outbox 无文件→
+  kill switch 收紧即时拦截、恢复后同 ref 放行。
+- API 层 TestClient 8 测覆盖七端点与三类错误映射（422/404/403）、写策略只收紧语义、
+  blocked→confirmed 全链路；适配器 9 测（含路径穿越、target 不匹配、manifest 幂等、
+  解析器回读）；store 5 测（含 v11 老库 DROP 回滚→重开升级钉版）；worker/dispatch 10 测。
+- 前端 `npm run build` 严格 TypeScript 零错，`/approvals` 静态导出 5.26 kB，
+  五组端点全部进 chunk；TestClient 同源托管冒烟 `/approvals.html` 200（不绑端口）。
+- 全量 **632 passed**（S2.5 净增 52：core 17 + store 5 + 适配器 9 + factory 3 +
+  worker/dispatch 10 + API 8，探针/前端不入 pytest）、import-lint OK；
+  A14 单跑通过，不触碰 8765 端口与 PID 64634。

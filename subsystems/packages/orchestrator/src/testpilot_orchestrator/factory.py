@@ -30,6 +30,24 @@ from testpilot_adapters.fts_search import FtsSearchAdapter
 
 
 @dataclass
+class WritePolicyState:
+    """运行期外部写策略（FR-WR-001 一键 kill switch）。
+
+    profile 的 ``external_write_enabled`` 是硬边界：profile 关着时运行期永远
+    不能越权打开（API 层只允许收紧）；profile 开着时可用 ``runtime_disabled``
+    一键停用/恢复。适配器的 kill_switch 闭包读本对象，翻转对同进程所有适配器
+    立即生效，无需重新装配。
+    """
+
+    profile_enabled: bool
+    runtime_disabled: bool = False
+
+    @property
+    def writes_enabled(self) -> bool:
+        return self.profile_enabled and not self.runtime_disabled
+
+
+@dataclass
 class Container:
     config: ProfileConfig
     base_dir: Path
@@ -37,6 +55,8 @@ class Container:
     adapters: dict[str, object] = field(default_factory=dict)
     # app lifespan 安排的模型预热后台任务（仅 ollama profile 非 None），关停时取消
     warmup_task: asyncio.Task | None = None
+    # S2.5：运行期写策略状态，审批页 kill switch 直接翻转本对象
+    write_policy: WritePolicyState | None = None
 
     def get(self, name: str):  # noqa: ANN202
         return self.adapters.get(name)
@@ -54,6 +74,8 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     a = config.adapters
 
     container = Container(config=config, base_dir=base_dir, data_dir=data_dir)
+    container.write_policy = WritePolicyState(
+        profile_enabled=config.external_write_enabled)
     store = bootstrap_store(data_dir)
     container.adapters["store"] = store
     container.adapters["queue"] = SqliteQueue(store.conn)
@@ -146,10 +168,23 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             read_dirs=[ticket_fixtures],
             write_dir=data_dir / "ticket-store",
             approval_provider=store.get_approval,
-            kill_switch=lambda: not config.external_write_enabled,
+            kill_switch=lambda: not container.write_policy.writes_enabled,
         )
     elif a.tickets.type != "stub":
         raise ValueError(f"未知 tickets 适配器类型: {a.tickets.type}")
+
+    # ── 人审回写用例库（S2.5 FR-TD-004：写根独立于只读语料仓，默认 data_dir/case-writeback）──
+    if a.case_repo.type == "markdown-fs":
+        from testpilot_adapters.case_repo import MarkdownCaseRepository
+
+        write_subdir = a.case_repo.settings.get("write_subdir", "case-writeback")
+        container.adapters["case_repo"] = MarkdownCaseRepository(
+            data_dir / write_subdir,
+            approval_provider=store.get_approval,
+            kill_switch=lambda: not container.write_policy.writes_enabled,
+        )
+    elif a.case_repo.type != "stub":
+        raise ValueError(f"未知 case_repo 适配器类型: {a.case_repo.type}")
 
     # ── CI 事件 ──
     if a.ci_events.type == "json-replay":
