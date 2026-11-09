@@ -24,6 +24,8 @@ class AdapterSet(BaseModel):
     scm: AdapterRef
     docs: AdapterRef
     cases: AdapterRef
+    # S2.2 FR-TD-001：需求文档连接器；带 stub 默认值，老 profile 不配也能加载
+    requirements: AdapterRef = Field(default_factory=lambda: AdapterRef(type="stub"))
     tickets: AdapterRef
     ci_events: AdapterRef
     runner: AdapterRef

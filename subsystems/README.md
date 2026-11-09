@@ -40,12 +40,13 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（480 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（508 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
 # 意图免模型旁路）、S1.6 评测（golden 结构、hostless 裁判红→绿、runner 投影/双形态/
-# hermetic 备份/容器端到端）、S2.1 用例文档解析（双格式/缺预期/取消/死信/老库 v8 迁移）；
+# hermetic 备份/容器端到端）、S2.1 用例文档解析（双格式/缺预期/取消/死信/老库 v8 迁移）、
+# S2.2 需求骨架抽取（FR/NFR/AC/缺口/白名单链接/老库 v9 迁移）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -552,18 +553,20 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（9 个自动门禁）
+## 一键验收（11 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 9 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 11 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、413 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、508 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
-A9 离线评测探针（FR-EV-001～003：golden smoke 4 题 + hostless 裁判 + eval 账本/报告）。
+A9 离线评测探针（FR-EV-001～003：golden smoke 4 题 + hostless 裁判 + eval 账本/报告）、
+A10 用例文档连接器（FR-CON-003：双格式解析 + 死信/取消/缺预期形状断言）、
+A11 需求骨架抽取（FR-TD-001：确定性解析 + 录制模型 AC↔FR 白名单链接）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
 旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。
 
@@ -706,3 +709,48 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   全量 **480 passed**、import-lint OK；A10 单跑通过。
 - 注意：ios-local-poc 活库（PID 64634 持有的 v7 库）下次进程重启时才会跑 v8 迁移，
   当前运行进程不受影响；test_cases 是新表，对既有表零影响。
+
+## 需求骨架抽取（S2.2，FR-TD-001）：四段骨架、显式标缺与白名单模型链接
+
+测试设计纵切第二刀：自由格式需求文档 → `{功能点, 规则, 验收标准, 涉及模块}` 骨架与
+缺口清单。延续 S2.1 分层：**core 零依赖确定性解析为脊，模型只做语义配对且受白名单
+约束**，无模型环境也能产出完整骨架。
+
+### 抽取契约
+
+| 维度 | 行为 |
+|---|---|
+| 功能点 | `## 功能需求` 节内 `### x.y 模块` 小节的 FR 表：FR-1 / FR-2a 子编号、优先级、删除线或「取消」→ `lifecycle=cancelled`（不进骨架但留缺口）、缺优先级显式记 `priority_missing` |
+| 规则 | `## 非功能需求` 两列 NFR 表；其他节（风险/元信息）无 ID/需求列的表整体跳过 |
+| 验收标准 | `## 验收标准` 顶格编号列表，跨行续接拼到同一条；无此节 → `ac_section_missing` 且每个功能点一条 present=False |
+| 显式标缺 | 没有任何 AC 覆盖的活跃功能点产出 `AcceptanceCriterion(present=False)`，**原文一条不丢、模型一个字不替** |
+| 死信 | 列数损坏/编号不符的行进 `RequirementParseError`，单条失败不阻断整批；围栏内假结构整体剔除 |
+| 模型链接 | 模型只返回 `{ac_index, fr_ids[]}` 配对；未知 FR ID/越界序号/形状非法 → 整包 `SkeletonValidationError` fail-closed（同问答引用白名单纪律）；模型不可用/降级 → 保留确定性结果并计 `link_degraded_docs`，绝不编造 |
+| 幂等 | URN = 文档 external_id + FR/NFR ID；hash 增量跳过，重灌按 doc_urn 整组替换不留幽灵；schema v9 新表 `requirement_skeletons` |
+
+### 运行方式
+
+```bash
+# 自动门禁 A11：合成夹具 --full 全链路（offline profile 带录制模型，确定性断言形状；
+# 夹具故意带损坏行，worker 按设计 exit 1，门检验 JSON 形状）：
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  .venv/bin/python -m testpilot_workers.ingest_requirements --full
+
+# 真档验证（非 CI 门禁；语料仓只读、路径参数化、不拷原文、探针不写业务库）：
+.venv/bin/python scripts/requirement_probe.py \
+  ~/Documents/Code/app-calendar-alarm/docs/V1需求文档-强提醒闹钟.md
+# 附加本机 Ollama 链接验收（hermetic 内存验证，失败按拒绝/降级记录）：
+.venv/bin/python scripts/requirement_probe.py <需求.md> --link-model
+```
+
+### 验收证据（2026-11-09，V1 真档）
+
+- 确定性探针：**34 个 FR 标记 → 34 解析、9 个 NFR → 9，零死信零漏解析**；
+  FR-7 取消态正确识别；V1 §7 七条产品口径不带 FR ID，纯确定性下 33 个活跃功能点
+  全部显式标缺——如实暴露「验收口径与需求条目未机器链接」的规格现状。
+- 真模型 hermetic 验收（qwen2.5:7b）：链接载荷**整包通过白名单（零幻觉 ID）**，
+  保守链上 16/33（强提醒主链路 FR-2 系列/FR-9 系列/起床 FR-16~19 等），
+  剩余 17 个为真实规格缺口（生日 CRUD、快速闹钟剪除、首页外壳等确实没有产品级 AC）；
+  报告 `out/eval/requirement-probe.{json,md}`（gitignore）。
+- 老库 v8→v9 平滑迁移有专门测试；全量 **508 passed**（S2.2 净增 28）、
+  import-lint OK；A11 单跑通过，不触碰 8765 端口。

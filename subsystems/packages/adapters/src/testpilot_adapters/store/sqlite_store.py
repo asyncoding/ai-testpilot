@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 from testpilot_core import SCHEMA_VERSION
 from testpilot_core.enums import OutboxStatus
+from testpilot_core.requirement import RequirementParseResult
 from testpilot_core.models import (
     Approval,
     Entity,
@@ -710,6 +711,60 @@ class Store:
     def count_test_cases(self) -> int:
         return int(
             self.conn.execute("SELECT COUNT(*) AS n FROM test_cases").fetchone()["n"]
+        )
+
+    # ── 需求骨架（S2.2 FR-TD-001）────────────────────────────────────────
+    def upsert_requirement_skeleton(
+        self, doc_urn: str, result: Any, *, content_hash: str, branch: str = "main"
+    ) -> None:
+        """投影列供 SQL 盘点/过滤，完整结果以 raw_json 为唯一还原来源。"""
+        ac_missing = sum(
+            1 for g in result.gaps if g.kind == "ac_missing_for_feature"
+        )
+        self.conn.execute(
+            """INSERT INTO requirement_skeletons
+               (urn, external_id, content_hash, branch, feature_count, rule_count,
+                ac_count, ac_missing_count, gap_count, dead_letter_count,
+                linking_source, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(urn) DO UPDATE SET
+                 content_hash=excluded.content_hash, branch=excluded.branch,
+                 feature_count=excluded.feature_count, rule_count=excluded.rule_count,
+                 ac_count=excluded.ac_count, ac_missing_count=excluded.ac_missing_count,
+                 gap_count=excluded.gap_count,
+                 dead_letter_count=excluded.dead_letter_count,
+                 linking_source=excluded.linking_source, raw_json=excluded.raw_json""",
+            (
+                doc_urn, result.external_id, content_hash, branch,
+                len(result.active_features), len(result.rules),
+                len(result.acceptance), ac_missing, len(result.gaps),
+                len(result.dead_letters), result.linking_source,
+                result.model_dump_json(),
+            ),
+        )
+        self.conn.commit()
+
+    def delete_requirement_skeleton(self, doc_urn: str) -> int:
+        """整文档替换前清旧（重灌幂等：文档内删除的需求不残留）。"""
+        cur = self.conn.execute(
+            "DELETE FROM requirement_skeletons WHERE urn=?", (doc_urn,)
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def list_requirement_skeletons(self) -> list[RequirementParseResult]:
+        return [
+            RequirementParseResult.model_validate_json(r["raw_json"])
+            for r in self.conn.execute(
+                "SELECT raw_json FROM requirement_skeletons ORDER BY external_id"
+            ).fetchall()
+        ]
+
+    def count_requirement_skeletons(self) -> int:
+        return int(
+            self.conn.execute(
+                "SELECT COUNT(*) AS n FROM requirement_skeletons"
+            ).fetchone()["n"]
         )
 
     # ── 审批 ───────────────────────────────────────────────────────────

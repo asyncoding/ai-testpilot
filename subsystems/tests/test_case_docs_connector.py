@@ -177,7 +177,7 @@ def test_missing_adapter_raises_and_stub_profile_safe(tmp_path):
 
 
 def test_v7_database_bootstraps_test_cases_table(tmp_path):
-    """老库平滑升级：v7 库没有 test_cases 表，v8 bootstrap 幂等补建。"""
+    """老库平滑升级：v7 库没有 test_cases 表，当前版 bootstrap 幂等补建。"""
     db_dir = tmp_path / "data"
     store = bootstrap_store(db_dir)
     store.conn.execute("DROP TABLE test_cases")
@@ -186,7 +186,7 @@ def test_v7_database_bootstraps_test_cases_table(tmp_path):
 
     upgraded = bootstrap_store(db_dir)
     try:
-        assert upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "8"
+        assert upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "9"
         tables = {
             r["name"] for r in upgraded.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"

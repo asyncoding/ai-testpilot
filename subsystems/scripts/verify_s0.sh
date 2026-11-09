@@ -2,7 +2,8 @@
 # 自动门禁一键验收（docs/07 §10）：A1–A6 为 S0 骨架门禁，A7 为 S1.4 离线问答探针，
 # A8 为 S1.5 问答 HTTP API 冒烟（真实 uvicorn + curl），A9 为 S1.6 离线评测探针
 # （golden smoke 题集 + 录制模型，确定性验证评测 runner 全链路），A10 为 S2.1
-# 用例文档连接器探针（合成夹具全链路入库，含损坏行死信与取消/缺预期标记）。
+# 用例文档连接器探针（合成夹具全链路入库，含损坏行死信与取消/缺预期标记），
+# A11 为 S2.2 需求骨架抽取探针（合成夹具 + 录制模型 AC↔FR 链接，白名单 fail-closed）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -121,7 +122,27 @@ else
   echo "FAIL  见 /tmp/tp_cases_a10.log"; fail_n=$((fail_n+1))
 fi
 
+echo "=== A11. 需求骨架抽取（S2.2 FR-TD-001：合成夹具 --full，确定性解析+录制模型链接） ==="
+# 夹具故意含 1 条列数损坏行，worker 按设计 exit 1；门禁断言 JSON 形状而非退出码。
+# offline profile 带录制模型且含 req_link 夹具键：模型补链后 ac_missing 3→1（仅 FR-3）。
+TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
+  $PY -m testpilot_workers.ingest_requirements --full > /tmp/tp_reqs_a11.log 2>&1 || true
+if grep -q '"status": "partial"' /tmp/tp_reqs_a11.log \
+  && grep -q '"features_active": 6' /tmp/tp_reqs_a11.log \
+  && grep -q '"features_cancelled": 1' /tmp/tp_reqs_a11.log \
+  && grep -q '"rules": 2' /tmp/tp_reqs_a11.log \
+  && grep -q '"acceptance_criteria": 2' /tmp/tp_reqs_a11.log \
+  && grep -q '"ac_missing": 1' /tmp/tp_reqs_a11.log \
+  && grep -q '"model_linked_docs": 1' /tmp/tp_reqs_a11.log \
+  && grep -q '"link_degraded_docs": 0' /tmp/tp_reqs_a11.log \
+  && grep -q '"parse_dead_letters": 1' /tmp/tp_reqs_a11.log; then
+  echo "PASS  6 活跃需求/1 取消/2 规则/2 AC，模型补链后仅 1 缺 AC（FR-CON 白名单链路）"
+  pass_n=$((pass_n+1))
+else
+  echo "FAIL  见 /tmp/tp_reqs_a11.log"; fail_n=$((fail_n+1))
+fi
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

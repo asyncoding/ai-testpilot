@@ -313,6 +313,27 @@ CREATE TABLE IF NOT EXISTS test_cases (
 CREATE INDEX IF NOT EXISTS idx_test_cases_doc ON test_cases(doc_urn);
 CREATE INDEX IF NOT EXISTS idx_test_cases_module ON test_cases(module);
 
+-- 需求骨架（S2.2 FR-TD-001）：需求 Markdown 连接器的抽取结果。
+-- raw_json 存完整 RequirementParseResult（富结构+缺口+死信摘要），投影列供 SQL 盘点。
+-- 重灌幂等：URN = 文档 external_id 的 requirement_doc URN，按 doc 整组替换。
+CREATE TABLE IF NOT EXISTS requirement_skeletons (
+    urn               TEXT PRIMARY KEY,
+    external_id       TEXT NOT NULL,
+    content_hash      TEXT NOT NULL,
+    branch            TEXT NOT NULL DEFAULT 'main',
+    feature_count     INTEGER NOT NULL DEFAULT 0,
+    rule_count        INTEGER NOT NULL DEFAULT 0,
+    ac_count          INTEGER NOT NULL DEFAULT 0,
+    ac_missing_count  INTEGER NOT NULL DEFAULT 0,
+    gap_count         INTEGER NOT NULL DEFAULT 0,
+    dead_letter_count INTEGER NOT NULL DEFAULT 0,
+    linking_source    TEXT NOT NULL DEFAULT 'deterministic',
+    raw_json          TEXT NOT NULL,
+    indexed_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_requirement_skeletons_external
+    ON requirement_skeletons(external_id);
+
 -- 任务队列（offline profile 的 QueuePort 实现）
 CREATE TABLE IF NOT EXISTS jobs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,

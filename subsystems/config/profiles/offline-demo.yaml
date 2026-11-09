@@ -51,6 +51,10 @@ adapters:
     type: fs-cases
     settings:
       roots: [tests/fixtures/cases]
+  requirements:                   # S2.2 FR-TD-001：需求 Markdown 连接器
+    type: fs-reqs
+    settings:
+      roots: [tests/fixtures/requirements]
   tickets:
     type: json
     settings: {}

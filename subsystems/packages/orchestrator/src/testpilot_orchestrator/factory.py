@@ -123,6 +123,22 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.cases.type != "stub":
         raise ValueError(f"未知 cases 适配器类型: {a.cases.type}")
 
+    # ── 需求文档连接器（S2.2 FR-TD-001：fs-reqs 只读扫描 + core 骨架抽取）──
+    if a.requirements.type == "fs-reqs":
+        from testpilot_adapters.requirement_docs import RequirementDocumentAdapter
+
+        rs = a.requirements.settings
+        req_roots = [_resolve(r) for r in rs.get("roots", [])] or [
+            fixtures_dir / "requirements"
+        ]
+        container.adapters["requirements"] = RequirementDocumentAdapter(
+            req_roots,
+            excludes=rs.get("excludes", []),
+            branch=config.project.default_branch,
+        )
+    elif a.requirements.type != "stub":
+        raise ValueError(f"未知 requirements 适配器类型: {a.requirements.type}")
+
     # ── 工单 ──
     if a.tickets.type == "json":
         ticket_fixtures = _p(fixtures_dir, "tickets")

@@ -186,5 +186,17 @@
         }
       ]
     }
+  },
+  "req_link:requirements/synthetic-requirements.md": {
+    "text": "",
+    "tokens_in": 640,
+    "tokens_out": 80,
+    "degraded": false,
+    "structured": {
+      "links": [
+        {"ac_index": 0, "fr_ids": ["FR-1", "FR-2", "FR-2a"]},
+        {"ac_index": 1, "fr_ids": ["FR-5", "FR-6"]}
+      ]
+    }
   }
 }

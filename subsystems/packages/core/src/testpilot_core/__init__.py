@@ -12,6 +12,8 @@
 # 免模型）/ model / fallback，支撑两类 run 的延迟 SQL 切片对比。
 # v8（S2.1 FR-CON-003）：新增 test_cases 表承载用例文档解析结果；解析死信复用
 # dead_letters（source=fs-cases）。老库经 schema.sql CREATE IF NOT EXISTS 幂等补建。
-SCHEMA_VERSION = 8
+# v9（S2.2 FR-TD-001）：新增 requirement_skeletons 表承载需求骨架抽取结果；
+# 解析死信复用 dead_letters（source=fs-reqs），老库同样幂等补建。
+SCHEMA_VERSION = 9
 
 __all__ = ["SCHEMA_VERSION"]
