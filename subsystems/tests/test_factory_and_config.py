@@ -362,11 +362,25 @@ def test_xcode_runner_and_ios_simulator_env_wired(tmp_path):
         assert (tmp_path / "bundles").is_dir()  # 构造期备好产物根
         assert env._lease_timeout_s == 120  # noqa: SLF001
         assert [d.udid for d in env._devices] == ["UDID-A", "UDID-B"]  # noqa: SLF001
-        # S3.3 前 parser 是 fail-closed 占位，绝不拿假数据冒充测试结论
-        from testpilot_adapters.xcode_runner import unavailable_xcresult_parser
-        assert runner._parser is unavailable_xcresult_parser  # noqa: SLF001
+        # S3.3：parser 换成真实 xcresulttool 链路，与容器共享 localfs 制品端口
+        from testpilot_adapters.xcresult_tool import XcresultToolResultParser
+
+        assert isinstance(runner._parser, XcresultToolResultParser)  # noqa: SLF001
+        assert runner._parser._store is container.get("artifact")  # noqa: SLF001
+        assert (tmp_path / "data" / "artifacts").is_dir()
     finally:
         container.get("store").close()
+
+
+def test_xcode_runner_requires_localfs_artifact(tmp_path):
+    config = _offline_config(tmp_path)
+    config.adapters.runner = AdapterRef(type="xcode", settings={
+        "workspace": "AlarmKitSpike/AlarmKitSpike.xcworkspace",
+        "scheme": "AlarmKitSpike",
+    })
+    config.adapters.artifact = AdapterRef(type="stub", settings={})
+    with pytest.raises(ValueError, match="artifact=localfs"):
+        build_container(config, SUBSYSTEMS)
 
 
 def test_ios_simulator_empty_device_list_fails_at_assembly(tmp_path):
@@ -389,18 +403,41 @@ def test_unknown_runner_and_environment_types_rejected(tmp_path):
         build_container(config, SUBSYSTEMS)
 
 
-def test_stub_environment_not_registered_and_logs_still_locked(tmp_path):
+def test_stub_environment_not_registered_and_os_log_wiring(tmp_path):
     # 行为不变性：默认 profile environment=stub → 容器里没有该适配器，
-    # 执行服务走 S3.1 旧路径；logs 仍是后续里程碑 stub 位
+    # 执行服务走 S3.1 旧路径；logs=stub 同样不注册
     config = _offline_config(tmp_path)
     container = build_container(config, SUBSYSTEMS)
     try:
         assert container.get("environment") is None
-        config.adapters.logs = AdapterRef(type="os-log", settings={})
-        with pytest.raises(ValueError, match="logs"):
-            build_container(config, SUBSYSTEMS)
+        assert container.get("logs") is None
     finally:
         container.get("store").close()
+
+    # S3.3：os-log 装配要求显式 udid（拒绝 booted 隐式目标）
+    config = _offline_config(tmp_path)
+    config.adapters.logs = AdapterRef(type="os-log", settings={})
+    with pytest.raises(ValueError, match="udid"):
+        build_container(config, SUBSYSTEMS)
+
+    config = _offline_config(tmp_path)
+    config.adapters.logs = AdapterRef(
+        type="os-log", settings={"udid": "5411787C-UDID"})
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        from testpilot_adapters.os_log import OsLogQueryAdapter
+
+        logs = container.get("logs")
+        assert isinstance(logs, OsLogQueryAdapter)
+        assert logs.udid == "5411787C-UDID"
+    finally:
+        container.get("store").close()
+
+    # 未知 logs 类型仍拒绝
+    config = _offline_config(tmp_path)
+    config.adapters.logs = AdapterRef(type="cloudwatch", settings={})
+    with pytest.raises(ValueError, match="未知 logs"):
+        build_container(config, SUBSYSTEMS)
 
 
 def test_tree_sitter_setting_registers_optional_chunker(tmp_path):

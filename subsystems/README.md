@@ -41,7 +41,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（882 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（969 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -65,7 +65,10 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # execution_service 超时/崩溃恢复/worker 循环/CLI）、
 # S3.2 iOS xcode 适配器（xcode_commands argv/能力/租约纯逻辑、SimctlEnvironment
 # 先租后跑与过期回收、XcodeTestRunner 预清理/子进程/cancel/parser 接缝、
-# 工厂 xcode/ios-simulator 装配、服务层租约三出口必释放）；
+# 工厂 xcode/ios-simulator 装配、服务层租约三出口必释放）、
+# S3.3 xcresult/os_log（xcresult_parse 树展平 fail-closed、附件 URN 回链、
+# oslog_commands 时间窗/可复现 query、ffmpeg 白名单、XcresultToolResultParser、
+# OsLogQueryAdapter NDJSON 坏行计数、工厂 os-log 装配、合成夹具守护）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -577,10 +580,10 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 20 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 21 个自动门禁；干净环境 21 PASS / 0 FAIL，日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、882 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、969 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -607,13 +610,18 @@ A19 测试执行与 runner-worker（S3.1 FR-EX-001/002：tmp 库 hermetic，先�
 A20 iOS xcode 适配器与环境租约（S3.2 FR-EX-003/004：FakeExecutor hermetic，
 argv 逐字对账/resultBundle 预清理/真机能力拒绝不硬跑/先租后跑 udid 透传/过期租约
 shutdown 回收/reset 守卫与 shutdown→erase 顺序/cancel 杀进程/超时释放/fail-closed，
-零 xcodebuild 零 simctl、绝不 erase 用户设备、不起端口）。
+零 xcodebuild 零 simctl、绝不 erase 用户设备、不起端口）、
+A21 xcresult 制品与 os_log 查询（S3.3 FR-EX-005/006：假执行器 hermetic，用例树
+展平/畸形 fail-closed/附件 localfs URN 回链/导出缺件响亮失败/NDJSON 时间窗 AC2/
+坏行计数/query 回显可复现/ffmpeg 白名单/工厂 os-log 装配，零 xcresulttool 零
+simctl 零 ffmpeg、不碰用户设备、不起端口）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20 为纯进程内探针，可脱离整脚本单跑：
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21 为纯进程内探针，可脱离整脚本单跑：
 `.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
 `.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
 `.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`、
-`.venv/bin/python scripts/xcode_adapter_probe.py`。
+`.venv/bin/python scripts/xcode_adapter_probe.py`、
+`.venv/bin/python scripts/xcresult_oslog_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -1291,7 +1299,7 @@ hermetic 测试与 A20 探针用 FakeExecutor/FakeSpawner 逐字断言 argv，�
 | core | `ports.py` | `EnvironmentPort` 增 `env_id_for_lease`：租约→udid 的显式翻译，未知/已释放租约抛 NotFound，杜绝空 udid 裸跑 |
 | adapters | `process_executor.py` | 唯一进程出口：argv 列表 + `create_subprocess_exec`（永不 shell）；`run`/`spawn` 两形态，命令不存在统一翻译为 AdapterUnavailableError |
 | adapters | `ios_simulator_env.py`（12 测） | `SimctlEnvironment` 实现 EnvironmentPort：acquire 先回收过期租约再选空闲设备、能力不过零 simctl 调用、全忙显式不可用；health_check/reset（持租约设备禁止 erase）/release（幂等）；过期回收尽力 shutdown（幂等兜底） |
-| adapters | `xcode_runner.py`（7 测） | `XcodeTestRunner` 实现 TestRunnerPort：无 udid 直接拒跑；`-resultBundlePath` 已存在先 `rmtree`（xcodebuild 拒覆盖）；spawn 留句柄、cancel 幂等 terminate；结果解析走可注入 `result_parser` 接缝（S3.3 接 xcresulttool，当前注入 fail-closed 占位，禁止假数据冒充结论） |
+| adapters | `xcode_runner.py`（7 测） | `XcodeTestRunner` 实现 TestRunnerPort：无 udid 直接拒跑；`-resultBundlePath` 已存在先 `rmtree`（xcodebuild 拒覆盖）；spawn 留句柄、cancel 幂等 terminate；结果解析走可注入 `result_parser` 接缝（S3.3 已接 `XcresultToolResultParser`；库内 fail-closed 占位函数保留，单测/探针仍直接注入验证其行为） |
 | orchestrator | `factory.py` | 新增 `runner: xcode` 与 `environment: ios-simulator` 装配分支（设备清单配置化、空清单装配期即响、未知 type 仍 ValueError）；environment=stub 时不注册，S3.1 剖面行为一字不动 |
 | workers | `execution_service.py`（新增 7 测集成文件） | environment 存在时**先租后跑**：acquire（内含能力校验）→ udid/request_id 透传进 request labels → runner；成功/超时/异常三出口 finally 必 release，release 失败不掩盖执行结论；能力拒绝/全忙统一收口为 run error + job failed，runner 零调用（不硬跑） |
 
@@ -1335,3 +1343,61 @@ hermetic 测试与 A20 探针用 FakeExecutor/FakeSpawner 逐字断言 argv，�
   uvicorn（PID 64634，按约束不杀）占用 8765 失败，与 S3.2 无关。
 - **手动探针审批前置（未执行）**：真实模拟器链路（`simctl erase` 会重置用户设备状态）
   需单独提报方案并获用户明确批准后才动手，自动门禁永不触发。
+
+## xcresult 制品采集与 os_log 查询（S3.3，FR-EX-005/006）：证据进 URN、查询可复现
+
+S3 纵切第三片，把 S3.2 留下的 `unavailable_xcresult_parser` 占位换成真实 xcresulttool
+链路，并落地 LogQueryPort 的 os_log 实现。纪律延续：**解析/命令/过滤全部是 core 纯函数
+（零 IO、仅 stdlib json/datetime），进程与文件 IO 沉到 adapters 且执行器可注入**，
+A21 探针与全部单测用自造合成夹具 hermetic 运行，零 xcresulttool/simctl/ffmpeg 真实调用；
+真实工具只作为获批后的手动探针，不进自动门禁。schema 保持 **v15 零变更**。
+
+### 分层落点
+
+| 层 | 新增/改动 | 职责 |
+|---|---|---|
+| core | `xcresult_parse.py`（纯逻辑零 IO，31 测） | `parse_test_nodes`：testNodes 树展平为用例（external_id=节点名全路径）、result 三态映射、秒→毫秒、failureText 首行 500 字、未知 nodeType/result/负时长/状态与证据矛盾一律 SchemaValidationError；`parse_attachments`：mime→ArtifactType 分型（未登记落 other 不丢证据）、同用例多附件保序聚合；`link_attachment_urns`：URN 回链不改输入；`test_run_from_xcresult`：归一 TestRun（run_id 留空由 runner 收口） |
+| core | `oslog_commands.py`（18 测） | `build_os_log_query`：拼装 `simctl spawn <udid> log show --start/--end --predicate --style json`，显式 udid 拒绝 booted 隐式目标、ISO 窗校验 start≤end、谓词非空且 ≤1024 字；`OsLogQuery.echo()` 回显可照跑 argv（AC1）；`filter_window` 闭区间纵深过滤（AC2），坏时间戳 fail-closed |
+| core | `ffmpeg_commands.py`（13 测） | `build_frame_extract_argv`：对齐 docs/03 §3.5 原型（`-y -i -vf fps=N frame_%03d.png`），fps 白名单 1..30 整数（bool/浮点/越界全拒），除路径与 fps 无其他参数面 |
+| adapters | `xcresult_tool.py`（11 测） | `XcresultToolResultParser` 对上 runner 的 parser 接缝：get tests → get attachments →（有附件才）export 三命令；附件经 LocalFsArtifactAdapter 内容寻址（sha256 URN），失败用例 `artifact_urns` 回链（AC1）；tests 原始 JSON 同入制品根作 `raw_report_ref`/XCRESULT 制品；非零退出/导出缺件响亮失败；模拟器未覆盖层（真机/后台音频/签名）显式声明 |
+| adapters | `os_log.py`（9 测） | `OsLogQueryAdapter` 实现 LogQueryPort：NDJSON 行解析，坏行计数+样片留痕（样片封顶 3、总数不封顶）不中断整窗；服务端窗口外再纯函数过滤一遍；返回 `{entries, query, bad_lines, dropped_out_of_window}`，query 节即实跑 argv |
+| orchestrator | `factory.py`（装配测试 +3） | 制品块前移到 runner 之前；`runner: xcode` 改注真实 parser 且要求 `artifact=localfs`（否则装配期 ValueError）；新增 `logs: os-log` 分支（必须显式 udid，未知 type 仍拒绝）；stub 剖面行为不变 |
+| tests | `fixtures/xcresult/`、`fixtures/oslog/` + `test_s33_fixtures.py`（4 测） | 自造合成夹具（零语料仓原件）：三态用例树+两附件清单+畸形样本；NDJSON 窗内 3/窗外 2/坏行 1，附 README 钉死预期处置 |
+
+### 关键语义
+
+- **大文件只进制品根，不进向量库/SQLite**：截图/录屏经 LocalFsArtifactAdapter 存字节，
+  结构化字段只留 URN+hash（默认保留 14 天）；失败用例与附件的关联是
+  `CaseResult.artifact_urns`，归因链从用例一跳到证据文件。
+- **查询条件本身是证据（FR-EX-006 AC1）**：不用 `--last 20m` 相对时间（不可复现），
+  改显式 `--start/--end` ISO 窗；不用 `spawn booted`（依赖调用时刻隐式状态），
+  改租约绑定的具体 udid；返回体 query 节与实跑 argv 同源，事后可逐字重放。
+- **坏数据不静默吞**：xcresult 未知形态 fail-closed 等手动探针校准后再放行；
+  os_log 单行损坏计数留痕而非废掉整窗，但倒挂窗口/空谓词在起进程前就拒绝（零调用）。
+- **零 schema 变更**：附件/日志证据全走 URN 与既有 TestRun/ArtifactRef 模型，
+  `SCHEMA_VERSION` 保持 15。
+
+```bash
+# A21 端到端探针（生产装配路径 + 假执行器，tmp 目录 hermetic，不起端口/不碰设备）
+.venv/bin/python scripts/xcresult_oslog_probe.py
+# 报告：out/eval/xcresult-oslog-probe.{json,md}（gitignore），连跑幂等
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 A21 **10 项检查全绿**（11 个 ✅ 含总结行）：树解析/畸形守卫/附件分型/URN 回链/
+  响亮失败/argv 对账/时间窗/坏行封顶/ffmpeg/工厂装配。
+- **三红证对照**（改生产代码 → 专属测试变红 → 还原转绿，grep 确认零 TEMP 残留）：
+  ① 摘掉时间窗过滤 → 3 个窗过滤测试 + 探针⑦变红（窗外日志整量灌入）；
+  ② 摘掉附件 URN 回链 → happy-path 测试 + 探针④变红（失败用例拿不到证据）；
+  ③ 摘掉导出缺件守卫 → 缺件测试变红且探针以未捕获 FileNotFoundError 崩溃 exit 1
+  （证明守卫把低层异常收口成领域级 AdapterUnavailableError 的价值）。
+- 契约测试净增 **87 个**（xcresult_parse 31 + oslog_commands 18 + ffmpeg 13 +
+  xcresult_tool 11 + os_log 适配器 9 + 夹具守护 4 + 工厂装配净增 1，探针不入 pytest），
+  全量 **969 passed**（882+87）、import-lint OK（core 仍零三方零 IO）、
+  `bash -n scripts/verify_s0.sh` 通过。
+- 本轮全门禁实测 **19 PASS / 2 FAIL**：A21 首次接入即 PASS，A20 经接缝替换断言更新后
+  保持 PASS；仅 A4/A8 仍因用户终端 uvicorn（PID 64634，按约束不杀）占用 8765 失败，
+  与 S3.3 无关。
+- **手动探针审批前置（未执行，延续 S3.2）**：真实 xcresulttool/os_log/ffmpeg 字段校准
+  与模拟器链路（含 `simctl erase`）需单独提报方案并获用户明确批准后才动手。

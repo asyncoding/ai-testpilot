@@ -1,0 +1,14 @@
+{
+  "attachments": [
+    {
+      "case_ref": "AlarmKitSpikeTests.xctest/AlarmKitSpikeTests/testKillBackupFallsBackTo30s()",
+      "file_name": "Screenshot-Failure-1.png",
+      "mime_type": "image/png"
+    },
+    {
+      "case_ref": "AlarmKitSpikeTests.xctest/AlarmKitSpikeTests/testKillBackupFallsBackTo30s()",
+      "file_name": "FailureRecording.mp4",
+      "mime_type": "video/mp4"
+    }
+  ]
+}

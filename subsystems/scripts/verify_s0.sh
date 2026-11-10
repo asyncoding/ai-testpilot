@@ -24,7 +24,11 @@
 # A20 为 S3.2 iOS xcode 适配器与环境租约探针（FakeExecutor/FakeSpawner hermetic：
 # argv 逐字对账/resultBundle 预清理/真机能力拒绝不硬跑/先租后跑透传 udid/过期租约
 # shutdown 回收/reset 守卫与 shutdown→erase 顺序/cancel 杀进程/超时释放/fail-closed，
-# 零 xcodebuild 零 simctl、绝不 erase 用户设备、不起端口）。
+# 零 xcodebuild 零 simctl、绝不 erase 用户设备、不起端口），
+# A21 为 S3.3 xcresult 制品与 os_log 探针（FakeExecutor hermetic：用例树展平/
+# 附件 localfs URN 回链/畸形与缺件 fail-closed/NDJSON 时间窗过滤/坏行计数/
+# query 回显可复现/ffmpeg 白名单/工厂 os-log 装配，零 xcresulttool 零 simctl
+# 零 ffmpeg、不碰用户设备、不起端口）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -269,6 +273,16 @@ $PY scripts/xcode_adapter_probe.py > /tmp/tp_xcode_a20.log 2>&1 \
   || { echo "FAIL  见 /tmp/tp_xcode_a20.log 与 out/eval/xcode-adapter-probe.json"; fail_n=$((fail_n+1)); }
 
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2）"
+echo "=== A21. xcresult 制品与 os_log 查询（S3.3 FR-EX-005/006：假执行器 hermetic，树展平/附件 URN 回链/坏行 fail-closed/时间窗 AC2/query 可复现/ffmpeg 白名单/工厂装配，零真机零模拟器） ==="
+# 进程出口全部换假件：不跑 xcresulttool/simctl/ffmpeg、不碰用户设备、不起端口；
+# 报告落 out/eval/xcresult-oslog-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/xcresult_oslog_probe.py > /tmp/tp_xcresult_a21.log 2>&1 \
+  && grep -q '✅ xcresult_oslog_probe 全部通过' /tmp/tp_xcresult_a21.log \
+  && grep -q '⑦ NDJSON 窗内 3/窗外 2/坏行 1' /tmp/tp_xcresult_a21.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_xcresult_a21.log) 项检查全绿（树解析/畸形守卫/附件分型/URN 回链/响亮失败/argv 对账/时间窗/坏行封顶/ffmpeg/工厂）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_xcresult_a21.log 与 out/eval/xcresult-oslog-probe.json"; fail_n=$((fail_n+1)); }
+
+echo
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

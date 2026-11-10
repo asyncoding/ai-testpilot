@@ -1,10 +1,10 @@
 """适配器装配工厂（依赖注入根，docs/08 FR-CFG-002 AC3）。
 
 换 profile = 换适配器实现，工作流代码零改动。
-支持的 type：stub / fs-docs / json / json-replay / recorded / junit-xml / xcode（S3.2）/
-localfs / sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/
-chroma（vectors）/ git 与 recorded（scm，S1.3）/ ios-simulator（environment，S3.2）；
-logs 仍为 stub 位，S3.3 随 xcresulttool / os_log 落地。
+支持的 type：stub / fs-docs / json / json-replay / recorded / junit-xml / xcode（S3.2，
+S3.3 起接 xcresulttool 真实 parser）/ localfs / sqlite-fts / hybrid / sqlite / noop /
+langfuse / ollama（model）/ chroma（vectors）/ git 与 recorded（scm，S1.3）/
+ios-simulator（environment，S3.2）/ os-log（logs，S3.3）。
 
 降级是运行期行为（向量通道故障→FTS-only），不是装配期选项：hybrid 必须配齐
 model+vectors，否则 build_container 直接 ValueError（防止静默退化为单路而不自知）。
@@ -193,6 +193,15 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.ci_events.type != "stub":
         raise ValueError(f"未知 ci_events 适配器类型: {a.ci_events.type}")
 
+    # ── 制品（先于执行器装配：xcode runner 的 xcresult parser 要注入制品端口）──
+    if a.artifact.type == "localfs":
+        artifact_store = LocalFsArtifactAdapter(data_dir / "artifacts")
+        container.adapters["artifact"] = artifact_store
+    elif a.artifact.type != "stub":
+        raise ValueError(f"未知 artifact 适配器类型: {a.artifact.type}")
+    else:
+        artifact_store = None
+
     # ── 执行器 ──
     if a.runner.type == "recorded":
         container.adapters["runner"] = RecordedTestRunner(fixtures_dir / "runs")
@@ -211,30 +220,32 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
         )
     elif a.runner.type == "xcode":
         # S3.2 FR-EX-003：真实 xcodebuild，进程出口唯一走 SubprocessExecutor
-        # （argv 列表 create_subprocess_exec，永不 shell）；result parser 是
-        # S3.3 FR-EX-005 的 xcresulttool 接缝，当前注入 fail-closed 占位。
-        from testpilot_adapters.xcode_runner import (
-            XcodeTestRunner,
-            unavailable_xcresult_parser,
-        )
+        # （argv 列表 create_subprocess_exec，永不 shell）；S3.3 FR-EX-005 起
+        # result parser 换成真实 xcresulttool 链路，附件经制品端口内容寻址。
+        from testpilot_adapters.xcode_runner import XcodeTestRunner
+        from testpilot_adapters.xcresult_tool import XcresultToolResultParser
 
+        if artifact_store is None:
+            raise ValueError(
+                "runner=xcode 要求 artifact=localfs：xcresult 附件/原始 JSON "
+                "必须经制品端口内容寻址落盘，不允许裸跑无制品根的 xcode 链路"
+            )
         rs = a.runner.settings
+        result_parser = XcresultToolResultParser(
+            artifact_store,
+            work_dir=_p(
+                base_dir, rs.get("xcresult_work_dir", "store/xcresult-work")),
+        )
         container.adapters["runner"] = XcodeTestRunner(
             workspace=rs["workspace"],
             scheme=rs["scheme"],
             repo_path=repo_path,
             result_bundle_dir=_p(
                 base_dir, rs.get("result_bundle_dir", "store/xcresult")),
-            result_parser=unavailable_xcresult_parser,
+            result_parser=result_parser,
         )
     elif a.runner.type != "stub":
         raise ValueError(f"未知 runner 适配器类型: {a.runner.type}")
-
-    # ── 制品 ──
-    if a.artifact.type == "localfs":
-        container.adapters["artifact"] = LocalFsArtifactAdapter(data_dir / "artifacts")
-    elif a.artifact.type != "stub":
-        raise ValueError(f"未知 artifact 适配器类型: {a.artifact.type}")
 
     # ── trace（先装配：模型网关构造时注入，span 随调用链）──
     if a.tracer.type == "noop":
@@ -372,8 +383,19 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.environment.type != "stub":
         raise ValueError(f"未知 environment 适配器类型: {a.environment.type}")
 
-    # logs 仍是 stub 位（S3.3 随 xcresulttool / os_log 一起落地）
-    if a.logs.type != "stub":
-        raise ValueError(f"适配器 logs 的类型 {a.logs.type} 将在后续里程碑实现")
+    # ── 日志查询（S3.3 FR-EX-006：os_log 模拟器实现；必须显式 udid，拒绝 booted）──
+    if a.logs.type == "os-log":
+        from testpilot_adapters.os_log import OsLogQueryAdapter
+
+        ls = a.logs.settings
+        udid = ls.get("udid", "")
+        if not udid:
+            raise ValueError(
+                "logs=os-log 要求 settings.udid：查询条件须可复现，"
+                "不接受 booted 隐式目标"
+            )
+        container.adapters["logs"] = OsLogQueryAdapter(str(udid))
+    elif a.logs.type != "stub":
+        raise ValueError(f"未知 logs 适配器类型: {a.logs.type}")
 
     return container

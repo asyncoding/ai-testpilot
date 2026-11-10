@@ -1,0 +1,42 @@
+{
+  "testNodes": [
+    {
+      "nodeType": "Unit test bundle",
+      "name": "AlarmKitSpikeTests.xctest",
+      "result": "Mixed",
+      "duration": 1.23,
+      "children": [
+        {
+          "nodeType": "Test Suite",
+          "name": "AlarmKitSpikeTests",
+          "result": "Mixed",
+          "children": [
+            {
+              "nodeType": "Test case",
+              "name": "testReminderScheduleBaseline()",
+              "result": "Passed",
+              "duration": 0.032
+            },
+            {
+              "nodeType": "Test case",
+              "name": "testSoundPickRequiresGrant()",
+              "result": "Skipped",
+              "duration": 0.001
+            },
+            {
+              "nodeType": "Test case",
+              "name": "testKillBackupFallsBackTo30s()",
+              "result": "Failed",
+              "duration": 0.41,
+              "failures": [
+                {
+                  "failureText": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")\nAlarmKitSpikeTests/ReminderSchedulerTests.swift:88"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

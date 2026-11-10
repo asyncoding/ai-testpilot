@@ -73,6 +73,21 @@ xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tm
 # 录屏抽帧取证：ffmpeg -i <attachment>.mp4 -vf fps=2 frame_%03d.png
 ```
 
+> **S3.3 实现注记（2026-11-10，hostless 已落地，真实输出待手动探针校准）**：
+> 上文是候选命令原型，工程实现为适配证据可复现性做了三处收口——
+> ① 日志命令不用 `spawn booted`，改 `spawn <租约 udid>`，不依赖调用时刻的隐式
+> "谁是 booted"；不用 `--last 20m` 相对时间，改 `--start/--end` 显式 ISO8601 窗
+> （`OsLogQueryAdapter`，FR-EX-006 AC1 要求查询条件可逐字重放），并固定
+> `--style json` 走 NDJSON 行解析；
+> ② xcresulttool 链路固定三命令：`get test-results tests --format json`（用例树）、
+> `get test-results attachments --format json`（附件归属清单）、有附件才
+> `export attachments --output-path`（字节导出）；附件经 localfs 制品端口按
+> sha256 内容寻址存 URN，失败用例经 `artifact_urns` 关联（FR-EX-005 AC1）；
+> ③ ffmpeg 抽帧 argv 由 `ffmpeg_commands.py` 白名单拼装（`-y` 幂等覆盖、
+> fps 仅允许 1..30 整数、输出固定 `frame_%03d.png`），真实 ffmpeg 仅手动探针调用。
+> 合成 JSON 形态是自造夹具，真实 Xcode 16 字段名以手动探针实测为准（未知形态
+> 解析器 fail-closed，不会静默吞）。
+
 注意：
 
 - `-resultBundlePath` 目录已存在时 xcodebuild 拒覆盖，先删；

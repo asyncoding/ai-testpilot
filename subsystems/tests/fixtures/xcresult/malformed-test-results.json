@@ -1,0 +1,10 @@
+{
+  "testNodes": [
+    {
+      "nodeType": "Mystery Node",
+      "name": "future-xcode-node",
+      "result": "Passed",
+      "children": []
+    }
+  ]
+}

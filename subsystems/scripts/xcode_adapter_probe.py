@@ -21,7 +21,8 @@ SimctlEnvironment 的进程出口全部换成 FakeExecutor/FakeSpawner，验证�
      erase 失败翻译成 AdapterUnavailableError；
   ⑧ cancel 杀子进程：terminate 到位、重复/未知 id 幂等；
   ⑨ 超时出口也释放租约（设备泄漏防线在超时路径同样生效）；
-  ⑩ 无 udid 拒跑（无租约不裸跑 xcodebuild）+ S3.3 前 parser 占位 fail-closed。
+  ⑩ 无 udid 拒跑（无租约不裸跑 xcodebuild）+ 占位 parser 函数自身仍 fail-closed
+     （S3.3 起工厂已换真实 XcresultToolResultParser，本项验证库内占位行为不变）。
 
 报告落 out/eval/xcode-adapter-probe.{json,md}（out/ 已 gitignore）。任一断言不符 exit 1。
 
@@ -48,6 +49,9 @@ from testpilot_adapters.store import bootstrap_store  # noqa: E402
 from testpilot_adapters.xcode_runner import (  # noqa: E402
     XcodeTestRunner,
     unavailable_xcresult_parser,
+)
+from testpilot_adapters.xcresult_tool import (  # noqa: E402
+    XcresultToolResultParser,
 )
 from testpilot_core.config_schema import AdapterRef  # noqa: E402
 from testpilot_core.enums import CaseStatus, RunStatus  # noqa: E402
@@ -265,8 +269,10 @@ async def _main_async() -> tuple[list[dict[str, str]], list[str], Path]:
     container = build_container(config, SUBSYSTEMS)
     runner = container.get("runner")
     env = container.get("environment")
+    # S3.3 起工厂注入真实 xcresulttool parser（与容器共享 localfs 制品端口），
+    # 旧 fail-closed 占位函数保留在库内，⑩ 仍直接注入验证其自身行为不变
     wired = isinstance(runner, XcodeTestRunner) and isinstance(env, SimctlEnvironment) \
-        and runner._parser is unavailable_xcresult_parser  # noqa: SLF001
+        and isinstance(runner._parser, XcresultToolResultParser)  # noqa: SLF001
     container.get("store").close()
 
     bad_runner_cfg = load_profile(PROFILE)
@@ -471,7 +477,7 @@ async def _main_async() -> tuple[list[dict[str, str]], list[str], Path]:
             env_id=_UDID, returncode=0)
     except AdapterUnavailableError:
         parser_loud = True
-    check("⑩ 无租约不裸跑（缺 udid 拒且零 spawn）；S3.3 前 parser 占位 fail-closed",
+    check("⑩ 无租约不裸跑（缺 udid 拒且零 spawn）；占位 parser 函数自身仍 fail-closed",
           no_udid_loud and spawner10.spawned == [] and parser_loud,
           f"no_udid={no_udid_loud} spawned={len(spawner10.spawned)} "
           f"parser_loud={parser_loud}")

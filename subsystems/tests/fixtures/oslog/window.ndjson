@@ -1,0 +1,6 @@
+{"timestamp": "2026-11-10T09:59:00", "subsystem": "com.thames.alarmkitspike", "category": "lifecycle", "process": "AlarmKitSpike", "message": "out-of-window before: app launched early"}
+{"timestamp": "2026-11-10T10:00:00", "subsystem": "com.thames.alarmkitspike", "category": "scheduler", "process": "AlarmKitSpike", "message": "in-window left bound: schedule primary reminder t+30s"}
+{"timestamp": "2026-11-10T10:10:00", "subsystem": "com.apple.AlarmKitCore", "category": "default", "process": "clockagentd", "message": "in-window: system alarm commit ack"}
+{"timestamp": "2026-11-10T10:20:00", "subsystem": "com.thames.alarmkitspike", "category": "scheduler", "process": "AlarmKitSpike", "message": "in-window right bound: backup timer fired"}
+{"timestamp": "2026-11-10T10:21:00", "subsystem": "com.thames.alarmkitspike", "category": "lifecycle", "process": "AlarmKitSpike", "message": "out-of-window after: test tear down complete"}
+{this line is deliberately broken json to exercise bad-line accounting
