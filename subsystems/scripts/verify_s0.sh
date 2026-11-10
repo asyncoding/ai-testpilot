@@ -20,7 +20,11 @@
 # 正常出口、重放幂等、盲序守卫活体，纯 core 确定性链不起端口），
 # A19 为 S3.1 测试执行与 runner-worker 探针（tmp 库 hermetic：先账本后队列/幂等
 # 重放/重跑配额拒入零幻影/协作取消/超时收口/租约 requeue 与死信/junit-xml 工厂
-# 装配 Surefire 三态/v15 持久化，不起端口、不碰 store/offline-demo）。
+# 装配 Surefire 三态/v15 持久化，不起端口、不碰 store/offline-demo），
+# A20 为 S3.2 iOS xcode 适配器与环境租约探针（FakeExecutor/FakeSpawner hermetic：
+# argv 逐字对账/resultBundle 预清理/真机能力拒绝不硬跑/先租后跑透传 udid/过期租约
+# shutdown 回收/reset 守卫与 shutdown→erase 顺序/cancel 杀进程/超时释放/fail-closed，
+# 零 xcodebuild 零 simctl、绝不 erase 用户设备、不起端口）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -255,7 +259,16 @@ $PY scripts/execution_probe.py > /tmp/tp_exec_a19.log 2>&1 \
   && { echo "PASS  $(grep -c '✅' /tmp/tp_exec_a19.log) 项检查全绿（空队列/幂等/落账/配额拒入/取消/超时/requeue/死信/junit 装配/持久化 v15）"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_exec_a19.log 与 out/eval/execution-probe.json"; fail_n=$((fail_n+1)); }
 
+echo "=== A20. iOS xcode 适配器与环境租约（S3.2 FR-EX-003/004：FakeExecutor hermetic，argv 对账/预清理/能力拒绝/租约回收/reset 顺序/cancel/超时释放，零真机零模拟器） ==="
+# 进程出口全部换假件：不跑 xcodebuild/simctl、不 erase 用户设备、不起端口；
+# 报告落 out/eval/xcode-adapter-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/xcode_adapter_probe.py > /tmp/tp_xcode_a20.log 2>&1 \
+  && grep -q '✅ xcode_adapter_probe 全部通过' /tmp/tp_xcode_a20.log \
+  && grep -q '⑦ reset：持租约守卫零命令' /tmp/tp_xcode_a20.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_xcode_a20.log) 项检查全绿（argv 对账/工厂装配/预清理/cancel/能力拒绝/先租后跑/租约回收/reset 守卫/超时释放/fail-closed）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_xcode_a20.log 与 out/eval/xcode-adapter-probe.json"; fail_n=$((fail_n+1)); }
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

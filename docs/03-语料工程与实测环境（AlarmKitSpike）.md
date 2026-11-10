@@ -77,6 +77,9 @@ xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tm
 
 - `-resultBundlePath` 目录已存在时 xcodebuild 拒覆盖，先删；
 - `simctl erase` 必须先 shutdown；UI 测试每用例以 `--ak-clear-all` 启动互不污染；
+- 上文 `-only-testing:Foo` 是冒号单参写法；Agent 实现（S3.2 `xcode_commands.py`）
+  统一用 `-only-testing`、`Foo` 两个 argv 的数组写法，两者 xcodebuild 语义等价，
+  数组写法配合 `create_subprocess_exec` 无 shell 解析面，命令注入面最小；
 - 真机走 `xcrun devicectl device install/launch --device <udid> --console <bundle>`，
   设备必须解锁；Demo 阶段用模拟器即可，真机路径在方案里作为"生产化扩展"讲。
 

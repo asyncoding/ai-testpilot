@@ -41,7 +41,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（821 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（882 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -62,7 +62,10 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # S2.6d S2 五门禁总验（oracle_eval 专家盲评纯逻辑/盲序封存/五门禁统一探针）、
 # S3.1 测试执行纵切（execution 纯逻辑状态机/重跑配额/租约回收、junit_report
 # Surefire 纯解析、v15 三表迁移、队列租约+协作取消、JUnitXmlRunner、
-# execution_service 超时/崩溃恢复/worker 循环/CLI）；
+# execution_service 超时/崩溃恢复/worker 循环/CLI）、
+# S3.2 iOS xcode 适配器（xcode_commands argv/能力/租约纯逻辑、SimctlEnvironment
+# 先租后跑与过期回收、XcodeTestRunner 预清理/子进程/cancel/parser 接缝、
+# 工厂 xcode/ios-simulator 装配、服务层租约三出口必释放）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -570,14 +573,14 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（19 个自动门禁）
+## 一键验收（20 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 19 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 20 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、821 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、882 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -600,12 +603,17 @@ A18 S2 五门禁总验（S2.6d：合成夹具 hermetic，专家清单先封存�
 重放幂等、盲序守卫活体，纯 core 确定性链不起端口）、
 A19 测试执行与 runner-worker（S3.1 FR-EX-001/002：tmp 库 hermetic，先账本后队列/
 幂等重放/重跑配额拒入零幻影/协作取消/超时收口/租约 requeue 与死信/junit-xml 工厂
-装配/v15 持久化，不起端口、不碰 offline 库）。
+装配/v15 持久化，不起端口、不碰 offline 库）、
+A20 iOS xcode 适配器与环境租约（S3.2 FR-EX-003/004：FakeExecutor hermetic，
+argv 逐字对账/resultBundle 预清理/真机能力拒绝不硬跑/先租后跑 udid 透传/过期租约
+shutdown 回收/reset 守卫与 shutdown→erase 顺序/cancel 杀进程/超时释放/fail-closed，
+零 xcodebuild 零 simctl、绝不 erase 用户设备、不起端口）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19 为纯进程内探针，可脱离整脚本单跑：
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20 为纯进程内探针，可脱离整脚本单跑：
 `.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
 `.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
-`.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`。
+`.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`、
+`.venv/bin/python scripts/xcode_adapter_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -1267,3 +1275,63 @@ xcodebuild**，只经 SQLite 队列与独立 runner-worker 交互。本切片全
   （PID 64634，按约束不杀）占用 8765 端口，日志证据 `[Errno 48] address already in use`，
   与 S3.1 改动无关；进程释放后该两门禁即恢复。A5 曾因 CLI 改造丢失无参自检而 FAIL，
   已修复（无参恢复 ready 输出）并复验通过。
+
+## iOS xcode 适配器与环境租约（S3.2，FR-EX-003/004）：先租后跑、无租约不裸跑
+
+S3 纵切第二片，把 S3.1 的语言中立执行契约接到 iOS 真机侧命令面。纪律延续：**命令拼装与
+能力/租约判定全部留在 core 纯函数（零 IO），所有子进程交互沉到 adapters 且进程出口可注入**，
+hermetic 测试与 A20 探针用 FakeExecutor/FakeSpawner 逐字断言 argv，本机不装 Xcode 也能跑；
+真实 xcodebuild/simctl 只作为获批后的手动探针，不进自动门禁、绝不自动 erase 用户设备。
+
+### 分层落点
+
+| 层 | 新增/改动 | 职责 |
+|---|---|---|
+| core | `xcode_commands.py`（纯逻辑零 IO，31 测） | `build_xcodebuild_argv`（始终带 `-only-testing`，空选择 fail-closed 防静默全量；udid 白名单正则防注入）、`simctl_reset_plan`（shutdown→erase 顺序固定）、`evaluate_capabilities`（真机独占能力 `ios.device/background_audio/codesigning` 在模拟器显式拒并说明"未覆盖层"）、`EnvLease`/`env_lease_id` 内容寻址/半开区间过期判定 `reclaimable_env_leases` |
+| core | `ports.py` | `EnvironmentPort` 增 `env_id_for_lease`：租约→udid 的显式翻译，未知/已释放租约抛 NotFound，杜绝空 udid 裸跑 |
+| adapters | `process_executor.py` | 唯一进程出口：argv 列表 + `create_subprocess_exec`（永不 shell）；`run`/`spawn` 两形态，命令不存在统一翻译为 AdapterUnavailableError |
+| adapters | `ios_simulator_env.py`（12 测） | `SimctlEnvironment` 实现 EnvironmentPort：acquire 先回收过期租约再选空闲设备、能力不过零 simctl 调用、全忙显式不可用；health_check/reset（持租约设备禁止 erase）/release（幂等）；过期回收尽力 shutdown（幂等兜底） |
+| adapters | `xcode_runner.py`（7 测） | `XcodeTestRunner` 实现 TestRunnerPort：无 udid 直接拒跑；`-resultBundlePath` 已存在先 `rmtree`（xcodebuild 拒覆盖）；spawn 留句柄、cancel 幂等 terminate；结果解析走可注入 `result_parser` 接缝（S3.3 接 xcresulttool，当前注入 fail-closed 占位，禁止假数据冒充结论） |
+| orchestrator | `factory.py` | 新增 `runner: xcode` 与 `environment: ios-simulator` 装配分支（设备清单配置化、空清单装配期即响、未知 type 仍 ValueError）；environment=stub 时不注册，S3.1 剖面行为一字不动 |
+| workers | `execution_service.py`（新增 7 测集成文件） | environment 存在时**先租后跑**：acquire（内含能力校验）→ udid/request_id 透传进 request labels → runner；成功/超时/异常三出口 finally 必 release，release 失败不掩盖执行结论；能力拒绝/全忙统一收口为 run error + job failed，runner 零调用（不硬跑） |
+
+### 关键语义
+
+- **先租后跑、无租约不裸跑**：worker 只经 EnvironmentPort 拿租约，`env_id_for_lease`
+  翻译成 udid 透传进 `request.environment.labels["udid"]`；runner 不自己挑设备，
+  labels 缺 udid 直接 AdapterUnavailableError，且不产生任何子进程。
+- **不硬跑防线**：真机独占能力（后台音频/推送/签名）在模拟器物理层不可验，
+  `UnsupportedCapabilityError` 必须带"未覆盖层"说明；错误发生在 acquire 阶段，
+  runner.submit 永远不会被调用，不留租约幻影、不碰 simctl。
+- **设备不泄漏**：租约有效期默认 300s（半开区间 `[acquired, expires)`，到点即过期）；
+  进程内登记是 POC 范围，多进程设备云在 P2；进程重启后的兜底是 `reclaim_expired`
+  调幂等的 `simctl shutdown`，不会留下锁死设备。
+- **reset 双重守卫**：持活跃租约的设备 `reset` 直接 PolicyDenied（零命令）；
+  通过后按固定计划先 shutdown 再 erase，任一步非零退出翻译成 AdapterUnavailableError。
+- **argv 形态说明**：docs/03 §3 文档里的 `-only-testing:Foo` 冒号单参写法，与实现使用的
+  `-only-testing Foo` 两 argv 写法在 xcodebuild 语义完全等价；选后者是因为
+  `create_subprocess_exec` 按 argv 数组传参，天然没有 shell 解析面，注入面最小。
+
+```bash
+# A20 端到端探针（生产装配路径 + 假进程出口，tmp 目录 hermetic，不起端口/不碰模拟器）
+.venv/bin/python scripts/xcode_adapter_probe.py
+# 报告：out/eval/xcode-adapter-probe.{json,md}（gitignore），连跑幂等
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 A20 **10 项检查全绿**（11 个 ✅ 含总结行），连跑两遍幂等：argv 两形态逐字对账 +
+  注入/空选择 fail-closed、工厂四分支（装配/未知 type/空清单/stub 缺席）、预清理、
+  cancel 幂等、真机能力拒绝零命令零租约、先租后跑 labels 透传与释放、过期回收 shutdown
+  且设备可再分配、reset 守卫与 shutdown→erase 逐字顺序及失败显式报错、超时出口释放租约、
+  无 udid 拒跑与 parser 占位 fail-closed。
+- **双红证对照**（改生产代码 → 专属测试变红 → 还原转绿，grep 确认零 TEMP 残留）：
+  ① 摘掉 finally 的 release → 服务层 3 个租约测试变红（成功/超时/异常三出口设备泄漏）；
+  ② 吞掉 acquire 异常继续往下跑 → 能力拒绝与全忙 2 个"不硬跑"测试变红（runner 被误调）。
+- 契约测试净增 **61 个**（xcode_commands 31 + ios_sim_env 12 + xcode_runner 7 +
+  execution_env_lease 7 + 工厂装配 4，探针不入 pytest），全量 **882 passed**（821+61）、
+  import-lint OK（core 仍零三方零 IO）、`bash -n scripts/verify_s0.sh` 通过。
+- 本轮全门禁实测 **18 PASS / 2 FAIL**：A20 首次接入即 PASS；仅 A4/A8 仍因用户终端
+  uvicorn（PID 64634，按约束不杀）占用 8765 失败，与 S3.2 无关。
+- **手动探针审批前置（未执行）**：真实模拟器链路（`simctl erase` 会重置用户设备状态）
+  需单独提报方案并获用户明确批准后才动手，自动门禁永不触发。

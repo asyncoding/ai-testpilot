@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -184,13 +185,51 @@ async def _process_job(container, job: dict[str, Any]) -> dict[str, Any]:
     store.update_test_run(
         run_id, status=RunStatus.RUNNING.value, started_at=_now_iso())
 
+    # S3.2 FR-EX-004：environment 适配器存在时"先租后跑"。acquire 内部先做
+    # 能力判定——UnsupportedCapabilityError 与本块其他异常统一落到函数末尾的
+    # 外层 except 收口为 run error + job fail，永远到不了 runner.submit（不硬跑）；
+    # environment=stub 时本块整体跳过，S3.1 的 recorded/junit 路径行为一字不动。
+    env = container.get("environment")
+    lease_id = ""
     adapter_run_id = ""
     try:
+        enriched_request = request
+        if env is not None:
+            try:
+                requirements = request.environment.model_copy(update={
+                    "labels": {
+                        **request.environment.labels,
+                        "request_id": request.request_id,
+                    },
+                })
+                lease_id = await env.acquire(requirements)
+                # 租约→具体设备（udid），runner 只认 labels 不自己挑设备
+                env_id = env.env_id_for_lease(lease_id)
+                enriched_request = request.model_copy(update={
+                    "environment": requirements.model_copy(update={
+                        "labels": {**requirements.labels, "udid": env_id},
+                    }),
+                })
+            except BaseException:
+                # acquire 成功后、enrichment 前出错（适配器契约违例等）也不留租约幻影
+                if lease_id:
+                    with contextlib.suppress(Exception):
+                        await env.release(lease_id)
+                raise
+
         try:
-            adapter_run_id = await asyncio.wait_for(
-                runner.submit(request), timeout=timeout_s)
-            adapter_run: TestRun = await asyncio.wait_for(
-                runner.get_run(adapter_run_id), timeout=timeout_s)
+            try:
+                adapter_run_id = await asyncio.wait_for(
+                    runner.submit(enriched_request), timeout=timeout_s)
+                adapter_run: TestRun = await asyncio.wait_for(
+                    runner.get_run(adapter_run_id), timeout=timeout_s)
+            finally:
+                # 任何出口（成功/超时/适配器异常）都释放租约，防模拟器设备泄漏。
+                # release 只是内存登记弹出（真正 shutdown 在 reclaim_expired），
+                # 且必须在 cancel 通知前后都安全；释放失败不能掩盖执行结论。
+                if lease_id:
+                    with contextlib.suppress(Exception):
+                        await env.release(lease_id)
         except asyncio.TimeoutError:
             # 尽力通知适配器终止（S3.2 xcode 适配器在此 kill 子进程）
             if adapter_run_id:

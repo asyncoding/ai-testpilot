@@ -1,0 +1,214 @@
+"""S3.2 core xcode_commands 纯逻辑测试（无 macOS/无模拟器，hostless）。"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from testpilot_core.errors import UnsupportedCapabilityError
+from testpilot_core.xcode_commands import (
+    CAPABILITY_DEVICE_ONLY,
+    CAPABILITY_NOT_OFFERED,
+    CAPABILITY_OK,
+    EnvLease,
+    build_simctl_erase_argv,
+    build_simctl_shutdown_argv,
+    build_xcodebuild_argv,
+    env_lease_id,
+    evaluate_capabilities,
+    is_env_lease_expired,
+    reclaimable_env_leases,
+    simctl_reset_plan,
+    validate_only_testing,
+)
+
+_UDID = "5411787C-8AFF-4EBF-9000-EB5EFD1457D5"
+_KWARGS = dict(
+    workspace="AlarmKitSpike/AlarmKitSpike.xcworkspace",
+    scheme="AlarmKitSpike",
+    udid=_UDID,
+    result_bundle_path="/tmp/hostless.xcresult",
+)
+_T0 = datetime(2026, 11, 10, 9, 0, tzinfo=timezone.utc)
+
+
+# ── xcodebuild argv ──────────────────────────────────────────────────────────
+
+
+def test_hostless_suite_argv_matches_docs03_exact_shape():
+    argv = build_xcodebuild_argv(only_testing=["AlarmKitSpikeTests"], **_KWARGS)
+    assert argv == [
+        "xcodebuild", "test",
+        "-workspace", "AlarmKitSpike/AlarmKitSpike.xcworkspace",
+        "-scheme", "AlarmKitSpike",
+        "-destination", f"platform=iOS Simulator,id={_UDID}",
+        "-only-testing", "AlarmKitSpikeTests",
+        "-resultBundlePath", "/tmp/hostless.xcresult",
+    ]
+
+
+def test_single_xcuitest_argv_keeps_fully_qualified_identifier():
+    argv = build_xcodebuild_argv(
+        only_testing=[
+            "AlarmKitSpikeUITests/ProductFlowUITests/test10_WakeForm_SoundPickedThenSwipeStillBlocked"
+        ],
+        **_KWARGS,
+    )
+    assert argv[8] == "-only-testing"
+    assert argv[9].endswith("/ProductFlowUITests/test10_WakeForm_SoundPickedThenSwipeStillBlocked")
+
+
+def test_multiple_only_testing_flags_in_order():
+    argv = build_xcodebuild_argv(
+        only_testing=["AlarmKitSpikeTests", "AlarmKitSpikeUITests/ProductFlowUITests"],
+        **_KWARGS,
+    )
+    assert argv.count("-only-testing") == 2
+    first = argv.index("-only-testing")
+    assert argv[first + 1] == "AlarmKitSpikeTests"
+    assert argv[first + 3] == "AlarmKitSpikeUITests/ProductFlowUITests"
+
+
+@pytest.mark.parametrize("field", ["workspace", "scheme", "udid", "result_bundle_path"])
+def test_missing_required_arg_fails_closed(field):
+    kwargs = dict(_KWARGS)
+    kwargs[field] = "   "
+    with pytest.raises(ValueError, match="不能为空"):
+        build_xcodebuild_argv(only_testing=["AlarmKitSpikeTests"], **kwargs)
+
+
+def test_empty_only_testing_rejected_no_silent_full_run():
+    with pytest.raises(ValueError, match="选择执行"):
+        build_xcodebuild_argv(only_testing=[], **_KWARGS)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["AlarmKitSpikeTests;rm -rf /", "../AlarmKitSpikeTests", "Suite/Class/method/extra",
+     "Suite With Space", "", "Suite/-Bad", "1Suite"],
+)
+def test_invalid_only_testing_identifier_rejected(bad):
+    with pytest.raises(ValueError, match="非法 -only-testing"):
+        validate_only_testing(bad)
+
+
+@pytest.mark.parametrize("bad_udid", ["", "  ", "ABC; rm", "UDID WITH SPACE", "abc'--"])
+def test_udid_injection_chars_rejected(bad_udid):
+    kwargs = dict(_KWARGS, udid=bad_udid)
+    with pytest.raises(ValueError):
+        build_xcodebuild_argv(only_testing=["AlarmKitSpikeTests"], **kwargs)
+
+
+# ── simctl 重置计划 ──────────────────────────────────────────────────────────
+
+
+def test_reset_plan_is_shutdown_then_erase_in_fixed_order():
+    plan = simctl_reset_plan(_UDID)
+    assert plan == [
+        ["xcrun", "simctl", "shutdown", _UDID],
+        ["xcrun", "simctl", "erase", _UDID],
+    ]
+    assert build_simctl_shutdown_argv(_UDID)[2] == "shutdown"
+    assert build_simctl_erase_argv(_UDID)[2] == "erase"
+
+
+def test_simctl_argv_rejects_bad_udid():
+    with pytest.raises(ValueError):
+        simctl_reset_plan("not a udid")
+
+
+# ── 能力判定（FR-EX-004 AC1）─────────────────────────────────────────────────
+
+
+def test_empty_requirements_always_supported():
+    decision = evaluate_capabilities([], offered=["ios.simulator"])
+    assert decision.supported and decision.reason == CAPABILITY_OK
+    decision.raise_if_unsupported()  # 不抛
+
+
+def test_simulator_capabilities_supported_when_offered():
+    decision = evaluate_capabilities(
+        ["ios.simulator", "ui.automation"],
+        offered=["ios.simulator", "ui.automation", "hostless"],
+    )
+    assert decision.supported
+
+
+def test_device_only_capability_rejected_with_uncovered_layer_message():
+    decision = evaluate_capabilities(
+        ["background_audio"], offered=["ios.simulator", "background_audio"]
+    )
+    # 即使设备清单误标了该能力，真机独占集合仍一票否决（物理层给不出）
+    assert not decision.supported
+    assert decision.reason == CAPABILITY_DEVICE_ONLY
+    assert "background_audio" in decision.unsupported
+    assert "未覆盖层" in decision.message
+    with pytest.raises(UnsupportedCapabilityError, match="未覆盖层"):
+        decision.raise_if_unsupported()
+
+
+def test_codesigning_and_ios_device_markers_are_device_only():
+    for cap in ("codesigning", "ios.device"):
+        decision = evaluate_capabilities([cap], offered=["ios.simulator"])
+        assert not decision.supported
+        assert decision.reason == CAPABILITY_DEVICE_ONLY
+
+
+def test_not_offered_capability_rejected_distinct_reason():
+    decision = evaluate_capabilities(
+        ["ui.automation"], offered=["ios.simulator"]
+    )
+    assert not decision.supported
+    assert decision.reason == CAPABILITY_NOT_OFFERED
+    assert decision.unsupported == ["ui.automation"]
+    assert "设备清单不提供" in decision.message
+
+
+def test_mixed_unsupported_reports_all_and_device_only_takes_precedence():
+    decision = evaluate_capabilities(
+        ["codesigning", "gpu.metal"], offered=["ios.simulator"]
+    )
+    assert not decision.supported
+    assert decision.reason == CAPABILITY_DEVICE_ONLY
+    assert decision.unsupported == ["codesigning", "gpu.metal"]
+
+
+# ── 环境租约回收（FR-EX-004 AC2）──────────────────────────────────────────────
+
+
+def _lease(seconds: int) -> EnvLease:
+    return EnvLease(
+        lease_id="envlease-x",
+        env_id="sim-1",
+        request_id="req-1",
+        acquired_at=_T0,
+        expires_at=_T0 + timedelta(seconds=seconds),
+    )
+
+
+def test_lease_id_content_addressed_and_stable():
+    lid = env_lease_id("sim-1", "req-1", _T0)
+    assert lid.startswith("envlease-") and len(lid) == len("envlease-") + 12
+    assert env_lease_id("sim-1", "req-1", _T0) == lid
+    assert env_lease_id("sim-2", "req-1", _T0) != lid
+
+
+def test_lease_expiry_boundary_is_half_open():
+    active = _lease(300)
+    assert is_env_lease_expired(active, now=_T0 + timedelta(seconds=299)) is False
+    # 恰好到期即视为过期（[acquired, expires) 半开区间）
+    assert is_env_lease_expired(active, now=_T0 + timedelta(seconds=300)) is True
+    assert is_env_lease_expired(active, now=_T0 + timedelta(seconds=301)) is True
+
+
+def test_reclaimable_only_returns_expired_leases():
+    fresh = EnvLease(
+        lease_id="envlease-fresh", env_id="sim-1", request_id="r1",
+        acquired_at=_T0, expires_at=_T0 + timedelta(seconds=300))
+    stale = EnvLease(
+        lease_id="envlease-stale", env_id="sim-2", request_id="r2",
+        acquired_at=_T0 - timedelta(seconds=600),
+        expires_at=_T0 - timedelta(seconds=1))
+    reclaimed = reclaimable_env_leases([fresh, stale], now=_T0)
+    assert reclaimed == [stale]

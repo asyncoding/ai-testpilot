@@ -1,9 +1,10 @@
 """适配器装配工厂（依赖注入根，docs/08 FR-CFG-002 AC3）。
 
 换 profile = 换适配器实现，工作流代码零改动。
-支持的 type：stub / fs-docs / json / json-replay / recorded / junit-xml / localfs /
-sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/ chroma（vectors）/
-git 与 recorded（scm，S1.3）；其余在 S3 引入（xcode …）。
+支持的 type：stub / fs-docs / json / json-replay / recorded / junit-xml / xcode（S3.2）/
+localfs / sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/
+chroma（vectors）/ git 与 recorded（scm，S1.3）/ ios-simulator（environment，S3.2）；
+logs 仍为 stub 位，S3.3 随 xcresulttool / os_log 落地。
 
 降级是运行期行为（向量通道故障→FTS-only），不是装配期选项：hybrid 必须配齐
 model+vectors，否则 build_container 直接 ValueError（防止静默退化为单路而不自知）。
@@ -208,6 +209,24 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             capabilities=rs.get("capabilities", []),
             version=rs.get("version", ""),
         )
+    elif a.runner.type == "xcode":
+        # S3.2 FR-EX-003：真实 xcodebuild，进程出口唯一走 SubprocessExecutor
+        # （argv 列表 create_subprocess_exec，永不 shell）；result parser 是
+        # S3.3 FR-EX-005 的 xcresulttool 接缝，当前注入 fail-closed 占位。
+        from testpilot_adapters.xcode_runner import (
+            XcodeTestRunner,
+            unavailable_xcresult_parser,
+        )
+
+        rs = a.runner.settings
+        container.adapters["runner"] = XcodeTestRunner(
+            workspace=rs["workspace"],
+            scheme=rs["scheme"],
+            repo_path=repo_path,
+            result_bundle_dir=_p(
+                base_dir, rs.get("result_bundle_dir", "store/xcresult")),
+            result_parser=unavailable_xcresult_parser,
+        )
     elif a.runner.type != "stub":
         raise ValueError(f"未知 runner 适配器类型: {a.runner.type}")
 
@@ -335,10 +354,26 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.search.type != "stub":
         raise ValueError(f"未知 search 适配器类型: {a.search.type}")
 
-    # stub 位（后续里程碑实现）：environment / logs
-    for name in ("environment", "logs"):
-        ref = getattr(a, name)
-        if ref.type != "stub":
-            raise ValueError(f"适配器 {name} 的类型 {ref.type} 将在后续里程碑实现")
+    # ── 环境（S3.2 FR-EX-004：ios-simulator 模拟器池；stub=不装配，
+    #    执行服务见不到 environment 时走旧路径，行为与 S3.1 完全一致）──
+    if a.environment.type == "ios-simulator":
+        from testpilot_adapters.ios_simulator_env import (
+            SimctlEnvironment,
+            SimulatorDevice,
+        )
+
+        es = a.environment.settings
+        devices = [SimulatorDevice.model_validate(d) for d in es.get("devices", [])]
+        # 空清单在构造期即 AdapterUnavailableError，不让坏 profile 拖到运行期
+        container.adapters["environment"] = SimctlEnvironment(
+            devices,
+            lease_timeout_s=int(es.get("lease_timeout_s", 300)),
+        )
+    elif a.environment.type != "stub":
+        raise ValueError(f"未知 environment 适配器类型: {a.environment.type}")
+
+    # logs 仍是 stub 位（S3.3 随 xcresulttool / os_log 一起落地）
+    if a.logs.type != "stub":
+        raise ValueError(f"适配器 logs 的类型 {a.logs.type} 将在后续里程碑实现")
 
     return container

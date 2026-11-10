@@ -111,6 +111,14 @@ class EnvironmentPort(Protocol):
     async def acquire(self, requirements) -> str:  # EnvironmentRequirements -> lease_id
         ...
 
+    def env_id_for_lease(self, lease_id: str) -> str:
+        """租约 → 具体环境标识（模拟器即 udid）；未知/已释放租约必须响亮失败。
+
+        worker 拿到 lease_id 后据此把 udid 透传进 request.environment.labels，
+        runner 只认 labels，不自己挑设备，保证"先租后跑、无租约不裸跑"。
+        """
+        ...
+
     async def health_check(self, env_id: str) -> bool: ...
 
     async def reset(self, env_id: str) -> None: ...

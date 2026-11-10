@@ -16,6 +16,8 @@ from testpilot_adapters.recorded_git import RecordedGitRepository
 from testpilot_adapters.recorded_model import RecordedModelGateway
 from testpilot_adapters.recorded_runner import RecordedTestRunner
 from testpilot_adapters.tracers import NoopTracer
+from testpilot_core.config_schema import AdapterRef
+from testpilot_core.errors import AdapterUnavailableError
 from testpilot_orchestrator.config_loader import load_profile
 from testpilot_orchestrator.factory import build_container
 
@@ -317,6 +319,88 @@ def test_unknown_swift_chunker_setting_raises(tmp_path):
     config.adapters.docs.settings["swift_chunker"] = "bogus"
     with pytest.raises(ValueError, match="swift_chunker"):
         build_container(config, SUBSYSTEMS)
+
+
+# ── S3.2：xcode runner / ios-simulator environment 装配 ──────────────────────
+
+def _offline_config(tmp_path, monkeypatch=None):
+    config = load_profile(PROFILE)
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.paths["fixtures_dir"] = str(SUBSYSTEMS / "tests" / "fixtures")
+    return config
+
+
+def test_xcode_runner_and_ios_simulator_env_wired(tmp_path):
+    # 纯构造验证：不起任何 xcodebuild/simctl 进程，bundle 目录落在 tmp 下
+    from testpilot_adapters.ios_simulator_env import SimctlEnvironment
+    from testpilot_adapters.xcode_runner import XcodeTestRunner
+
+    config = _offline_config(tmp_path)
+    config.adapters.runner = AdapterRef(type="xcode", settings={
+        "workspace": "AlarmKitSpike/AlarmKitSpike.xcworkspace",
+        "scheme": "AlarmKitSpike",
+        "result_bundle_dir": str(tmp_path / "bundles"),
+    })
+    config.adapters.environment = AdapterRef(type="ios-simulator", settings={
+        "devices": [
+            {"udid": "UDID-A", "name": "iPhone 15",
+             "capabilities": ["ios.simulator", "ui.automation"]},
+            {"udid": "UDID-B", "name": "iPhone SE",
+             "capabilities": ["ios.simulator"]},
+        ],
+        "lease_timeout_s": 120,
+    })
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        runner = container.get("runner")
+        env = container.get("environment")
+        assert isinstance(runner, XcodeTestRunner)
+        assert isinstance(env, SimctlEnvironment)
+        assert runner.workspace.endswith("AlarmKitSpike.xcworkspace")
+        assert runner.scheme == "AlarmKitSpike"
+        assert runner.result_bundle_dir == tmp_path / "bundles"
+        assert (tmp_path / "bundles").is_dir()  # 构造期备好产物根
+        assert env._lease_timeout_s == 120  # noqa: SLF001
+        assert [d.udid for d in env._devices] == ["UDID-A", "UDID-B"]  # noqa: SLF001
+        # S3.3 前 parser 是 fail-closed 占位，绝不拿假数据冒充测试结论
+        from testpilot_adapters.xcode_runner import unavailable_xcresult_parser
+        assert runner._parser is unavailable_xcresult_parser  # noqa: SLF001
+    finally:
+        container.get("store").close()
+
+
+def test_ios_simulator_empty_device_list_fails_at_assembly(tmp_path):
+    config = _offline_config(tmp_path)
+    config.adapters.environment = AdapterRef(
+        type="ios-simulator", settings={"devices": []})
+    with pytest.raises(AdapterUnavailableError, match="设备清单为空"):
+        build_container(config, SUBSYSTEMS)
+
+
+def test_unknown_runner_and_environment_types_rejected(tmp_path):
+    config = _offline_config(tmp_path)
+    config.adapters.runner = AdapterRef(type="xcode-cloud", settings={})
+    with pytest.raises(ValueError, match="未知 runner"):
+        build_container(config, SUBSYSTEMS)
+
+    config = _offline_config(tmp_path)
+    config.adapters.environment = AdapterRef(type="device-farm", settings={})
+    with pytest.raises(ValueError, match="未知 environment"):
+        build_container(config, SUBSYSTEMS)
+
+
+def test_stub_environment_not_registered_and_logs_still_locked(tmp_path):
+    # 行为不变性：默认 profile environment=stub → 容器里没有该适配器，
+    # 执行服务走 S3.1 旧路径；logs 仍是后续里程碑 stub 位
+    config = _offline_config(tmp_path)
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        assert container.get("environment") is None
+        config.adapters.logs = AdapterRef(type="os-log", settings={})
+        with pytest.raises(ValueError, match="logs"):
+            build_container(config, SUBSYSTEMS)
+    finally:
+        container.get("store").close()
 
 
 def test_tree_sitter_setting_registers_optional_chunker(tmp_path):
