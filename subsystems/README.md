@@ -41,7 +41,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（969 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（1023 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -68,7 +68,10 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # 工厂 xcode/ios-simulator 装配、服务层租约三出口必释放）、
 # S3.3 xcresult/os_log（xcresult_parse 树展平 fail-closed、附件 URN 回链、
 # oslog_commands 时间窗/可复现 query、ffmpeg 白名单、XcresultToolResultParser、
-# OsLogQueryAdapter NDJSON 坏行计数、工厂 os-log 装配、合成夹具守护）；
+# OsLogQueryAdapter NDJSON 坏行计数、工厂 os-log 装配、合成夹具守护）、
+# S3.4 失败归因（attribution 五候选纯规则引擎/置信地板与不对称护栏/needs_human
+# 不硬归因、attribution_eval 混淆矩阵四门禁/误误导口径/盲标封存、
+# attribution_service 证据组包 Provider 接缝、40 例合成盲标夹具守护）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -576,14 +579,14 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（20 个自动门禁）
+## 一键验收（22 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 21 个自动门禁；干净环境 21 PASS / 0 FAIL，日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 22 个自动门禁；干净环境 22 PASS / 0 FAIL，日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、969 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、1023 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -614,14 +617,18 @@ shutdown 回收/reset 守卫与 shutdown→erase 顺序/cancel 杀进程/超时�
 A21 xcresult 制品与 os_log 查询（S3.3 FR-EX-005/006：假执行器 hermetic，用例树
 展平/畸形 fail-closed/附件 localfs URN 回链/导出缺件响亮失败/NDJSON 时间窗 AC2/
 坏行计数/query 回显可复现/ffmpeg 白名单/工厂 os-log 装配，零 xcresulttool 零
-simctl 零 ffmpeg、不碰用户设备、不起端口）。
+simctl 零 ffmpeg、不碰用户设备、不起端口）、
+A22 失败归因（S3.4 FR-EX-007：纯 hermetic，五候选规则/AC1 四历史原型/产品改动
+分界/不对称护栏/AC4 needs_human 三场景/40 例盲标混淆矩阵四门禁（准确率/真缺陷
+recall/误误导率/证据充分率）/误误导口径/组包服务/封存哈希，零 IO 零端口）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21 为纯进程内探针，可脱离整脚本单跑：
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21/A22 为纯进程内探针，可脱离整脚本单跑：
 `.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
 `.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
 `.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`、
 `.venv/bin/python scripts/xcode_adapter_probe.py`、
-`.venv/bin/python scripts/xcresult_oslog_probe.py`。
+`.venv/bin/python scripts/xcresult_oslog_probe.py`、
+`.venv/bin/python scripts/attribution_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -1401,3 +1408,66 @@ A21 探针与全部单测用自造合成夹具 hermetic 运行，零 xcresulttoo
   与 S3.3 无关。
 - **手动探针审批前置（未执行，延续 S3.2）**：真实 xcresulttool/os_log/ffmpeg 字段校准
   与模拟器链路（含 `simctl erase`）需单独提报方案并获用户明确批准后才动手。
+
+## 失败归因（S3.4，FR-EX-007）：五候选确定性脊柱、不对称护栏与 needs_human 不硬归因
+
+S3 纵切第四片：S3.1 跑出失败、S3.3 采到制品与日志证据，本片把归一化证据包归因到
+五个候选类别（真缺陷 / 用例过期 / flaky / 环境失败 / 产品改动），证据不足或候选冲突时
+裁决 `needs_human` 交人审，**绝不硬归因**（AC4）。纪律延续：core 纯规则零 IO 零三方，
+workers 只负责证据组包（Provider 接缝依赖注入），**schema 保持 v15 零变更、本切片不做
+持久化**（verdict 落库/HTTP API/详情页留 S3.5）；LLM 归因留 P2——真缺陷 recall ≥.95、
+误误导率 ≤.02 的护栏只有确定性规则能给出可复现保证。
+
+### 分层落点
+
+| 层 | 新增/改动 | 职责 |
+|---|---|---|
+| core | `attribution.py`（纯逻辑零 IO，28 测） | 证据包账本校验（空身份/重复 ref/结构化信号缺同源账本一律 SchemaValidationError）；四条规则 `_rule_flaky`/`_rule_assertion_family`/`_rule_environment`/`_rule_real_defect` 只在有决定性证据时开火；置信地板 0.6、前两名冲突区间 0.1、真缺陷不对称护栏 0.7；每个 verdict 打规则版本戳 `attribution-rules-1` |
+| core | `attribution_eval.py`（12 测） | `LabeledManifest` 盲标封存（规范 JSON sha256[:16]）、6×6 混淆矩阵（36 格预建）、四门禁（准确率 ≥.7 / 真缺陷 recall ≥.95 / 误误导率 ≤.02 / 证据充分率 ≥.9）；逐类 P/R 零除返 **None 不伪造 0**，缺席真缺陷类时 recall 门禁显式判负 |
+| workers | `attribution_service.py`（8 测） | `AttributionEvidenceProvider` Protocol（重跑/断言对照/日志/diff/环境/变更记录六异步方法）+ `NullEvidenceProvider`（空证据必回 needs_human）；`attribute_case` 组账本 ref 并透传 `uncovered_layers`，passed/skipped 拒入归因；`attribute_run` 只收 failed/error 且保序 |
+| tests | `fixtures/attribution/labeled_cases.json` + `test_s34_fixtures.py`（6 测） | 40 例**全自造**盲标（零语料仓原件、零本机路径）：20 真缺陷 / 5 flaky / 4 过期 / 4 环境 / 4 产品改动 / 3 needs_human，含 AC1 四历史原型与多组噪声诱饵；夹具-引擎-门禁三方契约守卫 |
+
+### 关键语义（口径钉版，改动先改文档与 handoff）
+
+- **flaky 的唯一充分证据**：同一 commit_sha 的重跑观察（≥2）里同时出现 passed 与
+  failed/error；全失败不是 flaky（那是复现缺陷的正向证据之一）。
+- **断言失配二分**：断言期望与当前代码常量不匹配即失配；有覆盖该符号的变更记录背书 →
+  product_change（有意改动），否则 → case_outdated（用例守旧值）。
+- **真缺陷不许排除法**：必须有正向证据——堆栈符号命中近期 diff（置信 0.9），或同 commit
+  ≥2 次失败且失败消息属缺陷族（XCTAssert/exception/crash 等，0.75）；其他候选都不成立
+  不等于缺陷成立。
+- **不对称护栏**：真缺陷候选 ≥0.7 在场而非缺陷类领先时，领先优势 ≤0.1 一律 needs_human
+  （把真缺陷收口成 flaky/过期是代价最高的错误）；前两名置信差 ≤0.1 的并列冲突同样交
+  人审，且 needs_human  verdict 保留全部冲突候选供复核。
+- **误误导率口径**：GT=真缺陷却判进四个非缺陷收口（过期/flaky/环境/产品改动）才算误导；
+  判 needs_human 是**弃权**而非误导（升级人审不会放缺陷出门），单独计弃权率，
+  证据充分率 = 1 − 弃权率。
+- **证据可回溯**：verdict 的每个 evidence_refs 必须命中证据账本；组包层结构化信号
+  （重跑/断言/日志/diff/环境/变更）必须带同源账本条目，否则整包 fail-closed。
+
+```bash
+# A22 端到端探针（纯 core/workers 确定性链，零端口零网络零真机状态，报告 gitignore）
+.venv/bin/python scripts/attribution_probe.py
+# 报告：out/eval/attribution-probe.{json,md}，连跑幂等、封存哈希稳定
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 A22 **14 项检查全绿**（门禁行 15 个 ✅ 含总结行）：规则版本与六类闭集、AC1 四
+  历史原型（90→30 过期/授权竞态/真机能力缺失/flaky）、产品改动分界、缺陷挂环境噪声诱饵
+  仍判真缺陷、needs_human 三场景且冲突保留候选、40 例四门禁实测 **acc 1.0 / 真缺陷
+  recall 1.0 / 误误导 0.0 / 充分率 0.925**（弃权 3/40）、36 格矩阵总数对账、误误导口径
+  内联例证、组包服务两查、封存稳定与零除 None。
+- **三红证对照**（改生产代码 → 专属测试变红 → 还原转绿，`grep TEMP-RED` 零残留）：
+  ① 废掉断言对照规则 → 过期/产品改动 5 测红、探针②⑥⑨红（acc 0.800、充分率 0.750）；
+  ② 拆 flaky 的 passed 护栏（全失败也算 flaky）→ 4 测红，8 例复现缺陷被 flaky 收口，
+  **误误导率 0.400、recall 0.600 双门禁红**；
+  ③ 真缺陷规则加"消息非空即开火"兜底 → 薄证据被硬归因，AC4 3 测红，失配/环境原型
+  连带翻 needs_human（acc 0.675、充分率 0.650），证明正向证据纪律的保护面。
+- 契约测试净增 **54 个**（attribution 28 + attribution_eval 12 + attribution_service 8 +
+  夹具守护 6，探针不入 pytest），全量 **1023 passed**（969+54）、import-lint OK
+  （core 仍零三方零 IO）、`bash -n scripts/verify_s0.sh` 通过。
+- 本轮全门禁实测 **20 PASS / 2 FAIL**：A22 首次接入即 PASS；仅 A4/A8 仍因用户终端
+  uvicorn（PID 64634，按约束不杀）占用 8765 失败，与 S3.4 无关。
+- **手动验证延后（用户自行处理）**：真实模拟器/xcresult/os_log 字段校准（延续 S3.2/S3.3
+  审批前置）与 QA 节专家评测；本片 40 例为自造合成盲标，真档归因标定待真实证据链路打通后。

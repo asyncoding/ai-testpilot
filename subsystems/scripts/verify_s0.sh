@@ -28,7 +28,10 @@
 # A21 为 S3.3 xcresult 制品与 os_log 探针（FakeExecutor hermetic：用例树展平/
 # 附件 localfs URN 回链/畸形与缺件 fail-closed/NDJSON 时间窗过滤/坏行计数/
 # query 回显可复现/ffmpeg 白名单/工厂 os-log 装配，零 xcresulttool 零 simctl
-# 零 ffmpeg、不碰用户设备、不起端口）。
+# 零 ffmpeg、不碰用户设备、不起端口），
+# A22 为 S3.4 失败归因探针（纯 hermetic：五候选规则/AC1 四历史原型/不对称护栏/
+# needs_human 三场景/40 例盲标混淆矩阵四门禁/误误导口径/组包服务/封存哈希，
+# 零端口零网络零真机状态）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -283,6 +286,16 @@ $PY scripts/xcresult_oslog_probe.py > /tmp/tp_xcresult_a21.log 2>&1 \
   || { echo "FAIL  见 /tmp/tp_xcresult_a21.log 与 out/eval/xcresult-oslog-probe.json"; fail_n=$((fail_n+1)); }
 
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3）"
+echo "=== A22. 失败归因（S3.4 FR-EX-007：纯 hermetic，五候选/AC1 四原型/护栏/needs_human/40 例混淆矩阵四门禁，不起端口） ==="
+# 纯 core/workers 确定性链：盲标夹具封存后跑引擎，零端口零网络零真机；
+# 报告落 out/eval/attribution-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/attribution_probe.py > /tmp/tp_attribution_a22.log 2>&1 \
+  && grep -q '✅ attribution_probe 全部通过' /tmp/tp_attribution_a22.log \
+  && grep -q '⑨ 40 例盲标四门禁全过' /tmp/tp_attribution_a22.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_attribution_a22.log) 项检查全绿（四原型/产品改动分界/护栏/needs_human/矩阵四门/误误导口径/组包/封存）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_attribution_a22.log 与 out/eval/attribution-probe.json"; fail_n=$((fail_n+1)); }
+
+echo
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3 / A22 S3.4）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

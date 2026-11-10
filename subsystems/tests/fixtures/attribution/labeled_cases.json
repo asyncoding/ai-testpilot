@@ -1,0 +1,618 @@
+{
+  "version": "attribution-labeled-v1",
+  "cases": [
+    {
+      "case_id": "RD-DIFF-01",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-01",
+        "commit_sha": "c0ffee01",
+        "message": "XCTAssertTrue failed",
+        "stack_top": "ReminderScheduler.backupFallback()",
+        "diff": {"base": "b0001", "head": "h0001", "changed_symbols": ["ReminderScheduler.backupFallback()"], "stack_symbol": "ReminderScheduler.backupFallback()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0001..h0001"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-02",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-02",
+        "commit_sha": "c0ffee02",
+        "message": "XCTAssertEqual failed: (\"on\") is not equal to (\"off\")",
+        "stack_top": "AlarmRing.toggle()",
+        "diff": {"base": "b0002", "head": "h0002", "changed_symbols": ["AlarmRing.toggle()"], "stack_symbol": "AlarmRing.toggle()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0002..h0002"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-03",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-03",
+        "commit_sha": "c0ffee03",
+        "message": "Fatal error: Unexpectedly found nil",
+        "stack_top": "SoundPicker.load()",
+        "diff": {"base": "b0003", "head": "h0003", "changed_symbols": ["SoundPicker.load()", "SoundPicker.save()"], "stack_symbol": "SoundPicker.load()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0003..h0003"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-04",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-04",
+        "commit_sha": "c0ffee04",
+        "message": "XCTAssertNotNil failed",
+        "stack_top": "NotificationGate.evaluate()",
+        "diff": {"base": "b0004", "head": "h0004", "changed_symbols": ["NotificationGate.evaluate()"], "stack_symbol": "NotificationGate.evaluate()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0004..h0004"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-05",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-05",
+        "commit_sha": "c0ffee05",
+        "message": "XCTAssertEqual failed: (\"2\") is not equal to (\"1\")",
+        "stack_top": "BackupStore.write()",
+        "diff": {"base": "b0005", "head": "h0005", "changed_symbols": ["BackupStore.write()"], "stack_symbol": "BackupStore.write()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0005..h0005"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-06",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-06",
+        "commit_sha": "c0ffee06",
+        "message": "uncaught exception NSInvalidArgumentException",
+        "stack_top": "ClockAngelClient.reschedule()",
+        "diff": {"base": "b0006", "head": "h0006", "changed_symbols": ["ClockAngelClient.reschedule()"], "stack_symbol": "ClockAngelClient.reschedule()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0006..h0006"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-07",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-07",
+        "commit_sha": "c0ffee07",
+        "message": "XCTAssertTrue failed",
+        "stack_top": "LunarSpike.nextWindow()",
+        "diff": {"base": "b0007", "head": "h0007", "changed_symbols": ["LunarSpike.nextWindow()"], "stack_symbol": "LunarSpike.nextWindow()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0007..h0007"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-08",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-08",
+        "commit_sha": "c0ffee08",
+        "message": "XCTAssertEqual failed: (\"30\") is not equal to (\"60\")",
+        "stack_top": "ReminderScheduler.schedulePrimary()",
+        "diff": {"base": "b0008", "head": "h0008", "changed_symbols": ["ReminderScheduler.schedulePrimary()"], "stack_symbol": "ReminderScheduler.schedulePrimary()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0008..h0008"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-09",
+      "archetype": "real_defect_diff_with_env_noise",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-09",
+        "commit_sha": "c0ffee09",
+        "message": "XCTAssertTrue failed",
+        "stack_top": "AlarmRing.snooze()",
+        "diff": {"base": "b0009", "head": "h0009", "changed_symbols": ["AlarmRing.snooze()"], "stack_symbol": "AlarmRing.snooze()", "stack_symbol_changed": true},
+        "environment": [{"family": "authorization_race", "detail": "日志里有授权告警噪声，但失败堆栈直指改动符号", "uncovered_layers": []}],
+        "ledger": [
+          {"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0009..h0009"},
+          {"ref": "ev-env-1", "kind": "environment", "summary": "authorization_race: 环境噪声信号", "data": {"family": "authorization_race"}}
+        ]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-10",
+      "archetype": "real_defect_diff_with_env_noise",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-10",
+        "commit_sha": "c0ffee10",
+        "message": "XCTAssertEqual failed",
+        "stack_top": "SoundPicker.grant()",
+        "diff": {"base": "b0010", "head": "h0010", "changed_symbols": ["SoundPicker.grant()"], "stack_symbol": "SoundPicker.grant()", "stack_symbol_changed": true},
+        "environment": [{"family": "capability_gap", "detail": "模拟器能力提示噪声", "uncovered_layers": ["codesigning"]}],
+        "log_signals": [{"query_ref": "q-10", "predicate": "subsystem == \"com.thames.alarmkitspike\"", "matched_count": 5, "families": ["capability_gap"]}],
+        "uncovered_layers": ["codesigning"],
+        "ledger": [
+          {"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0010..h0010"},
+          {"ref": "ev-env-1", "kind": "environment", "summary": "capability_gap: 环境噪声信号", "data": {"family": "capability_gap"}},
+          {"ref": "ev-log-1", "kind": "log", "summary": "os_log 查询 q-10 命中 5 条", "data": {"predicate": "subsystem == \"com.thames.alarmkitspike\"", "families": ["capability_gap"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-11",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-11",
+        "commit_sha": "c0ffee11",
+        "message": "crash: EXC_BAD_ACCESS",
+        "stack_top": "RingPlayer.start()",
+        "diff": {"base": "b0011", "head": "h0011", "changed_symbols": ["RingPlayer.start()"], "stack_symbol": "RingPlayer.start()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0011..h0011"}]
+      }
+    },
+    {
+      "case_id": "RD-DIFF-12",
+      "archetype": "real_defect_diff",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-DIFF-12",
+        "commit_sha": "c0ffee12",
+        "message": "XCTAssertFalse failed",
+        "stack_top": "QuotaGuard.check()",
+        "diff": {"base": "b0012", "head": "h0012", "changed_symbols": ["QuotaGuard.check()"], "stack_symbol": "QuotaGuard.check()", "stack_symbol_changed": true},
+        "ledger": [{"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号命中近期 diff b0012..h0012"}]
+      }
+    },
+    {
+      "case_id": "RD-REPL-01",
+      "archetype": "real_defect_replicated",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-01",
+        "commit_sha": "c1ffee01",
+        "message": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")",
+        "reruns": [
+          {"run_id": "run-r1-1", "commit_sha": "c1ffee01", "status": "failed"},
+          {"run_id": "run-r1-2", "commit_sha": "c1ffee01", "status": "failed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败观察", "data": {"run_ids": ["run-r1-1", "run-r1-2"]}}]
+      }
+    },
+    {
+      "case_id": "RD-REPL-02",
+      "archetype": "real_defect_replicated",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-02",
+        "commit_sha": "c1ffee02",
+        "message": "XCTAssertTrue failed",
+        "reruns": [
+          {"run_id": "run-r2-1", "commit_sha": "c1ffee02", "status": "failed"},
+          {"run_id": "run-r2-2", "commit_sha": "c1ffee02", "status": "error"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 失败+error 观察"}]
+      }
+    },
+    {
+      "case_id": "RD-REPL-03",
+      "archetype": "real_defect_replicated",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-03",
+        "commit_sha": "c1ffee03",
+        "message": "XCTAssertNotNil failed: expected non-nil identifier",
+        "reruns": [
+          {"run_id": "run-r3-1", "commit_sha": "c1ffee03", "status": "failed"},
+          {"run_id": "run-r3-2", "commit_sha": "c1ffee03", "status": "failed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败观察"}]
+      }
+    },
+    {
+      "case_id": "RD-REPL-04",
+      "archetype": "real_defect_replicated",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-04",
+        "commit_sha": "c1ffee04",
+        "message": "Fatal error: index out of range",
+        "reruns": [
+          {"run_id": "run-r4-1", "commit_sha": "c1ffee04", "status": "failed"},
+          {"run_id": "run-r4-2", "commit_sha": "c1ffee04", "status": "failed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败观察"}]
+      }
+    },
+    {
+      "case_id": "RD-REPL-05",
+      "archetype": "real_defect_replicated",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-05",
+        "commit_sha": "c1ffee05",
+        "message": "XCTAssertEqual failed: (\"true\") is not equal to (\"false\")",
+        "reruns": [
+          {"run_id": "run-r5-1", "commit_sha": "c1ffee05", "status": "error"},
+          {"run_id": "run-r5-2", "commit_sha": "c1ffee05", "status": "error"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次 error 观察"}]
+      }
+    },
+    {
+      "case_id": "RD-REPL-06",
+      "archetype": "real_defect_replicated_log_noise",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-06",
+        "commit_sha": "c1ffee06",
+        "message": "XCTAssertTrue failed",
+        "reruns": [
+          {"run_id": "run-r6-1", "commit_sha": "c1ffee06", "status": "failed"},
+          {"run_id": "run-r6-2", "commit_sha": "c1ffee06", "status": "failed"}
+        ],
+        "log_signals": [{"query_ref": "q-r6", "predicate": "process == \"ClockAngel\"", "matched_count": 21, "families": ["unclassified_noise"]}],
+        "ledger": [
+          {"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败观察"},
+          {"ref": "ev-log-1", "kind": "log", "summary": "os_log 查询 q-r6 命中 21 条但无环境信号族", "data": {"predicate": "process == \"ClockAngel\"", "families": ["unclassified_noise"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "RD-REPL-07",
+      "archetype": "real_defect_replicated_log_noise",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-07",
+        "commit_sha": "c1ffee07",
+        "message": "XCTAssertEqual failed: (\"1\") is not equal to (\"2\")",
+        "reruns": [
+          {"run_id": "run-r7-1", "commit_sha": "c1ffee07", "status": "failed"},
+          {"run_id": "run-r7-2", "commit_sha": "c1ffee07", "status": "failed"}
+        ],
+        "log_signals": [{"query_ref": "q-r7", "predicate": "subsystem == \"com.apple.AlarmKitCore\"", "matched_count": 8, "families": ["unclassified_noise"]}],
+        "ledger": [
+          {"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败观察"},
+          {"ref": "ev-log-1", "kind": "log", "summary": "系统侧日志噪声，不构成环境候选", "data": {"families": ["unclassified_noise"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "RD-REPL-08",
+      "archetype": "real_defect_replicated",
+      "ground_truth": "real_defect",
+      "evidence": {
+        "case_id": "RD-REPL-08",
+        "commit_sha": "c1ffee08",
+        "message": "uncaught exception NSInternalInconsistencyException",
+        "reruns": [
+          {"run_id": "run-r8-1", "commit_sha": "c1ffee08", "status": "failed"},
+          {"run_id": "run-r8-2", "commit_sha": "c1ffee08", "status": "failed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败观察"}]
+      }
+    },
+    {
+      "case_id": "FLAKY-01",
+      "archetype": "flaky_fail_then_pass",
+      "ground_truth": "flaky",
+      "evidence": {
+        "case_id": "FLAKY-01",
+        "commit_sha": "c2ffee01",
+        "message": "XCTAssertTrue failed",
+        "reruns": [
+          {"run_id": "run-f1-1", "commit_sha": "c2ffee01", "status": "failed"},
+          {"run_id": "run-f1-2", "commit_sha": "c2ffee01", "status": "passed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 先失败后通过"}]
+      }
+    },
+    {
+      "case_id": "FLAKY-02",
+      "archetype": "flaky_two_fail_one_pass",
+      "ground_truth": "flaky",
+      "evidence": {
+        "case_id": "FLAKY-02",
+        "commit_sha": "c2ffee02",
+        "message": "XCTAssertEqual failed",
+        "reruns": [
+          {"run_id": "run-f2-1", "commit_sha": "c2ffee02", "status": "failed"},
+          {"run_id": "run-f2-2", "commit_sha": "c2ffee02", "status": "failed"},
+          {"run_id": "run-f2-3", "commit_sha": "c2ffee02", "status": "passed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败后通过"}]
+      }
+    },
+    {
+      "case_id": "FLAKY-03",
+      "archetype": "flaky_pass_then_fail",
+      "ground_truth": "flaky",
+      "evidence": {
+        "case_id": "FLAKY-03",
+        "commit_sha": "c2ffee03",
+        "message": "XCTAssertTrue failed",
+        "reruns": [
+          {"run_id": "run-f3-1", "commit_sha": "c2ffee03", "status": "passed"},
+          {"run_id": "run-f3-2", "commit_sha": "c2ffee03", "status": "failed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 先通过后失败，顺序不影响判定"}]
+      }
+    },
+    {
+      "case_id": "FLAKY-04",
+      "archetype": "flaky_with_env_noise",
+      "ground_truth": "flaky",
+      "evidence": {
+        "case_id": "FLAKY-04",
+        "commit_sha": "c2ffee04",
+        "message": "XCTAssertTrue failed",
+        "reruns": [
+          {"run_id": "run-f4-1", "commit_sha": "c2ffee04", "status": "failed"},
+          {"run_id": "run-f4-2", "commit_sha": "c2ffee04", "status": "passed"}
+        ],
+        "environment": [{"family": "authorization_race", "detail": "授权告警噪声，但同代码已通过过，flaky 证据决定性", "uncovered_layers": []}],
+        "ledger": [
+          {"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 失败+通过"},
+          {"ref": "ev-env-1", "kind": "environment", "summary": "authorization_race: 环境噪声", "data": {"family": "authorization_race"}}
+        ]
+      }
+    },
+    {
+      "case_id": "FLAKY-05",
+      "archetype": "flaky_error_then_pass",
+      "ground_truth": "flaky",
+      "evidence": {
+        "case_id": "FLAKY-05",
+        "commit_sha": "c2ffee05",
+        "message": "Test runner lost connection",
+        "reruns": [
+          {"run_id": "run-f5-1", "commit_sha": "c2ffee05", "status": "error"},
+          {"run_id": "run-f5-2", "commit_sha": "c2ffee05", "status": "passed"}
+        ],
+        "ledger": [{"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit error 后通过，error 视同失败态"}]
+      }
+    },
+    {
+      "case_id": "OUTDATED-01",
+      "archetype": "case_outdated_90_to_30",
+      "ground_truth": "case_outdated",
+      "evidence": {
+        "case_id": "OUTDATED-01",
+        "commit_sha": "c3ffee01",
+        "message": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")",
+        "assertion": {"expected": "90", "actual_constant": "30", "matches": false, "symbol_id": "BackupInterval.seconds"},
+        "ledger": [{"ref": "ev-assert", "kind": "assertion", "summary": "断言期望 90 与当前常量 30 失配（kill backup 90s→30s 历史原型，合成数据）", "data": {"symbol_id": "BackupInterval.seconds"}}]
+      }
+    },
+    {
+      "case_id": "OUTDATED-02",
+      "archetype": "case_outdated_constant",
+      "ground_truth": "case_outdated",
+      "evidence": {
+        "case_id": "OUTDATED-02",
+        "commit_sha": "c3ffee02",
+        "message": "XCTAssertEqual failed: (\"5\") is not equal to (\"3\")",
+        "assertion": {"expected": "5", "actual_constant": "3", "matches": false, "symbol_id": "MaxRetry.count"},
+        "ledger": [{"ref": "ev-assert", "kind": "assertion", "summary": "断言期望 5 与当前常量 3 失配", "data": {"symbol_id": "MaxRetry.count"}}]
+      }
+    },
+    {
+      "case_id": "OUTDATED-03",
+      "archetype": "case_outdated_with_env_noise",
+      "ground_truth": "case_outdated",
+      "evidence": {
+        "case_id": "OUTDATED-03",
+        "commit_sha": "c3ffee03",
+        "message": "XCTAssertEqual failed: (\"120\") is not equal to (\"60\")",
+        "assertion": {"expected": "120", "actual_constant": "60", "matches": false, "symbol_id": "GracePeriod.seconds"},
+        "environment": [{"family": "capability_gap", "detail": "模拟器能力提示噪声，断言失配证据更具体", "uncovered_layers": []}],
+        "ledger": [
+          {"ref": "ev-assert", "kind": "assertion", "summary": "断言期望 120 与当前常量 60 失配", "data": {"symbol_id": "GracePeriod.seconds"}},
+          {"ref": "ev-env-1", "kind": "environment", "summary": "capability_gap: 环境噪声", "data": {"family": "capability_gap"}}
+        ]
+      }
+    },
+    {
+      "case_id": "OUTDATED-04",
+      "archetype": "case_outdated_boolean",
+      "ground_truth": "case_outdated",
+      "evidence": {
+        "case_id": "OUTDATED-04",
+        "commit_sha": "c3ffee04",
+        "message": "XCTAssertEqual failed: (\"true\") is not equal to (\"false\")",
+        "assertion": {"expected": "true", "actual_constant": "false", "matches": false, "symbol_id": "FeatureFlag.soundPickRequired"},
+        "ledger": [{"ref": "ev-assert", "kind": "assertion", "summary": "布尔开关期望值与当前值失配", "data": {"symbol_id": "FeatureFlag.soundPickRequired"}}]
+      }
+    },
+    {
+      "case_id": "ENV-01",
+      "archetype": "environment_authorization_race",
+      "ground_truth": "environment",
+      "evidence": {
+        "case_id": "ENV-01",
+        "commit_sha": "c4ffee01",
+        "message": "UI Testing Failure: Failed to get matching element",
+        "environment": [{"family": "authorization_race", "detail": "授权弹窗与用例点击竞态，os_log 命中 TCC 拒绝序列", "uncovered_layers": []}],
+        "log_signals": [{"query_ref": "q-env1", "predicate": "subsystem == \"com.thames.alarmkitspike\" AND eventMessage CONTAINS \"authorization\"", "matched_count": 14, "families": ["authorization_race"]}],
+        "ledger": [
+          {"ref": "ev-env-1", "kind": "environment", "summary": "authorization_race: 授权竞态（历史原型，合成数据）", "data": {"family": "authorization_race"}},
+          {"ref": "ev-log-1", "kind": "log", "summary": "os_log 查询 q-env1 命中 14 条授权事件", "data": {"predicate": "subsystem == \"com.thames.alarmkitspike\"", "families": ["authorization_race"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "ENV-02",
+      "archetype": "environment_authorization_race",
+      "ground_truth": "environment",
+      "evidence": {
+        "case_id": "ENV-02",
+        "commit_sha": "c4ffee02",
+        "message": "Failed to scroll to visible (elapsed 5s)",
+        "environment": [{"family": "authorization_race", "detail": "首次安装授权流程未稳定即断言", "uncovered_layers": []}],
+        "ledger": [
+          {"ref": "ev-env-1", "kind": "environment", "summary": "authorization_race: 授权时序竞态", "data": {"family": "authorization_race"}}
+        ]
+      }
+    },
+    {
+      "case_id": "ENV-03",
+      "archetype": "environment_device_only_capability",
+      "ground_truth": "environment",
+      "evidence": {
+        "case_id": "ENV-03",
+        "commit_sha": "c4ffee03",
+        "message": "UI Testing Failure: Background audio assertion never observed",
+        "environment": [{"family": "device_only", "detail": "后台音频是真机-only 能力，模拟器物理层不暴露（历史原型，合成数据）", "uncovered_layers": ["background_audio", "ios.device"]}],
+        "uncovered_layers": ["background_audio", "ios.device"],
+        "ledger": [
+          {"ref": "ev-env-1", "kind": "environment", "summary": "device_only: 模拟器不暴露真机行为", "data": {"family": "device_only"}}
+        ]
+      }
+    },
+    {
+      "case_id": "ENV-04",
+      "archetype": "environment_multi_signal",
+      "ground_truth": "environment",
+      "evidence": {
+        "case_id": "ENV-04",
+        "commit_sha": "c4ffee04",
+        "message": "App activation timed out",
+        "environment": [
+          {"family": "authorization_race", "detail": "授权竞态", "uncovered_layers": []},
+          {"family": "capability_gap", "detail": "模拟器能力缺口叠加", "uncovered_layers": ["codesigning"]}
+        ],
+        "uncovered_layers": ["codesigning"],
+        "ledger": [
+          {"ref": "ev-env-1", "kind": "environment", "summary": "authorization_race: 授权竞态", "data": {"family": "authorization_race"}},
+          {"ref": "ev-env-2", "kind": "environment", "summary": "capability_gap: 能力缺口", "data": {"family": "capability_gap"}}
+        ]
+      }
+    },
+    {
+      "case_id": "PRODUCT-01",
+      "archetype": "product_change_recorded",
+      "ground_truth": "product_change",
+      "evidence": {
+        "case_id": "PRODUCT-01",
+        "commit_sha": "c5ffee01",
+        "message": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")",
+        "assertion": {"expected": "90", "actual_constant": "30", "matches": false, "symbol_id": "BackupInterval.seconds"},
+        "change_records": [{"ref": "CR-101", "summary": "产品决策：kill backup 兜底 90s 收紧到 30s", "symbols": ["BackupInterval.seconds"]}],
+        "ledger": [
+          {"ref": "ev-assert", "kind": "assertion", "summary": "断言期望 90 与当前常量 30 失配", "data": {"symbol_id": "BackupInterval.seconds"}},
+          {"ref": "ev-change-1", "kind": "change_record", "summary": "CR-101: 有意产品变更覆盖该符号", "data": {"symbols": ["BackupInterval.seconds"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "PRODUCT-02",
+      "archetype": "product_change_recorded",
+      "ground_truth": "product_change",
+      "evidence": {
+        "case_id": "PRODUCT-02",
+        "commit_sha": "c5ffee02",
+        "message": "XCTAssertEqual failed: (\"3\") is not equal to (\"5\")",
+        "assertion": {"expected": "3", "actual_constant": "5", "matches": false, "symbol_id": "ReminderLimit.count"},
+        "change_records": [{"ref": "CR-102", "summary": "产品决策：提醒上限 3 放宽到 5", "symbols": ["ReminderLimit.count"]}],
+        "ledger": [
+          {"ref": "ev-assert", "kind": "assertion", "summary": "断言期望 3 与当前常量 5 失配", "data": {"symbol_id": "ReminderLimit.count"}},
+          {"ref": "ev-change-1", "kind": "change_record", "summary": "CR-102: 有意产品变更", "data": {"symbols": ["ReminderLimit.count"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "PRODUCT-03",
+      "archetype": "product_change_recorded",
+      "ground_truth": "product_change",
+      "evidence": {
+        "case_id": "PRODUCT-03",
+        "commit_sha": "c5ffee03",
+        "message": "XCTAssertFalse failed",
+        "assertion": {"expected": "false", "actual_constant": "true", "matches": false, "symbol_id": "FeatureFlag.lunarMode"},
+        "change_records": [{"ref": "CR-103", "summary": "产品决策：农历模式默认开启", "symbols": ["FeatureFlag.lunarMode", "FeatureFlag.soundPickRequired"]}],
+        "ledger": [
+          {"ref": "ev-assert", "kind": "assertion", "summary": "开关期望与当前值失配", "data": {"symbol_id": "FeatureFlag.lunarMode"}},
+          {"ref": "ev-change-1", "kind": "change_record", "summary": "CR-103: 有意产品变更", "data": {"symbols": ["FeatureFlag.lunarMode"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "PRODUCT-04",
+      "archetype": "product_change_recorded",
+      "ground_truth": "product_change",
+      "evidence": {
+        "case_id": "PRODUCT-04",
+        "commit_sha": "c5ffee04",
+        "message": "XCTAssertEqual failed: (\"60\") is not equal to (\"45\")",
+        "assertion": {"expected": "60", "actual_constant": "45", "matches": false, "symbol_id": "SnoozeDuration.seconds"},
+        "change_records": [{"ref": "CR-104", "summary": "产品决策：贪睡时长 60s 改 45s", "symbols": ["SnoozeDuration.seconds"]}],
+        "ledger": [
+          {"ref": "ev-assert", "kind": "assertion", "summary": "断言期望 60 与当前常量 45 失配", "data": {"symbol_id": "SnoozeDuration.seconds"}},
+          {"ref": "ev-change-1", "kind": "change_record", "summary": "CR-104: 有意产品变更", "data": {"symbols": ["SnoozeDuration.seconds"]}}
+        ]
+      }
+    },
+    {
+      "case_id": "HUMAN-01",
+      "archetype": "needs_human_thin_evidence",
+      "ground_truth": "needs_human",
+      "evidence": {
+        "case_id": "HUMAN-01",
+        "commit_sha": "c6ffee01",
+        "message": "application launch stuck",
+        "ledger": []
+      }
+    },
+    {
+      "case_id": "HUMAN-02",
+      "archetype": "needs_human_flaky_vs_defect_conflict",
+      "ground_truth": "needs_human",
+      "evidence": {
+        "case_id": "HUMAN-02",
+        "commit_sha": "c6ffee02",
+        "message": "XCTAssertTrue failed",
+        "stack_top": "AlarmRing.commit()",
+        "reruns": [
+          {"run_id": "run-h2-1", "commit_sha": "c6ffee02", "status": "failed"},
+          {"run_id": "run-h2-2", "commit_sha": "c6ffee02", "status": "passed"}
+        ],
+        "diff": {"base": "b6002", "head": "h6002", "changed_symbols": ["AlarmRing.commit()"], "stack_symbol": "AlarmRing.commit()", "stack_symbol_changed": true},
+        "ledger": [
+          {"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 失败+通过（flaky 候选）"},
+          {"ref": "ev-diff", "kind": "diff", "summary": "堆栈符号同时命中近期 diff（真缺陷候选），冲突交人审"}
+        ]
+      }
+    },
+    {
+      "case_id": "HUMAN-03",
+      "archetype": "needs_human_defect_vs_environment_guard",
+      "ground_truth": "needs_human",
+      "evidence": {
+        "case_id": "HUMAN-03",
+        "commit_sha": "c6ffee03",
+        "message": "XCTAssertEqual failed",
+        "reruns": [
+          {"run_id": "run-h3-1", "commit_sha": "c6ffee03", "status": "failed"},
+          {"run_id": "run-h3-2", "commit_sha": "c6ffee03", "status": "failed"}
+        ],
+        "environment": [
+          {"family": "f1", "detail": "多重环境信号 1", "uncovered_layers": []},
+          {"family": "f2", "detail": "多重环境信号 2", "uncovered_layers": []},
+          {"family": "f3", "detail": "多重环境信号 3", "uncovered_layers": []},
+          {"family": "f4", "detail": "多重环境信号 4", "uncovered_layers": []}
+        ],
+        "ledger": [
+          {"ref": "ev-rerun", "kind": "rerun", "summary": "同 commit 两次失败（复现缺陷候选 0.75）"},
+          {"ref": "ev-env-1", "kind": "environment", "summary": "f1: 环境信号", "data": {"family": "f1"}},
+          {"ref": "ev-env-2", "kind": "environment", "summary": "f2: 环境信号", "data": {"family": "f2"}},
+          {"ref": "ev-env-3", "kind": "environment", "summary": "f3: 环境信号", "data": {"family": "f3"}},
+          {"ref": "ev-env-4", "kind": "environment", "summary": "f4: 环境信号顶格 0.85，护栏拦截非缺陷收口", "data": {"family": "f4"}}
+        ]
+      }
+    }
+  ]
+}
