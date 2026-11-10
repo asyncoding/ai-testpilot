@@ -41,7 +41,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（757 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（821 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -59,7 +59,10 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # 变更/四源闭集派生/低置信阈值/证据 dossier fail-closed/knowledge_api 两端点）、
 # S2.6c 反馈/bad case 闭环（badcase 纯逻辑状态机/v14 迁移/负反馈投影幂等/
 # 分诊→golden→回归全链路/badcase_service/badcase_api 六端点）、
-# S2.6d S2 五门禁总验（oracle_eval 专家盲评纯逻辑/盲序封存/五门禁统一探针）；
+# S2.6d S2 五门禁总验（oracle_eval 专家盲评纯逻辑/盲序封存/五门禁统一探针）、
+# S3.1 测试执行纵切（execution 纯逻辑状态机/重跑配额/租约回收、junit_report
+# Surefire 纯解析、v15 三表迁移、队列租约+协作取消、JUnitXmlRunner、
+# execution_service 超时/崩溃恢复/worker 循环/CLI）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -567,14 +570,14 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（18 个自动门禁）
+## 一键验收（19 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 18 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 19 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、757 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、821 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -591,15 +594,18 @@ A16 用例↔符号关系派生（FR-ING-004：tmp 库 hermetic，独立 ground 
 precision/recall=1.0（AC3 门 ≥.85）、低置信默认隐藏、证据 dossier unresolved
 fail-closed、scope 隔离零误伤、指纹增量与幽灵清扫、重开无损）、
 A17 反馈/bad case 闭环（FR-EV-005：tmp 库 hermetic，负反馈投影/👍 跳过/幂等巡检/
-内容寻址 ID/状态机 fail-closed/golden 溯源冻结/幽灵回归拒入/闭环统计/v13→v14 迁移/重开无损）、
+内容寻址 ID/状态机 fail-closed/golden 溯源冻结/幽灵回归拒入/闭环统计/v13→v15 迁移/重开无损）、
 A18 S2 五门禁总验（S2.6d：合成夹具 hermetic，专家清单先封存再跑管线，结构合法 100%/
 覆盖 ≥.75/P0P1 漏点=0/幻觉 ≤.05/oracle 有效率 ≥.7 五门齐过，探索性用例正常出口、
-重放幂等、盲序守卫活体，纯 core 确定性链不起端口）。
+重放幂等、盲序守卫活体，纯 core 确定性链不起端口）、
+A19 测试执行与 runner-worker（S3.1 FR-EX-001/002：tmp 库 hermetic，先账本后队列/
+幂等重放/重跑配额拒入零幻影/协作取消/超时收口/租约 requeue 与死信/junit-xml 工厂
+装配/v15 持久化，不起端口、不碰 offline 库）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18 为纯进程内探针，可脱离整脚本单跑：
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19 为纯进程内探针，可脱离整脚本单跑：
 `.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
 `.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
-`.venv/bin/python scripts/s2_gate_probe.py`。
+`.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -1197,3 +1203,67 @@ kind=`bad_case`），修复后关联回归评测 run——pass 才闭环 fixed�
   重复判定与数量不匹配/封存稳定与重放幂等。全量 **757 passed**（745+12，探针不入 pytest）、
   import-lint OK、`bash -n scripts/verify_s0.sh` 通过、Web 静态导出构建通过；
   A18 单跑通过，不触碰 8765 端口与 PID 64634；零 schema 变更（v14 不动）。
+
+## 测试执行与 runner-worker（S3.1，FR-EX-001/002）：语言中立执行契约与独立执行进程
+
+S3 纵切第一片，把「测试执行」从问答/设计链路里独立出来：orchestrator 进程**永不直接拉
+xcodebuild**，只经 SQLite 队列与独立 runner-worker 交互。本切片全部使用合成夹具与录制
+适配器，真实 xcodebuild/模拟器从 S3.2 起仅做手动探针，不进自动门禁。
+
+### 分层落点
+
+| 层 | 新增/改动 | 职责 |
+|---|---|---|
+| core | `execution.py`（纯逻辑零 IO） | run 状态机闭集转移（queued/running/passed/failed/error/timeout/canceled，唯一回头路 `requeue` 仅 RUNNING→QUEUED 且需过期租约作证）、内容寻址 `run_id_for`、重跑配额 `evaluate_rerun`（OK/REPLAY/DENIED，崩溃重放不双扣）、租约回收 `decide_reclaim`（未过期不抢、attempts 顶格死信） |
+| core | `junit_report.py`（仅 stdlib xml） | Surefire/JUnit XML → 语言中立 `TestRun`：testsuite(s) 双根、failure/error/skipped 互斥校验、未知子元素/多状态子元素/缺名一律 `SchemaValidationError`、秒→毫秒 |
+| adapters | schema v15 | `jobs` +`lease_expires_at`/+`cancel_requested`（老库 ALTER 迁移）；新表 `test_runs`（幂等键 UNIQUE，raw_json 存完整 TestRun）、`rerun_budget`（request_id UNIQUE 防双扣） |
+| adapters | `sqlite_queue.py` | `BEGIN IMMEDIATE` 事务化 dequeue 写租约；`reclaim_stale` 委托 core 纯判定 + `WHERE status='running'` 原子守卫；协作取消只打标不强杀 |
+| adapters | `junit_runner.py` | `JUnitXmlRunner` 实现 TestRunnerPort：fixture_hint 选报告（自动补 .xml），单报告自动发现，多报告歧义 fail-closed；附 `junit_xml` ArtifactRef（file URI + sha256 摘要） |
+| workers | `execution_service.py` | **先持久化账本再 enqueue**（崩溃只留可幂等重放的幻影记录）；认领双读取消标记；`asyncio.wait_for` 超时收口并尽力回调适配器 cancel；适配器异常/未收尾状态契约违例统一 error 收口；worker 启动先回收、协程并发受 `max_concurrency` 约束 |
+| workers | `runner.py` | `testpilot-runner` CLI：submit/run-once/worker/cancel/list/recover 六子命令；无参保留装配自检（打印 ready，A5 约定）；策略拒绝/未找到/适配器不可用统一 stderr + exit 2 |
+
+### 关键语义
+
+- **幂等身份**：`run_id = "run-" + sha1(idempotency_key)[:12]`，账本以它为权威身份，
+  覆盖适配器内部 run_id；同键重放返回同一 run_id 且 job 不增生。
+- **重跑配额**：仅带 `daily_budget_key` 的请求占配额；配额=0 挡新不挡重放；拒入时
+  无 run 账本、无 job、预算行不增（零幻影）。
+- **崩溃恢复**：worker 被杀 → 租约过期 → `recover_stale` 重领（attempts 未顶格）或
+  死信（顶格，run 账本置 error 留 `max_attempts_exceeded` 原因），run 账本与 jobs 对齐。
+- **Surefire 合成夹具**：`tests/fixtures/runs/surefire/TEST-com.example.CalcTest.xml`
+  （5 用例：pass×2/failure/error/skipped，含 system-out CDATA），不含语料仓任何内容。
+
+```bash
+# runner-worker CLI（profile 走 TESTPILOT_PROFILE，无参 = 装配自检）
+.venv/bin/testpilot-runner
+.venv/bin/testpilot-runner submit --request-id r1 --idempotency-key k1 \
+    --project demo --commit-sha deadbeef --fixture-hint TEST-com.example.CalcTest
+.venv/bin/testpilot-runner run-once        # 单轮认领，队列空返回 null
+.venv/bin/testpilot-runner list
+.venv/bin/testpilot-runner cancel --run-id run-xxxx
+.venv/bin/testpilot-runner recover         # 显式回收过期租约（worker 启动也自动做）
+
+# A19 端到端探针（生产装配路径，tmp 库 hermetic，不起端口）
+.venv/bin/python scripts/execution_probe.py
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 A19 **10 项检查全绿**（11 个 ✅ 含总结行）：空队列冷启动/内容寻址幂等/全链落账/
+  配额拒入零幻影/认领前取消/超时收口（cancel 回调到位）/租约 requeue/死信/junit-xml
+  工厂装配（5 用例三态 + junit_xml 产物）/重开库 v15 持久化无损；报告
+  `out/eval/execution-probe.{json,md}`，连跑两遍幂等。
+- **双红证对照**（改生产代码 → 专属测试变红 → 还原转绿，全量复跑确认无残留）：
+  ① 摘掉配额拒绝 → `test_rerun_quota_denied_leaves_no_phantom_and_accounts`
+  报 `DID NOT RAISE`（超额请求被放行）；② 让 `reclaim_stale` 空转 → 服务层 3 个 +
+  队列层 2 个回收测试变红，其余测试不受影响（爆炸半径正确）。
+- CLI 真命令冒烟（临时 profile 落 `out/`，零仓库残留）：submit/replay/list/run-once/
+  cancel/worker/recover 全通；配额耗尽与未知 run_id 均 exit 2。
+- 契约测试净增 **64 个**（execution 18 + junit_report 14 + execution_store 5 +
+  queue_lease 6 + junit_runner 6 + execution_service 14，探针不入 pytest），
+  全量 **821 passed**（757+64）、import-lint OK（core 仍零三方，XML 仅 stdlib）、
+  `bash -n scripts/verify_s0.sh` 通过。
+- 本轮全门禁实测 **17 PASS / 2 FAIL**：仅 A4/A8 失败，根因是用户终端 uvicorn
+  （PID 64634，按约束不杀）占用 8765 端口，日志证据 `[Errno 48] address already in use`，
+  与 S3.1 改动无关；进程释放后该两门禁即恢复。A5 曾因 CLI 改造丢失无参自检而 FAIL，
+  已修复（无参恢复 ready 输出）并复验通过。

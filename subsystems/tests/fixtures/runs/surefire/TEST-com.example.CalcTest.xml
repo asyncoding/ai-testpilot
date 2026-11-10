@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  S3.1 合成 Surefire 夹具（自创内容，不含语料仓原文）：
+  一份报告覆盖 passed/failure/error/skipped 四态，供 FR-EX-001 AC2 契约测试与
+  JUnitXmlRunner 适配器测试使用。真实 Jenkins 产物在 S5 接入时替换 reports_dir。
+-->
+<testsuite name="com.example.CalcTest" tests="5" failures="1" errors="1" skipped="1" time="0.234">
+  <testcase name="add" classname="com.example.CalcTest" time="0.031"/>
+  <testcase name="subtract" classname="com.example.CalcTest" time="0.042">
+    <failure message="expected:&lt;1&gt; but was:&lt;2&gt;" type="AssertionError">at com.example.CalcTest.subtract(CalcTest.java:42)
+at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)</failure>
+  </testcase>
+  <testcase name="divideByZero" classname="com.example.CalcTest" time="0.002">
+    <skipped message="requires JDK 21 arithmetic semantics"/>
+  </testcase>
+  <testcase name="readReport" classname="com.example.CalcTest" time="0.055">
+    <error type="java.io.IOException" message="report file unreadable"/>
+  </testcase>
+  <testcase name="multiply" classname="com.example.CalcTest" time="0.104"/>
+  <system-out><![CDATA[deterministic synthetic output]]></system-out>
+</testsuite>

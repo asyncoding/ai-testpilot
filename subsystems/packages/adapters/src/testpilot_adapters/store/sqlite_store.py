@@ -19,6 +19,7 @@ from testpilot_core.case_relations import (
     ensure_relation_scope,
 )
 from testpilot_core.enums import OutboxStatus
+from testpilot_core.execution import BudgetEntry
 from testpilot_core.oracle_mining import MinedOracle, suggestion_urn
 from testpilot_core.requirement import RequirementParseResult
 from testpilot_core.rule_assets import RuleAssetRevision
@@ -36,7 +37,9 @@ from testpilot_core.models import (
     Relation,
     SourceDocument,
     TestCase,
+    TestExecutionRequest,
     TestPoint,
+    TestRun,
 )
 
 
@@ -70,6 +73,11 @@ _COLUMN_MIGRATIONS = {
         "reviewed_by": "TEXT",
         "reviewed_at": "TEXT",
         "decision_reason": "TEXT NOT NULL DEFAULT ''",
+    },
+    # v15（S3.1 FR-EX-002）：jobs 增租约与协作式取消两列，老库 ALTER 补列
+    "jobs": {
+        "lease_expires_at": "TEXT",
+        "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 
@@ -1782,3 +1790,116 @@ class Store:
         if cur.rowcount == 0:
             raise ValueError(f"bad case 不存在，无法回写状态: {case.bad_case_id}")
         self.conn.commit()
+
+    # ── S3.1 测试执行账本（FR-EX-002：先持久化账本，再发起队列副作用）──────────
+
+    def insert_test_run_ledger(
+        self, *, request: TestExecutionRequest, run_id: str, status: str
+    ) -> None:
+        """登记 queued run；撞 UNIQUE(idempotency_key) 由调用方先查重，
+        约束本身是幂等兜底（IntegrityError 抛穿=预检失效的接线 bug）。"""
+        now = _now_iso()
+        self.conn.execute(
+            """INSERT INTO test_runs
+                 (run_id, idempotency_key, project, commit_sha, status,
+                  request_json, raw_json, error, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                run_id, request.idempotency_key, request.project, request.commit_sha,
+                status, request.model_dump_json(), "", "", now, now,
+            ),
+        )
+        self.conn.commit()
+
+    def get_test_run_row(self, run_id: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM test_runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+
+    def get_test_run_by_idempotency(self, idempotency_key: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM test_runs WHERE idempotency_key=?", (idempotency_key,)
+        ).fetchone()
+
+    def update_test_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        raw_json: str = "",
+        error: str = "",
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        """状态推进回写；rowcount=0 双击守卫（run 不存在/账本丢失直接报错）。"""
+        cur = self.conn.execute(
+            """UPDATE test_runs
+                  SET status=?, raw_json=?, error=?, started_at=COALESCE(?, started_at),
+                      finished_at=COALESCE(?, finished_at), updated_at=?
+                WHERE run_id=?""",
+            (status, raw_json, error, started_at, finished_at, _now_iso(), run_id),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"test run 不存在，无法回写状态: {run_id}")
+        self.conn.commit()
+
+    def list_test_runs(
+        self, *, project: str | None = None, status: str | None = None
+    ) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM test_runs"
+        clauses: list[str] = []
+        params: list[str] = []
+        if project is not None:
+            clauses.append("project=?")
+            params.append(project)
+        if status is not None:
+            clauses.append("status=?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at, run_id"
+        return list(self.conn.execute(sql, params).fetchall())
+
+    @staticmethod
+    def row_to_test_run(row: sqlite3.Row) -> TestRun | None:
+        """raw_json 为空（run 仍在 queued/running）时返回 None，调用方看投影列。"""
+        if not row["raw_json"]:
+            return None
+        return TestRun.model_validate_json(row["raw_json"])
+
+    # ── S3.1 每日重跑配额账本（FR-EX-002 AC2）─────────────────────────────────
+
+    def insert_budget_entry(self, entry: BudgetEntry) -> None:
+        """记账一行；request_id UNIQUE 兜底防重复扣减，调用方先做账本判定。"""
+        self.conn.execute(
+            """INSERT INTO rerun_budget
+                 (budget_key, budget_date, request_id, run_id, created_at)
+               VALUES (?,?,?,?,?)""",
+            (
+                entry.budget_key, entry.date, entry.request_id, entry.run_id,
+                _now_iso(),
+            ),
+        )
+        self.conn.commit()
+
+    def list_budget_entries(self, budget_key: str, budget_date: str) -> list[BudgetEntry]:
+        rows = self.conn.execute(
+            """SELECT budget_key, budget_date, request_id, run_id
+                 FROM rerun_budget WHERE budget_key=? AND budget_date=?
+               ORDER BY id""",
+            (budget_key, budget_date),
+        ).fetchall()
+        return [
+            BudgetEntry(
+                budget_key=r["budget_key"], date=r["budget_date"],
+                request_id=r["request_id"], run_id=r["run_id"],
+            )
+            for r in rows
+        ]
+
+    def count_budget_today(self, budget_key: str, budget_date: str) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM rerun_budget WHERE budget_key=? AND budget_date=?",
+            (budget_key, budget_date),
+        ).fetchone()
+        return int(row["n"])

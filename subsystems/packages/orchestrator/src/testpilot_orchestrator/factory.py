@@ -1,9 +1,9 @@
 """适配器装配工厂（依赖注入根，docs/08 FR-CFG-002 AC3）。
 
 换 profile = 换适配器实现，工作流代码零改动。
-支持的 type：stub / fs-docs / json / json-replay / recorded / localfs /
+支持的 type：stub / fs-docs / json / json-replay / recorded / junit-xml / localfs /
 sqlite-fts / hybrid / sqlite / noop / langfuse / ollama（model）/ chroma（vectors）/
-git 与 recorded（scm，S1.3）；其余在 S2–S3 引入（xcode …）。
+git 与 recorded（scm，S1.3）；其余在 S3 引入（xcode …）。
 
 降级是运行期行为（向量通道故障→FTS-only），不是装配期选项：hybrid 必须配齐
 model+vectors，否则 build_container 直接 ValueError（防止静默退化为单路而不自知）。
@@ -195,6 +195,19 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     # ── 执行器 ──
     if a.runner.type == "recorded":
         container.adapters["runner"] = RecordedTestRunner(fixtures_dir / "runs")
+    elif a.runner.type == "junit-xml":
+        # S3.1 FR-EX-001：真实 Surefire XML → 语言中立 TestRun（与 xcode 同模型）
+        from testpilot_adapters.junit_runner import JUnitXmlRunner
+
+        rs = a.runner.settings
+        reports_dir = _p(fixtures_dir, rs.get("reports_dir", "runs/surefire"))
+        container.adapters["runner"] = JUnitXmlRunner(
+            reports_dir,
+            provider=rs.get("provider", "junit-local"),
+            env_id=rs.get("env_id", "local-jvm"),
+            capabilities=rs.get("capabilities", []),
+            version=rs.get("version", ""),
+        )
     elif a.runner.type != "stub":
         raise ValueError(f"未知 runner 适配器类型: {a.runner.type}")
 

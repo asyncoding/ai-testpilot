@@ -55,7 +55,7 @@ def test_v12_store_upgrades_with_rule_assets_table(tmp_path):
 
     store2 = bootstrap_store(tmp_path)
     try:
-        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "14"
+        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "15"
         assert "rule_assets" in _table_names(store2.conn)
         # 升级后立即可写，且 unique 约束就位
         inserted = store2.append_asset_revision(

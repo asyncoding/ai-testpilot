@@ -26,6 +26,9 @@
 # v14（S2.6c FR-EV-005）：新增 bad_cases 表承载反馈/bad case 闭环台账
 # （状态机/四元组快照/golden 与回归关联），UNIQUE(source, source_ref) 与
 # feedback_id 部分唯一索引保证负反馈幂等，老库 IF NOT EXISTS 幂等补建。
-SCHEMA_VERSION = 14
+# v15（S3.1 FR-EX-002）：新增 test_runs 执行账本与 rerun_budget 重跑配额账本
+# （先记账后入队，idempotency_key/request_id UNIQUE 保证重放幂等）；jobs 表
+# ALTER 增 lease_expires_at/cancel_requested，支撑租约回收与协作式取消。
+SCHEMA_VERSION = 15
 
 __all__ = ["SCHEMA_VERSION"]

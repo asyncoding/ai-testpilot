@@ -14,10 +14,13 @@
 # A16 为 S2.6b 用例↔符号关系探针（tmp 库 hermetic：四源闭集派生 precision/recall=1.0
 # 钉 AC3≥.85、低置信阈值、证据 dossier fail-closed、scope 隔离与幽灵清扫，不起端口），
 # A17 为 S2.6c 反馈/bad case 闭环探针（tmp 库 hermetic：负反馈投影/幂等巡检/状态机
-# fail-closed/golden 溯源/幽灵回归拒入/闭环统计/v13→v14 迁移，不起端口），
+# fail-closed/golden 溯源/幽灵回归拒入/闭环统计/v13→v15 迁移，不起端口），
 # A18 为 S2.6d S2 五门禁总验探针（合成夹具 hermetic：专家清单先封存再跑管线，
 # 结构合法/覆盖≥.75/P0P1 漏点=0/幻觉≤.05/oracle 有效率≥.7 五门齐过，探索性用例
-# 正常出口、重放幂等、盲序守卫活体，纯 core 确定性链不起端口）。
+# 正常出口、重放幂等、盲序守卫活体，纯 core 确定性链不起端口），
+# A19 为 S3.1 测试执行与 runner-worker 探针（tmp 库 hermetic：先账本后队列/幂等
+# 重放/重跑配额拒入零幻影/协作取消/超时收口/租约 requeue 与死信/junit-xml 工厂
+# 装配 Surefire 三态/v15 持久化，不起端口、不碰 store/offline-demo）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -225,13 +228,13 @@ $PY scripts/relation_probe.py > /tmp/tp_relation_a16.log 2>&1 \
   && { echo "PASS  $(grep -c '✅' /tmp/tp_relation_a16.log) 项检查全绿（precision/recall=1.0/低置信/dossier/scope 隔离/幽灵清扫/重开无损）"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_relation_a16.log 与 out/eval/relation-probe.json"; fail_n=$((fail_n+1)); }
 
-echo "=== A17. 反馈/bad case 闭环（S2.6c FR-EV-005：tmp 库 hermetic，投影/幂等/状态机/golden/回归/统计/v14 迁移，不起端口） ==="
-# 探针内部 tempfile 工作目录 + 生产装配路径，schema v14 bad_cases 表内容寻址幂等；
+echo "=== A17. 反馈/bad case 闭环（S2.6c FR-EV-005：tmp 库 hermetic，投影/幂等/状态机/golden/回归/统计/v15 迁移，不起端口） ==="
+# 探针内部 tempfile 工作目录 + 生产装配路径，schema v15 bad_cases 表内容寻址幂等；
 # 报告落 out/eval/badcase-probe.{json,md}（gitignore），重复执行幂等。
 $PY scripts/badcase_probe.py > /tmp/tp_badcase_a17.log 2>&1 \
   && grep -q '✅ badcase_probe 全部通过' /tmp/tp_badcase_a17.log \
   && grep -q '⑤ 全生命周期：golden 冻结/幽灵拒入/fail 不闭环/pass 闭环' /tmp/tp_badcase_a17.log \
-  && { echo "PASS  $(grep -c '✅' /tmp/tp_badcase_a17.log) 项检查全绿（投影/幂等/内容寻址/生命周期/fail-closed/零幻影/统计/v14 迁移/重开无损）"; pass_n=$((pass_n+1)); } \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_badcase_a17.log) 项检查全绿（投影/幂等/内容寻址/生命周期/fail-closed/零幻影/统计/v15 迁移/重开无损）"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_badcase_a17.log 与 out/eval/badcase-probe.json"; fail_n=$((fail_n+1)); }
 
 echo "=== A18. S2 五门禁总验（S2.6d：合成夹具 hermetic，结构合法/覆盖/P0P1 漏点/幻觉/oracle 有效率，不起端口） ==="
@@ -243,7 +246,16 @@ $PY scripts/s2_gate_probe.py > /tmp/tp_s2gate_a18.log 2>&1 \
   && { echo "PASS  $(grep -c '✅' /tmp/tp_s2gate_a18.log) 项检查全绿（盲序封存/结构合法/脊柱 11 点/盲标四门/oracle 有效率/探索性出口/重放幂等/守卫活体）"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_s2gate_a18.log 与 out/eval/s2-gate-probe.json"; fail_n=$((fail_n+1)); }
 
+echo "=== A19. 测试执行与 runner-worker（S3.1 FR-EX-001/002：tmp 库 hermetic，账本/幂等/配额/取消/超时/租约回收/junit-xml 装配，不起端口） ==="
+# 生产装配路径（load_profile→build_container→execution_service），临时库不碰 offline-demo；
+# 报告落 out/eval/execution-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/execution_probe.py > /tmp/tp_exec_a19.log 2>&1 \
+  && grep -q '✅ execution_probe 全部通过' /tmp/tp_exec_a19.log \
+  && grep -q '⑧ attempts 顶格过期任务死信' /tmp/tp_exec_a19.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_exec_a19.log) 项检查全绿（空队列/幂等/落账/配额拒入/取消/超时/requeue/死信/junit 装配/持久化 v15）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_exec_a19.log 与 out/eval/execution-probe.json"; fail_n=$((fail_n+1)); }
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

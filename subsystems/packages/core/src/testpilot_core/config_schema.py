@@ -47,6 +47,12 @@ class Limits(BaseModel):
     max_tokens_per_run: int = 200_000
     daily_rerun_quota: int = 20
     request_timeout_s: int = 60
+    # S3.1 FR-EX-002：单 worker 进程内并发上限（模拟器场景默认 1：单机单设备）；
+    # 多 worker 进程的全局并发由队列租约保证不双跑，本值只管进程内协程数。
+    max_concurrency: int = 1
+    # 崩溃恢复：租约最多被重领的次数（attempts 达上限转死信，防毒消息循环）
+    execution_max_attempts: int = 3
+    execution_lease_seconds: int = 300
 
 
 class ProfileConfig(BaseModel):

@@ -438,7 +438,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     attempts         INTEGER NOT NULL DEFAULT 0,
     error            TEXT NOT NULL DEFAULT '',
     created_at       TEXT NOT NULL,
-    updated_at       TEXT NOT NULL
+    updated_at       TEXT NOT NULL,
+    -- v15（S3.1 FR-EX-002）：领任务即写租约到期时间，worker 崩溃后过期 running
+    -- 任务可被回收重领；cancel_requested 是协作式取消标记，worker 在认领/执行点检查。
+    lease_expires_at TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status_type ON jobs(status, job_type);
 
@@ -476,3 +480,36 @@ CREATE INDEX IF NOT EXISTS idx_bad_cases_source ON bad_cases(source);
 -- 仅 qa_feedback 行有 feedback_id：部分唯一索引允许其余源多行空串共存
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bad_cases_feedback
     ON bad_cases(feedback_id) WHERE feedback_id <> '';
+
+-- v15（S3.1 FR-EX-002）：测试执行账本。先持久化账本再 enqueue（外部副作用前先记账，
+-- 崩溃只留可幂等重放的幻影记录）。raw_json 是 TestRun 的唯一还原来源，投影列供
+-- SQL 盘点/过滤；UNIQUE(idempotency_key) 保证同请求重放返回同一 run_id。
+CREATE TABLE IF NOT EXISTS test_runs (
+    run_id           TEXT PRIMARY KEY,
+    idempotency_key  TEXT NOT NULL UNIQUE,
+    project          TEXT NOT NULL,
+    commit_sha       TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    request_json     TEXT NOT NULL,
+    raw_json         TEXT NOT NULL DEFAULT '',
+    error            TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    started_at       TEXT,
+    finished_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs(status);
+CREATE INDEX IF NOT EXISTS idx_test_runs_project ON test_runs(project);
+
+-- 每日重跑配额账本（FR-EX-002 AC2：超日配额的重跑拒绝并记账）。request_id UNIQUE
+-- 保证同一请求重放不重复扣减；(budget_key, budget_date) 支撑当日槽位计数。
+CREATE TABLE IF NOT EXISTS rerun_budget (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    budget_key   TEXT NOT NULL,
+    budget_date  TEXT NOT NULL,
+    request_id   TEXT NOT NULL UNIQUE,
+    run_id       TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rerun_budget_key_date
+    ON rerun_budget(budget_key, budget_date);

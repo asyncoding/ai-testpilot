@@ -17,7 +17,7 @@ workers.badcase_service → SQLite bad_cases），在临时工作目录跑完整
   ⑥ 非法迁移 fail-closed（promoted 再分诊、终态再迁移均拒）；
   ⑦ reject 路径不产生 golden 幻影；
   ⑧ 闭环统计：各态计数/闭环率/中位周期；
-  ⑨ v13→v14 老库迁移钉版（DROP 新表+版本打回，重开自动补建、老反馈无损）；
+  ⑨ v13→v15 老库迁移钉版（DROP 新表+版本打回，重开自动补建、老反馈无损）；
   ⑩ 重开库台账/审计历史持久化无损。
 
 报告落 out/eval/badcase-probe.{json,md}（out/ 已 gitignore）。任一断言不符 exit 1。
@@ -242,7 +242,7 @@ def main() -> int:
         store.close()
         main_store_closed = True
 
-        # ⑨ v13→v14 迁移钉版（独立 legacy 库，不污染主库）
+        # ⑨ v13→v15 迁移钉版（独立 legacy 库，不污染主库）
         legacy = bootstrap_store(work / "legacy-data")
         try:
             legacy.add_feedback(Feedback(
@@ -259,7 +259,7 @@ def main() -> int:
             tables = {r["name"] for r in upgraded.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             old_fb = upgraded.feedback_summary()
-            version_ok = upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "14"
+            version_ok = upgraded.get_meta("schema_version") == str(SCHEMA_VERSION) == "15"
             # 升级后立即可写
             upgraded.insert_bad_case(new_bad_case(
                 source="manual_review", source_ref="INC-9#c1",
@@ -268,7 +268,7 @@ def main() -> int:
             write_ok = upgraded.list_bad_cases() != []
         finally:
             upgraded.close()
-        check("⑨ v13→v14 自动补建 bad_cases、老反馈无损、升级后可写",
+        check("⑨ v13→v15 自动补建 bad_cases、老反馈无损、升级后可写",
               version_ok and "bad_cases" in tables
               and any(r["kind"] == "not_useful" for r in old_fb) and write_ok,
               f"version={SCHEMA_VERSION} tables={'bad_cases' in tables} write={write_ok}")

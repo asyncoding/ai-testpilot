@@ -71,7 +71,7 @@ def test_v13_store_upgrades_with_bad_cases_table(tmp_path):
 
     store2 = bootstrap_store(tmp_path)
     try:
-        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "14"
+        assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "15"
         assert "bad_cases" in _table_names(store2.conn)
         # 升级后立即可写，部分唯一索引就位
         case = _case(store2, source_ref="INC-9#c1")
