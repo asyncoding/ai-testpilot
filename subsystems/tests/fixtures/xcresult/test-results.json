@@ -1,36 +1,64 @@
 {
+  "testPlanConfigurations": [
+    {"configurationId": "1", "configurationName": "Test Scheme Action"}
+  ],
+  "devices": [
+    {
+      "deviceId": "18BC020D-33C5-40ED-8CD6-7D3B0BF07F35",
+      "deviceName": "testpilot-probe-synthetic",
+      "architecture": "arm64",
+      "modelName": "iPhone 17",
+      "platform": "iOS Simulator",
+      "osVersion": "26.4.1",
+      "osBuildNumber": "23E254a"
+    }
+  ],
   "testNodes": [
     {
-      "nodeType": "Unit test bundle",
-      "name": "AlarmKitSpikeTests.xctest",
-      "result": "Mixed",
-      "duration": 1.23,
+      "nodeType": "Test Plan",
+      "name": "AlarmKitSpike",
+      "result": "Failed",
       "children": [
         {
-          "nodeType": "Test Suite",
+          "nodeType": "Unit test bundle",
           "name": "AlarmKitSpikeTests",
-          "result": "Mixed",
+          "nodeIdentifierURL": "test://com.apple.xcode/AlarmKitSpike/AlarmKitSpikeTests",
+          "result": "Failed",
           "children": [
             {
-              "nodeType": "Test case",
-              "name": "testReminderScheduleBaseline()",
-              "result": "Passed",
-              "duration": 0.032
-            },
-            {
-              "nodeType": "Test case",
-              "name": "testSoundPickRequiresGrant()",
-              "result": "Skipped",
-              "duration": 0.001
-            },
-            {
-              "nodeType": "Test case",
-              "name": "testKillBackupFallsBackTo30s()",
+              "nodeType": "Test Suite",
+              "name": "ReminderSchedulerTests",
+              "nodeIdentifierURL": "test://com.apple.xcode/AlarmKitSpike/AlarmKitSpikeTests/ReminderSchedulerTests",
               "result": "Failed",
-              "duration": 0.41,
-              "failures": [
+              "children": [
                 {
-                  "failureText": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")\nAlarmKitSpikeTests/ReminderSchedulerTests.swift:88"
+                  "nodeType": "Test Case",
+                  "name": "testReminderScheduleBaseline()",
+                  "nodeIdentifier": "ReminderSchedulerTests/testReminderScheduleBaseline()",
+                  "result": "Passed",
+                  "duration": "0.032s",
+                  "durationInSeconds": 0.032
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "testSoundPickRequiresGrant()",
+                  "nodeIdentifier": "ReminderSchedulerTests/testSoundPickRequiresGrant()",
+                  "result": "Skipped"
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "testKillBackupFallsBackTo30s()",
+                  "nodeIdentifier": "ReminderSchedulerTests/testKillBackupFallsBackTo30s()",
+                  "result": "Failed",
+                  "duration": "0.41s",
+                  "durationInSeconds": 0.41,
+                  "children": [
+                    {
+                      "nodeType": "Failure Message",
+                      "name": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")",
+                      "details": "XCTAssertEqual failed: (\"90\") is not equal to (\"30\")\nAlarmKitSpikeTests/ReminderSchedulerTests.swift:88"
+                    }
+                  ]
                 }
               ]
             }

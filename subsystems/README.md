@@ -41,7 +41,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（1023 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（1035 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -71,7 +71,9 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # OsLogQueryAdapter NDJSON 坏行计数、工厂 os-log 装配、合成夹具守护）、
 # S3.4 失败归因（attribution 五候选纯规则引擎/置信地板与不对称护栏/needs_human
 # 不硬归因、attribution_eval 混淆矩阵四门禁/误误导口径/盲标封存、
-# attribution_service 证据组包 Provider 接缝、40 例合成盲标夹具守护）；
+# attribution_service 证据组包 Provider 接缝、40 例合成盲标夹具守护）、
+# 真机探针校准（xcresulttool 25115 两动词/os_log ndjson 与信封尾行/recordVideo
+# SIGINT/ffmpeg 真抽帧/cancel 与 XCUITest 端到端，四生产 bug 红→绿，探针不进门禁）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -586,7 +588,7 @@ cd subsystems
 bash scripts/verify_s0.sh    # 22 个自动门禁；干净环境 22 PASS / 0 FAIL，日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、1023 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、1035 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -1469,5 +1471,31 @@ workers 只负责证据组包（Provider 接缝依赖注入），**schema 保持
   （core 仍零三方零 IO）、`bash -n scripts/verify_s0.sh` 通过。
 - 本轮全门禁实测 **20 PASS / 2 FAIL**：A22 首次接入即 PASS；仅 A4/A8 仍因用户终端
   uvicorn（PID 64634，按约束不杀）占用 8765 失败，与 S3.4 无关。
-- **手动验证延后（用户自行处理）**：真实模拟器/xcresult/os_log 字段校准（延续 S3.2/S3.3
-  审批前置）与 QA 节专家评测；本片 40 例为自造合成盲标，真档归因标定待真实证据链路打通后。
+- **手动验证状态**：真实模拟器/xcresult/os_log/ffmpeg 字段校准**已完成**（2026-11-10，
+  见下节「S3.2/S3.3 真机探针校准」）；QA 节专家评测仍延后，本片 40 例为自造合成盲标，
+  真档归因标定待真实证据链路打通后。
+
+### S3.2/S3.3 真机探针校准（2026-11-10，手动探针不进门禁）
+
+专用一次性模拟器 `testpilot-probe`（iPhone 17 / iOS 26.4，用完即 delete），用户在用
+设备全程零接触；语料仓只读、零故障注入。八阶段探针 53 项检查全绿（租约/erase 10 +
+xcresult 端到端 9 + os_log 13 + ffmpeg 5 + cancel/XCUITest 16，另有原始字段取证），
+蒸馏报告 `out/eval/real-device-probe.{md,json}`（out/ gitignored）。要点：
+
+- **xcresulttool 25115（schema 0.4.0）**：两动词链路（get tests + export attachments
+  自动写 manifest 数组），旧 get attachments rc=64 下线；nodeType 大小写、duration 字符串
+  /durationInSeconds 双源、Failure Message 子节点、无 mime 按扩展名分型；能力戳
+  `xcresulttool-schema-0.4.0`；真机 6 单测全绿 + 单条 XCUITest（test00 隐私门，25.9s）
+  端到端 passed。
+- **os_log**：`--style ndjson`（json style 真机是美化数组不可逐行解析）、`--start/--end`
+  空格时间格式（T 分隔 rc=64）、流尾信封行 `{"count":N,"finished":1}` 识别跳过（残缺仍
+  fail-closed）、远古窗工具钳制 + 客户端 filter_window 兜底、mixed-tz 窗口归一；真查
+  24531+ 条目零坏行。
+- **recordVideo/ffmpeg**：停录只认 SIGINT（SIGTERM 泄漏 SimRenderServer 句柄 → Resource
+  busy），新增 `SubprocessProcess.interrupt()`；静态屏只有 0.07s 空视频，需 launch
+  Safari + appearance 切换制造 UI 活动；真 ffmpeg 7.1 抽帧 fps1/2/4=5/11/22，白名单契约零改动。
+- **cancel 真机收口**：worker 全真组件链 20s 超时 → SIGTERM 杀真 xcodebuild（pgrep 取证
+  进程消失）→ 账本 timeout/jobs failed/租约释放/设备仍 Booted。
+- **四个生产 bug 红→绿**：acquire 能力判定抢道、spawn 管道不排空必挂死、export 目录
+  manifest 覆盖拒绝、ndjson 尾行误计坏行 + 录屏信号语义。全量 **1035 passed**（1023+12）、
+  import-lint OK、A21 10/10、**schema 仍 v15 零变更**。

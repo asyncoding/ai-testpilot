@@ -73,20 +73,28 @@ xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tm
 # 录屏抽帧取证：ffmpeg -i <attachment>.mp4 -vf fps=2 frame_%03d.png
 ```
 
-> **S3.3 实现注记（2026-11-10，hostless 已落地，真实输出待手动探针校准）**：
-> 上文是候选命令原型，工程实现为适配证据可复现性做了三处收口——
+> **S3.3 实现注记（2026-11-10 真机探针校准后，Xcode 27 / xcresulttool 25115）**：
+> 上文是候选命令原型，工程实现为适配证据可复现性做了收口，括号内为真机实测事实
+> （探针报告 `subsystems/out/eval/real-device-probe.md`）——
 > ① 日志命令不用 `spawn booted`，改 `spawn <租约 udid>`，不依赖调用时刻的隐式
-> "谁是 booted"；不用 `--last 20m` 相对时间，改 `--start/--end` 显式 ISO8601 窗
-> （`OsLogQueryAdapter`，FR-EX-006 AC1 要求查询条件可逐字重放），并固定
-> `--style json` 走 NDJSON 行解析；
-> ② xcresulttool 链路固定三命令：`get test-results tests --format json`（用例树）、
-> `get test-results attachments --format json`（附件归属清单）、有附件才
-> `export attachments --output-path`（字节导出）；附件经 localfs 制品端口按
-> sha256 内容寻址存 URN，失败用例经 `artifact_urns` 关联（FR-EX-005 AC1）；
+> "谁是 booted"；不用 `--last 20m` 相对时间，改 `--start/--end` 显式窗
+> （`OsLogQueryAdapter`，FR-EX-006 AC1 要求查询条件可逐字重放）。真机校准：
+> 工具只吃 `%Y-%m-%d %H:%M:%S` 空格格式（T 分隔 rc=64），固定 `--style ndjson`
+> 行解析（`--style json` 真机是美化 JSON 数组，无法逐行解析）；每条流末尾有
+> 信封尾行 `{"count":N,"finished":1}`，解析器识别后跳过、残缺形态仍 fail-closed；
+> echo 层保留 ISO8601 原值，工具语法与可复现描述分层；
+> ② xcresulttool 25115 链路固定**两动词**：`get test-results tests --format json`
+> （用例树）+ `export attachments --output-path`（自动写 manifest.json 顶层数组，
+> 旧 `get test-results attachments` 已下线 rc=64）；导出目录已含 manifest.json 时
+> 工具 rc=1 拒覆盖，适配器导出前清场保证同幂等键重试安全；附件经 localfs 制品端口
+> 按 sha256 内容寻址存 URN，失败用例经 `artifact_urns` 关联（FR-EX-005 AC1），
+> 全绿 run 实测 manifest 为空数组、URN 全空属常态；
 > ③ ffmpeg 抽帧 argv 由 `ffmpeg_commands.py` 白名单拼装（`-y` 幂等覆盖、
-> fps 仅允许 1..30 整数、输出固定 `frame_%03d.png`），真实 ffmpeg 仅手动探针调用。
-> 合成 JSON 形态是自造夹具，真实 Xcode 16 字段名以手动探针实测为准（未知形态
-> 解析器 fail-closed，不会静默吞）。
+> fps 仅允许 1..30 整数、输出固定 `frame_%03d.png`），真机 7.1 抽帧契约零改动。
+> 另两个真机事实：`simctl io recordVideo` 只认 SIGINT 优雅停录（SIGTERM 会泄漏
+> SimRenderServer 录制句柄导致后续录制 Resource busy）；静态屏幕只产出 0.07s
+> 空视频，录屏需先制造 UI 活动（launch App + appearance 切换）。
+> 合成 JSON/NDJSON 是自造夹具，已按真机形态校准；未观测形态解析器 fail-closed。
 
 注意：
 

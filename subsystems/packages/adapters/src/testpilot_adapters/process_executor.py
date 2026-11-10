@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from dataclasses import dataclass
 
 from testpilot_core.errors import AdapterUnavailableError
@@ -32,13 +33,34 @@ class SubprocessProcess:
         self.argv = argv
         self.pid = process.pid
         self._terminated = False
+        self._returncode: int | None = None
 
     async def wait(self) -> int:
-        return await self._process.wait()
+        if self._returncode is not None:
+            return self._returncode
+        # 必须排空 stdout/stderr：子进程输出超过内核管道缓冲（约 64KB）后会阻塞
+        # 在写端永不退出——真实 xcodebuild 日志数 MB。2026-11-10 真机探针用 2MB
+        # 吵闹进程复现挂死（红证 tests/test_process_executor.py）。当前接口不暴露
+        # 日志内容，排空即弃；日志留存随 S3.5 证据链再做。
+        await self._process.communicate()
+        self._returncode = self._process.returncode or 0
+        return self._returncode
 
     def terminate(self) -> None:
         self._terminated = True
         self._process.terminate()
+
+    def interrupt(self) -> None:
+        """优雅停止（SIGINT）。
+
+        真机探针取证（2026-11-10）：``simctl io recordVideo`` 只在 SIGINT 下
+        完成 mp4 moov 原子写并释放宿主侧录制会话；SIGTERM 杀掉 xcrun 外壳后
+        SimRenderServer 仍持有录制句柄，产出 0 字节文件且后续录制全报
+        NSPOSIXErrorDomain Code=16 "Resource busy"，只能 shutdown 设备回收。
+        交互式/需要收尾的子进程走这里，强杀语义仍用 terminate()。
+        """
+        self._terminated = True
+        self._process.send_signal(signal.SIGINT)
 
     @property
     def terminated(self) -> bool:

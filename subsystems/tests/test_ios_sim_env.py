@@ -94,6 +94,20 @@ async def test_device_only_capability_rejected_with_uncovered_layer():
     assert executor.calls == []  # 能力不过不碰 simctl
 
 
+async def test_device_only_rejected_even_when_only_device_is_held():
+    """真机探针抓出（2026-11-10）：唯一设备被占用时，真机独占请求仍须能力拒绝。
+
+    held 跳过不能让 device_only 优先分支失效——重试解决不了 ios.device，
+    模拟器永远不提供该能力，回"全忙请重试"会误导调用方（FR-EX-004 AC1）。
+    """
+    executor = FakeExecutor()
+    env, _ = _env(devices=[_devices()[0]], executor=executor)
+    await env.acquire(_req("ios.simulator"))  # 唯一设备先被占
+    with pytest.raises(UnsupportedCapabilityError, match="未覆盖层"):
+        await env.acquire(_req("ios.device"))
+    assert executor.calls == []  # 能力不过不碰 simctl
+
+
 async def test_not_offered_capability_routed_to_capable_device_else_rejected():
     env, _ = _env()
     # ui.automation 只有 UDID-A 提供 → 跳过 B 直接选中 A

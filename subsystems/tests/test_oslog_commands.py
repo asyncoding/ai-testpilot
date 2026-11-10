@@ -29,13 +29,15 @@ def test_argv_exact_reconciliation_udid_explicit_not_booted():
     start, end = parse_window(_START, _END)
     argv = build_log_show_argv(udid=_UDID, predicate=_PREDICATE,
                                start=start, end=end)
+    # 真机校准（2026-11-10）：工具只吃 '%Y-%m-%d %H:%M:%S' 空格格式（T 分隔
+    # rc=64），且必须 ndjson（json style 是美化数组，无法逐行解析）
     assert argv == [
         "xcrun", "simctl", "spawn", _UDID,
         "log", "show",
-        "--start", "2026-11-10T10:00:00",
-        "--end", "2026-11-10T10:20:00",
+        "--start", "2026-11-10 10:00:00",
+        "--end", "2026-11-10 10:20:00",
         "--predicate", _PREDICATE,
-        "--style", "json",
+        "--style", "ndjson",
     ]
     assert "booted" not in argv
 
@@ -142,6 +144,34 @@ def test_filter_window_bad_timestamp_fails_closed_not_silently_dropped():
 def test_filter_window_empty_entries_returns_empty():
     start, end = parse_window(_START, _END)
     assert filter_window([], start, end) == []
+
+
+def test_filter_window_mixed_aware_entries_and_naive_window_uses_wall_clock():
+    # 真机形态：条目带 +0800 偏移，naive 窗口语义为本地挂钟（log show 默认
+    # 本地时区渲染）。混比不得 TypeError，按挂钟剥偏移后正常判窗。
+    start, end = parse_window(_START, _END)  # naive
+    entries = [
+        _entry("2026-11-10 09:59:59.123+0800", "before-aware"),
+        _entry("2026-11-10 10:00:00.000+0800", "left-bound-aware"),
+        _entry("2026-11-10 10:10:00.999+0800", "inside-aware"),
+        _entry("2026-11-10 10:20:00.000+0800", "right-bound-aware"),
+        _entry("2026-11-10 10:20:00.001+0800", "after-aware"),
+    ]
+    kept = filter_window(entries, start, end)
+    assert [e["message"] for e in kept] == [
+        "left-bound-aware", "inside-aware", "right-bound-aware"
+    ]
+
+
+def test_aware_window_with_naive_entries_also_comparable():
+    # 反向混搭：aware 窗口 + naive 条目（老夹具/老库历史数据），同样不得崩
+    start, end = parse_window(
+        "2026-11-10T10:00:00+08:00", "2026-11-10T10:20:00+08:00"
+    )
+    kept = filter_window(
+        [_entry("2026-11-10T10:10:00", "naive-inside")], start, end
+    )
+    assert len(kept) == 1
 
 
 def test_predicate_is_stripped_but_preserved_verbatim_in_argv():

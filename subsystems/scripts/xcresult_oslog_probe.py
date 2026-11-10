@@ -6,14 +6,17 @@
 OsLogQueryAdapter 的进程出口全部换成假执行器），复用 tests/fixtures 下的自造
 夹具，验证：零 xcresulttool、零 simctl、零 ffmpeg、零端口、零网络、零真机状态。
 
-故事线（10 项）：
+故事线（10 项，2026-11-10 按 xcresulttool 25115 / schema 0.4.0 真实形态校准）：
   ① core 用例树解析：夹具三态展平、秒→毫秒、failureText 首行证据；
   ② 畸形夹具 fail-closed：未知 nodeType → SchemaValidationError；
-  ③ 附件清单分型 + URN 回链纯函数（截图/录屏 → SCREENSHOT/VIDEO）；
-  ④ 适配器全链：get tests → get attachments → export → localfs 内容寻址，
-     失败用例 artifact_urns 两连且可解析，raw_report_ref 为 URN，未覆盖层显式；
+  ③ export manifest（顶层数组）后缀归属 + 扩展名分型 + URN 回链纯函数
+     （png/mp4 → SCREENSHOT/VIDEO，无 mime 字段）；
+  ④ 适配器全链：get tests → export attachments（manifest.json 随导出落盘）
+     → localfs 内容寻址，失败用例 artifact_urns 两连且可解析，raw_report_ref
+     为 URN，未覆盖层显式；
   ⑤ 适配器响亮失败：xcresulttool 非零退出 / 导出缺文件 → AdapterUnavailableError；
-  ⑥ os_log argv 逐字对账：显式 udid（无 booted）、--style json、query 可复现；
+  ⑥ os_log argv 逐字对账：显式 udid（无 booted）、空格时间窗 + --style ndjson、
+     echo 保 ISO 原文可复现（真机校准：T 分隔 rc=64、json style 是美化数组）；
   ⑦ os_log 适配器跑夹具 NDJSON：窗内 3 / 窗外 2 / 坏行 1，echo argv 与实跑同源；
   ⑧ 坏行样片封顶但总数不封顶；倒挂窗口零进程调用；
   ⑨ ffmpeg 抽帧 argv 对齐 docs/03 原型，fps 白名单越界即拒；
@@ -52,7 +55,7 @@ from testpilot_core.models import TestExecutionRequest  # noqa: E402
 from testpilot_core.oslog_commands import build_os_log_query  # noqa: E402
 from testpilot_core.xcresult_parse import (  # noqa: E402
     link_attachment_urns,
-    parse_attachments,
+    parse_attachment_manifest,
     parse_test_nodes,
 )
 from testpilot_orchestrator.config_loader import load_profile  # noqa: E402
@@ -65,7 +68,7 @@ FIX_OSLOG = SUBSYSTEMS / "tests" / "fixtures" / "oslog"
 EVAL_DIR = SUBSYSTEMS / "out" / "eval"
 _UDID = "5411787C-8AFF-4EBF-9000-EB5EFD1457D5"
 _FAIL_REF = (
-    "AlarmKitSpikeTests.xctest/AlarmKitSpikeTests/"
+    "AlarmKitSpike/AlarmKitSpikeTests/ReminderSchedulerTests/"
     "testKillBackupFallsBackTo30s()"
 )
 _START = "2026-11-10T10:00:00"
@@ -74,13 +77,17 @@ _PREDICATE = 'subsystem == "com.thames.alarmkitspike"'
 
 
 class FakeXcresultExecutor:
-    """按 argv 分发夹具 JSON；export 时在 --output-path 物化两个自造附件。"""
+    """按 argv 分发夹具 JSON（xcresulttool 25115 两动词形态）。
 
-    def __init__(self, tests_text: str, attachments_text: str, *,
+    get tests 回夹具用例树；export attachments 在 --output-path 物化
+    manifest.json（夹具顶层数组）+ 两个自造附件字节，对齐真实工具行为。
+    """
+
+    def __init__(self, tests_text: str, manifest_text: str, *,
                  tests_rc: int = 0, export_rc: int = 0,
                  skip_files: bool = False) -> None:
         self._tests = tests_text
-        self._attachments = attachments_text
+        self._manifest = manifest_text
         self._rc = {"tests": tests_rc, "export": export_rc}
         self._skip_files = skip_files
         self.calls: list[list[str]] = []
@@ -89,13 +96,15 @@ class FakeXcresultExecutor:
         self.calls.append(argv)
         if argv[2:5] == ["get", "test-results", "tests"]:
             return CommandResult(self._rc["tests"], self._tests, "", list(argv))
-        if argv[2:5] == ["get", "test-results", "attachments"]:
-            return CommandResult(0, self._attachments, "", list(argv))
         if argv[2:4] == ["export", "attachments"]:
-            if self._rc["export"] == 0 and not self._skip_files:
+            if self._rc["export"] == 0:
                 out = Path(argv[argv.index("--output-path") + 1])
-                (out / "Screenshot-Failure-1.png").write_bytes(b"\x89PNG synthetic")
-                (out / "FailureRecording.mp4").write_bytes(b"\x00mp4 synthetic")
+                # 真实工具：manifest.json 随导出自动落盘，全绿 run 时为 []
+                (out / "manifest.json").write_text(self._manifest, encoding="utf-8")
+                if not self._skip_files:
+                    (out / "Screenshot-Failure-1.png").write_bytes(
+                        b"\x89PNG synthetic")
+                    (out / "FailureRecording.mp4").write_bytes(b"\x00mp4 synthetic")
             return CommandResult(
                 self._rc["export"], "",
                 "" if self._rc["export"] == 0 else "export boom", list(argv))
@@ -159,8 +168,10 @@ async def _main_async() -> tuple[list[dict[str, str]], list[str], Path]:
     check("② 未知 nodeType 夹具 fail-closed", loud_2,
           "SchemaValidationError 命中" if loud_2 else "畸形输入被静默接受")
 
-    # ③ 附件分型 + URN 回链
-    grouped = parse_attachments(attachments_text)
+    # ③ export manifest 归属 + 扩展名分型 + URN 回链
+    # 25115 形态：顶层数组、testIdentifier 无 bundle 前缀、无 mime 字段
+    grouped = parse_attachment_manifest(
+        attachments_text, [case.external_id for case in cases])
     atts = grouped[_FAIL_REF]
     from testpilot_core.models import CaseResult
 
@@ -171,12 +182,16 @@ async def _main_async() -> tuple[list[dict[str, str]], list[str], Path]:
         case_results, {_FAIL_REF: ["urn:testpilot:localfs-artifact:screenshot:a",
                                    "urn:testpilot:localfs-artifact:video:b"]})
     ok_3 = (
-        [a.artifact_type for a in atts]
+        [a.file_name for a in atts]
+        == ["Screenshot-Failure-1.png", "FailureRecording.mp4"]
+        and [a.artifact_type for a in atts]
         == [ArtifactType.SCREENSHOT, ArtifactType.VIDEO]
+        and all(a.is_failure_associated for a in atts)
         and len(linked[0].artifact_urns) == 2
         and case_results[0].artifact_urns == []  # 输入不被改
     )
-    check("③ 附件 mime 分型与 URN 回链纯函数", ok_3,
+    check("③ manifest 后缀归属/扩展名分型与 URN 回链纯函数", ok_3,
+          f"files={[a.file_name for a in atts]} "
           f"types={[a.artifact_type.value for a in atts]} "
           f"urns={len(linked[0].artifact_urns)}")
 
@@ -193,15 +208,18 @@ async def _main_async() -> tuple[list[dict[str, str]], list[str], Path]:
     resolved = [await store.resolve_uri(u) for u in urns]
     types = sorted(a.type for a in run.artifacts)
     ok_4 = (
-        [c[2] for c in executor4.calls] == ["get", "get", "export"]
+        [c[2] for c in executor4.calls] == ["get", "export"]
+        and executor4.calls[1][2:4] == ["export", "attachments"]
         and len(urns) == 2 and all(r.startswith("file:") for r in resolved)
         and types == [ArtifactType.SCREENSHOT, ArtifactType.VIDEO,
                       ArtifactType.XCRESULT]
         and run.raw_report_ref and run.raw_report_ref.startswith("urn:")
         and run.uncovered_layers == ["background_audio", "codesigning", "ios.device"]
+        and run.runner_capability_version == "xcresulttool-schema-0.4.0"
     )
-    check("④ xcresulttool 三命令→localfs URN 回链失败用例（AC1）", ok_4,
-          f"urns={len(urns)} artifacts={[t.value for t in types]} "
+    check("④ xcresulttool 两命令（get tests→export attachments）→localfs URN 回链（AC1）", ok_4,
+          f"verbs={[c[2] for c in executor4.calls]} urns={len(urns)} "
+          f"artifacts={[t.value for t in types]} "
           f"raw_ref={'urn' if run.raw_report_ref else 'missing'}")
 
     # ⑤ 响亮失败两形态
@@ -235,13 +253,17 @@ async def _main_async() -> tuple[list[dict[str, str]], list[str], Path]:
     ok_6 = (
         q.argv == [
             "xcrun", "simctl", "spawn", _UDID, "log", "show",
-            "--start", _START, "--end", _END,
-            "--predicate", _PREDICATE, "--style", "json",
+            # 真机校准：工具只吃空格格式（T 分隔 rc=64），style 必须 ndjson
+            "--start", "2026-11-10 10:00:00",
+            "--end", "2026-11-10 10:20:00",
+            "--predicate", _PREDICATE, "--style", "ndjson",
         ]
         and "booted" not in q.argv
         and q.echo()["argv"] == q.argv
+        # echo 保留调用方 ISO 原文，进程 argv 用工具语法，两层不互相牺牲
+        and q.echo()["start_time"] == _START and q.echo()["end_time"] == _END
     )
-    check("⑥ os_log argv 逐字对账（显式 udid/无 booted）+ echo 可复现", ok_6,
+    check("⑥ os_log argv 逐字对账（空格时间窗/ndjson/显式 udid）+ echo 保 ISO 可复现", ok_6,
           f"argv_len={len(q.argv)} echo_match={q.echo()['argv'] == q.argv}")
 
     # ⑦ 适配器跑夹具 NDJSON

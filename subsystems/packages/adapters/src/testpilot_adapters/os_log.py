@@ -1,6 +1,7 @@
 """os_log 日志查询适配器（LogQueryPort 的 iOS 模拟器实现，FR-EX-006，S3.3）。
 
-封装 ``xcrun simctl spawn <udid> log show --style json``：
+封装 ``xcrun simctl spawn <udid> log show --style ndjson``（真机校准：
+``--style json`` 输出美化打印的 JSON 数组，无法逐行解析；ndjson 才是一行一条）：
 
 - argv 拼装、时间窗校验全部复用 core 纯函数（oslog_commands.py），本类只做
   进程调用与 NDJSON 行解析；
@@ -10,7 +11,8 @@
 - 坏行策略：单行 JSON 损坏/时间戳非法不计入 entries，但总数+留首条样片，
   既不因单行坏数据废掉整窗证据，也不静默丢弃。
 
-真实 ``log show --style json`` 的字段形态以手动探针校准（S3.3 handoff）。
+真实 ``log show --style ndjson`` 的字段形态已经 2026-11-10 专用模拟器探针
+校准（timestamp 形如 ``2026-11-10 21:40:31.506619+0800``，见 handoff）。
 """
 
 from __future__ import annotations
@@ -27,6 +29,18 @@ from .process_executor import SubprocessExecutor
 # 坏行样片最多留几条进返回体，防止畸形输出撑爆响应；总数不受此限
 _BAD_LINE_SAMPLE_LIMIT = 3
 _SNIPPET_LEN = 200
+
+
+def _is_envelope_trailer(entry: dict[str, Any]) -> bool:
+    """识别 ``log show --style ndjson`` 流末尾的工具汇总尾行。
+
+    2026-11-10 专用模拟器探针取证：每次查询最后一行固定为
+    ``{"count":N,"finished":1}``（N 恰为真实条目数），无 timestamp，
+    是工具信封而非坏数据——当坏行会让每次真查凭空多 1 条 bad_lines 污染
+    质量门禁。只放行 count+finished 双键完整形态，缺键的疑似尾行不识别，
+    仍按坏行 fail-closed（未观测形态不擅自放行）。
+    """
+    return "timestamp" not in entry and "count" in entry and "finished" in entry
 
 
 class OsLogQueryAdapter:
@@ -60,6 +74,8 @@ class OsLogQueryAdapter:
             else:
                 if not isinstance(entry, dict):
                     reason = "行顶层不是对象"
+                elif _is_envelope_trailer(entry):
+                    continue
                 else:
                     ts = entry.get("timestamp")
                     if not isinstance(ts, str):

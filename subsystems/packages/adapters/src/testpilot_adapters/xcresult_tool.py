@@ -1,34 +1,39 @@
-"""xcresulttool 结果解析适配器（FR-EX-005，S3.3）。
+"""xcresulttool 结果解析适配器（FR-EX-005，S3.3；2026-11-10 真机探针校准）。
 
 实现 :class:`XcodeTestRunner` 的 ``result_parser`` 接缝（签名
 request/result_bundle_path/env_id/returncode），把 S3.2 的
-``unavailable_xcresult_parser`` 占位替换为真实链路：
+``unavailable_xcresult_parser`` 占位替换为真实链路（xcresulttool 25115 /
+schema 0.4.0 实测形态）：
 
 1. ``xcresulttool get test-results tests --format json`` → core 纯函数展平用例树；
-2. ``get test-results attachments --format json`` → 附件清单（case_ref 归属）；
-3. ``export attachments --output-path <临时目录>`` → 附件字节落盘；
+2. ``export attachments --output-path <临时目录>`` → 附件字节落盘，且工具自动
+   生成 ``manifest.json``（顶层数组，含 testIdentifier 归属；25115 已下线
+   ``get test-results attachments``，rc=64）；
+3. manifest 经 core 纯函数归一（testIdentifier 后缀匹配 external_case_id，
+   无 mime 字段，类型按文件名扩展名推断）；
 4. 每个附件经 :class:`LocalFsArtifactAdapter` 内容寻址入制品根，URN 回链到
-   失败用例的 ``artifact_urns``（AC1）；大文件只存 URI+hash，不进向量库/SQLite；
+   对应用例的 ``artifact_urns``（AC1）；大文件只存 URI+hash，不进向量库/SQLite；
 5. tests 原始 JSON 同样入制品根，作为 ``raw_report_ref`` 与 XCRESULT 制品。
 
-纪律：xcresulttool 非零退出、导出文件缺失一律 AdapterUnavailableError 响亮失败，
-绝不用假数据冒充结论；真实 xcresulttool 输出形态以手动探针校准（见 S3.3 handoff）。
+全绿 run 没有附件是常态：export 仍 rc=0，manifest.json 为 ``[]``，stderr 的
+"Skipped export …" 提示不是错误。纪律：xcresulttool 非零退出、manifest 缺失、
+导出文件缺失一律 AdapterUnavailableError 响亮失败，绝不用假数据冒充结论。
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
+import shutil
 from pathlib import Path
 
 from testpilot_core.enums import ArtifactType
-from testpilot_core.errors import AdapterUnavailableError, SchemaValidationError
+from testpilot_core.errors import AdapterUnavailableError
 from testpilot_core.execution import run_id_for
 from testpilot_core.models import ArtifactRef, TestExecutionRequest, TestRun
 from testpilot_core.xcode_commands import DEVICE_ONLY_CAPABILITIES
 from testpilot_core.xcresult_parse import (
     link_attachment_urns,
-    parse_attachments,
+    parse_attachment_manifest,
     parse_test_nodes,
     test_run_from_xcresult,
 )
@@ -63,13 +68,9 @@ class XcresultToolResultParser:
             "--format", "json", "--path", bundle,
         ]
 
-    def _attachments_argv(self, bundle: str) -> list[str]:
-        return [
-            self._xcrun, "xcresulttool", "get", "test-results", "attachments",
-            "--format", "json", "--path", bundle,
-        ]
-
     def _export_argv(self, bundle: str, output_dir: str) -> list[str]:
+        # xcresulttool 25115：附件清单与字节导出合并为单命令，manifest.json
+        # 由工具写进 output-path；旧 get test-results attachments 已下线（rc=64）
         return [
             self._xcrun, "xcresulttool", "export", "attachments",
             "--path", bundle, "--output-path", output_dir,
@@ -84,21 +85,6 @@ class XcresultToolResultParser:
                 f"{' '.join(argv[:4])}… stderr={result.stderr[:300]}"
             )
         return result.stdout
-
-    @staticmethod
-    def _maybe_parse_attachments(stdout: str) -> dict:
-        """全绿 run 没有附件是常态：空清单返回 {}，畸形 JSON 仍 fail-closed。"""
-        if not stdout.strip():
-            return {}
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise SchemaValidationError(
-                f"附件清单 JSON 解析失败: {exc}"
-            ) from exc
-        if not isinstance(data, dict) or not data.get("attachments"):
-            return {}
-        return parse_attachments(data)
 
     async def __call__(
         self,
@@ -117,37 +103,46 @@ class XcresultToolResultParser:
         tests_stdout = await self._run_loud(self._tests_argv(bundle))
         cases = parse_test_nodes(tests_stdout)
 
-        # ② 附件清单（无附件时不触发导出）
-        manifest_stdout = await self._run_loud(self._attachments_argv(bundle))
-        grouped = self._maybe_parse_attachments(manifest_stdout)
+        # ② 附件：25115 单命令同时导出字节与 manifest.json（全绿 run
+        #    manifest 为 []，stderr 的 Skipped 提示是正常输出）
+        export_dir = run_dir / "attachments"
+        # 真机探针取证（2026-11-10）：25115 见输出目录已含 manifest.json 即
+        # rc=1 "file already exists" 拒绝覆盖；同 idempotency key 重试复用
+        # run_dir，先整目录清场保证解析幂等（目录由本适配器自建，非外部路径）
+        shutil.rmtree(export_dir, ignore_errors=True)
+        export_dir.mkdir(parents=True, exist_ok=True)
+        await self._run_loud(self._export_argv(bundle, str(export_dir)))
+        manifest_path = export_dir / "manifest.json"
+        if not manifest_path.exists():
+            # 工具声称成功却不给清单：证据链断裂，响亮失败不静默
+            raise AdapterUnavailableError(
+                f"export attachments 未生成 manifest.json: {manifest_path}"
+            )
+        grouped = parse_attachment_manifest(
+            manifest_path.read_text(encoding="utf-8"),
+            [case.external_id for case in cases],
+        )
 
         artifact_refs: list[ArtifactRef] = []
         urns_by_case: dict[str, list[str]] = {}
-        if grouped:
-            # ③ 导出附件字节
-            export_dir = run_dir / "attachments"
-            export_dir.mkdir(parents=True, exist_ok=True)
-            await self._run_loud(self._export_argv(bundle, str(export_dir)))
-
-            # ④ 内容寻址入制品根并按用例回链
-            for case_ref, attachments in grouped.items():
-                for att in attachments:
-                    src = export_dir / att.file_name
-                    if not src.exists():
-                        # 清单声称有附件但导出缺文件：证据链断裂，响亮失败不静默
-                        raise AdapterUnavailableError(
-                            f"附件导出缺失: {att.file_name}（case_ref={case_ref}）"
-                        )
-                    urn = await self._store.put(
-                        str(src), metadata={"type": att.artifact_type.value}
+        # ③ 内容寻址入制品根并按用例回链（manifest 归属已在 core 纯函数校验）
+        for external_case_id, attachments in grouped.items():
+            for att in attachments:
+                src = export_dir / att.file_name
+                if not src.exists():
+                    raise AdapterUnavailableError(
+                        f"附件导出缺失: {att.file_name}（case={external_case_id}）"
                     )
-                    digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
-                    artifact_refs.append(
-                        ArtifactRef(
-                            type=att.artifact_type, uri=urn, content_hash=digest
-                        )
+                urn = await self._store.put(
+                    str(src), metadata={"type": att.artifact_type.value}
+                )
+                digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
+                artifact_refs.append(
+                    ArtifactRef(
+                        type=att.artifact_type, uri=urn, content_hash=digest
                     )
-                    urns_by_case.setdefault(case_ref, []).append(urn)
+                )
+                urns_by_case.setdefault(external_case_id, []).append(urn)
 
         # ⑤ 原始 tests JSON 入制品根，作为可回放的 raw_report_ref
         raw_path = run_dir / "test-results.json"

@@ -13,14 +13,17 @@ import pytest
 from testpilot_core.enums import ArtifactType, CaseStatus
 from testpilot_core.errors import SchemaValidationError
 from testpilot_core.oslog_commands import parse_window
-from testpilot_core.xcresult_parse import parse_attachments, parse_test_nodes
+from testpilot_core.xcresult_parse import (
+    parse_attachment_manifest,
+    parse_test_nodes,
+)
 from testpilot_adapters.os_log import OsLogQueryAdapter
 from testpilot_adapters.process_executor import CommandResult
 
 _FIX = Path(__file__).parent / "fixtures"
 _XC = _FIX / "xcresult"
 _FAIL_REF = (
-    "AlarmKitSpikeTests.xctest/AlarmKitSpikeTests/"
+    "AlarmKitSpike/AlarmKitSpikeTests/ReminderSchedulerTests/"
     "testKillBackupFallsBackTo30s()"
 )
 _WINDOW_START = "2026-11-10T10:00:00"
@@ -40,7 +43,11 @@ def test_xcresult_fixture_tree_covers_three_statuses():
 
 
 def test_xcresult_fixture_attachments_link_to_failed_case():
-    grouped = parse_attachments((_XC / "attachments.json").read_text())
+    cases = parse_test_nodes((_XC / "test-results.json").read_text())
+    grouped = parse_attachment_manifest(
+        (_XC / "attachments.json").read_text(),
+        [case.external_id for case in cases],
+    )
     attachments = grouped[_FAIL_REF]
     assert [a.file_name for a in attachments] == [
         "Screenshot-Failure-1.png", "FailureRecording.mp4"
@@ -48,6 +55,7 @@ def test_xcresult_fixture_attachments_link_to_failed_case():
     assert [a.artifact_type for a in attachments] == [
         ArtifactType.SCREENSHOT, ArtifactType.VIDEO
     ]
+    assert all(a.is_failure_associated for a in attachments)
 
 
 def test_xcresult_malformed_fixture_is_rejected():

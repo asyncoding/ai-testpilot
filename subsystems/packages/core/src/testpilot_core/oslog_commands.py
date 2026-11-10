@@ -9,8 +9,15 @@ JSON 行解析在适配器层（adapters/os_log.py）。
 - docs/03 示例用 ``spawn booted``，实现改为显式 ``spawn <udid>``：租约本来就
   绑定具体模拟器，udid 进 argv 后查询条件可完整复现（FR-EX-006 AC1），不依赖
   调用时刻"谁是 booted"这个隐式状态；
-- 时间窗显式 ``--start/--end``（ISO8601）而非 ``--last 20m``：相对时间无法
-  复现，事后归因必须能回放同一窗口（AC1）；窗外条目不进知识库（AC2）；
+- 时间窗显式 ``--start/--end`` 而非 ``--last 20m``：相对时间无法复现，事后
+  归因必须能回放同一窗口（AC1）；窗外条目不进知识库（AC2）；
+- **2026-11-10 真机探针校准（Xcode 27 模拟器 iOS 26.4）**：``log show`` 的
+  ``--start/--end`` 只接受 ``%Y-%m-%d %H:%M:%S`` 空格格式，ISO8601 的 ``T``
+  分隔直接 rc=64；故进程 argv 用 strftime 工具格式，而 echo 回显仍保留调用方
+  ISO8601 原文（可复现描述与工具语法分层，不互相牺牲）；
+- **style 必须是 ``ndjson`` 不是 ``json``**：真机取证 ``--style json`` 输出
+  美化打印的 JSON 数组（多行一个对象），逐行解析会全量坏行；``ndjson`` 才是
+  一行一条、自带 ``timestamp`` 字符串字段的形态；
 - 谓词长度上限防手滑/防拼出巨型 NSPredicate，谓词原文原样进 query 回显。
 """
 
@@ -26,8 +33,12 @@ from .errors import SchemaValidationError
 # 谓词长度上限：NSPredicate 没有官方硬限，1024 足够覆盖 subsystem/process
 # 组合查询，超长基本意味着拼接错误或注入尝试
 MAX_PREDICATE_LEN = 1024
-# os_log --style json 每行一条记录，时间戳字段名固定
+# os_log --style ndjson 每行一条记录，时间戳字段名固定
 TIMESTAMP_KEY = "timestamp"
+# log show --start/--end 的唯一受支持语法（真机 rc=64 取证，T 分隔/ISO 均被拒）
+_TOOL_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+# 进程 argv 固定 ndjson：json style 是美化数组，无法逐行解析
+_TOOL_STYLE = "ndjson"
 
 
 class OsLogQuery(BaseModel):
@@ -100,10 +111,11 @@ def build_log_show_argv(
     return [
         "xcrun", "simctl", "spawn", udid.strip(),
         "log", "show",
-        "--start", start.isoformat(),
-        "--end", end.isoformat(),
+        # 工具只吃 '%Y-%m-%d %H:%M:%S'（真机 rc=64 取证）；ISO 原文保留在 echo
+        "--start", start.strftime(_TOOL_TIME_FORMAT),
+        "--end", end.strftime(_TOOL_TIME_FORMAT),
         "--predicate", predicate,
-        "--style", "json",
+        "--style", _TOOL_STYLE,
     ]
 
 
@@ -141,7 +153,18 @@ def _entry_timestamp(entry: dict[str, Any]) -> datetime:
 
 
 def in_window(ts: datetime, start: datetime, end: datetime) -> bool:
-    """闭区间 [start, end]：与 ``log show --start/--end`` 语义一致。"""
+    """闭区间 [start, end]：与 ``log show --start/--end`` 语义一致。
+
+    真机条目时间戳带时区偏移（``2026-11-10 21:40:31.5+0800``），调用方窗口
+    可能是 naive（语义=本地挂钟，log show 默认也按本地时区渲染）。aware/naive
+    直接比较会 TypeError，这里统一按本地挂钟口径剥偏移再比；两侧同为 aware 或
+    同为 naive 时原样比较，既有行为不变。
+    """
+    if start.tzinfo is None and ts.tzinfo is not None:
+        ts = ts.replace(tzinfo=None)
+    elif start.tzinfo is not None and ts.tzinfo is None:
+        start = start.replace(tzinfo=None)
+        end = end.replace(tzinfo=None)
     return start <= ts <= end
 
 

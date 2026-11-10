@@ -85,7 +85,8 @@ async def test_query_echo_is_reproducible_with_explicit_udid():
     # 实际跑的 argv 与回显同源，可直接照着重跑（AC1）
     assert query["argv"] == executor.calls[0]
     assert "booted" not in query["argv"]
-    assert query["argv"][-2:] == ["--style", "json"]
+    # 真机校准：json style 输出美化数组无法逐行解析，进程 argv 固定 ndjson
+    assert query["argv"][-2:] == ["--style", "ndjson"]
     assert query["argv"][query["argv"].index("--predicate") + 1] == _PREDICATE
 
 
@@ -149,6 +150,44 @@ async def test_bad_line_total_count_exceeds_sample_cap():
         "JSON 解析失败", "行顶层不是对象", "缺少 timestamp 字符串"
     }
     assert [s["line_no"] for s in result["bad_line_samples"]] == [1, 2, 3]
+
+
+async def test_envelope_trailer_line_is_skipped_not_counted_as_bad():
+    # 真机取证（2026-11-10）：ndjson 流末尾固定带汇总尾行
+    # {"count":N,"finished":1}，无 timestamp；它是工具信封不是坏数据，
+    # 静默跳过且不计 bad_lines，否则每次真查都会产生 1 条假坏行污染质量门禁
+    trailer = json.dumps({"count": 2, "finished": 1})
+    executor = FakeExecutor(
+        "\n".join([
+            _line("2026-11-10T10:05:00", "a"),
+            _line("2026-11-10T10:15:00", "b"),
+            trailer,
+        ])
+    )
+    adapter = OsLogQueryAdapter(_UDID, executor=executor)
+    result = await adapter.query(
+        run_id="r", predicate=_PREDICATE,
+        start_time=_START, end_time=_END,
+    )
+    assert [e["message"] for e in result["entries"]] == ["a", "b"]
+    assert result["bad_lines"] == 0 and result["bad_line_samples"] == []
+
+
+async def test_trailer_like_line_without_count_still_fails_closed():
+    # 只观测到 {"count":N,"finished":1} 完整形态；缺 count 的疑似尾行不擅自放行
+    executor = FakeExecutor(
+        "\n".join([
+            _line("2026-11-10T10:05:00", "a"),
+            json.dumps({"finished": 1}),
+        ])
+    )
+    adapter = OsLogQueryAdapter(_UDID, executor=executor)
+    result = await adapter.query(
+        run_id="r", predicate=_PREDICATE,
+        start_time=_START, end_time=_END,
+    )
+    assert result["bad_lines"] == 1
+    assert result["bad_line_samples"][0]["reason"] == "缺少 timestamp 字符串"
 
 
 async def test_blank_lines_are_ignored_not_counted():

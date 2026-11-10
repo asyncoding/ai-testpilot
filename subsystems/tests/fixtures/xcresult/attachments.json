@@ -1,14 +1,24 @@
-{
-  "attachments": [
-    {
-      "case_ref": "AlarmKitSpikeTests.xctest/AlarmKitSpikeTests/testKillBackupFallsBackTo30s()",
-      "file_name": "Screenshot-Failure-1.png",
-      "mime_type": "image/png"
-    },
-    {
-      "case_ref": "AlarmKitSpikeTests.xctest/AlarmKitSpikeTests/testKillBackupFallsBackTo30s()",
-      "file_name": "FailureRecording.mp4",
-      "mime_type": "video/mp4"
-    }
-  ]
-}
+[
+  {
+    "testIdentifier": "ReminderSchedulerTests/testKillBackupFallsBackTo30s()",
+    "testIdentifierURL": "test://com.apple.xcode/AlarmKitSpike/AlarmKitSpikeTests/ReminderSchedulerTests/testKillBackupFallsBackTo30s",
+    "attachments": [
+      {
+        "exportedFileName": "Screenshot-Failure-1.png",
+        "suggestedHumanReadableName": "Failure screenshot",
+        "isAssociatedWithFailure": true,
+        "configurationName": "Test Scheme Action",
+        "deviceName": "testpilot-probe-synthetic",
+        "deviceId": "18BC020D-33C5-40ED-8CD6-7D3B0BF07F35"
+      },
+      {
+        "exportedFileName": "FailureRecording.mp4",
+        "suggestedHumanReadableName": "Failure recording",
+        "isAssociatedWithFailure": true,
+        "configurationName": "Test Scheme Action",
+        "deviceName": "testpilot-probe-synthetic",
+        "deviceId": "18BC020D-33C5-40ED-8CD6-7D3B0BF07F35"
+      }
+    ]
+  }
+]

@@ -93,7 +93,18 @@ class SimctlEnvironment:
 
     async def acquire(self, requirements: EnvironmentRequirements) -> str:
         await self.reclaim_expired()
-        offered_by_udid = {d.udid: d.capabilities for d in self._devices}
+        # 先对整份清单的能力并集判定（与占用状态无关）：真机独占/清单永不提供的
+        # 能力重试也等不到，即使设备全被占也必须回能力拒绝，而非"全忙请重试"。
+        # 真机探针 2026-11-10 抓出：held 设备在下方循环被跳过，曾让单设备被占时
+        # decisions 为空、ios.device 请求误报 AdapterUnavailable（FR-EX-004 AC1）。
+        inventory_caps = sorted(
+            {cap for device in self._devices for cap in device.capabilities}
+        )
+        inventory_decision = evaluate_capabilities(
+            requirements.capabilities, inventory_caps, provider=self.provider
+        )
+        if not inventory_decision.supported:
+            raise UnsupportedCapabilityError(inventory_decision.message)
         decisions = []
         for device in self._devices:
             if device.udid in self._held:
@@ -121,10 +132,8 @@ class SimctlEnvironment:
                 self._held[device.udid] = lease.lease_id
                 return lease.lease_id
 
-        # 全清单都满足不了：真机独占类拒绝优先（换模拟器也没用，必须说清未覆盖层）
-        for device, decision in decisions:
-            if not decision.supported and decision.reason == "device_only_capability":
-                raise UnsupportedCapabilityError(decision.message)
+        # 能走到这里说明清单并集满足能力要求：空 decisions 只能是设备全被占，
+        # 属可重试的暂时不可用；非空则是唯一能满足的设备被占等逐机不匹配。
         if not decisions:
             raise AdapterUnavailableError("没有空闲模拟器（全部被占用），请稍后重试或扩容")
         raise UnsupportedCapabilityError(decisions[0][1].message)
