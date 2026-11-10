@@ -554,7 +554,7 @@ class AskResponse(BaseModel):
 
 class EvalCase(BaseModel):
     case_id: str
-    kind: Literal["qa", "test_design", "attribution", "negative"]
+    kind: Literal["qa", "test_design", "attribution", "negative", "bad_case"]
     question: str
     ground_truth: dict[str, Any] = Field(default_factory=dict)
     required_evidence: list[str] = Field(default_factory=list)

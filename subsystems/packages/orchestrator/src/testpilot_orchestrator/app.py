@@ -18,8 +18,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .approval_api import approval_router
+from .assets_api import assets_router
+from .badcase_api import badcase_router
 from .config_loader import load_profile
 from .factory import Container, build_container
+from .knowledge_api import knowledge_router
 from .qa_api import api_router, register_exception_handlers
 from .qa_graph.service import build_qa_service
 
@@ -98,6 +101,9 @@ def create_app(
     register_exception_handlers(app)
     app.include_router(api_router)
     app.include_router(approval_router)
+    app.include_router(assets_router)
+    app.include_router(badcase_router)
+    app.include_router(knowledge_router)
 
     @app.get("/health")
     async def health() -> dict:

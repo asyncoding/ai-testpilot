@@ -1,0 +1,95 @@
+{
+  "doc_external_id": "s2_gate/gate-requirements.md",
+  "sealed_at": "2026-11-10T08:00:00+08:00",
+  "expert": "blind-expert",
+  "points": [
+    {
+      "expert_id": "E1",
+      "text": "创建闹钟主流程必须可验证（本地持久化）",
+      "fr_id": "FR-1",
+      "priority": "P0",
+      "match_keywords": ["创建闹钟并立即本地持久化"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E2",
+      "text": "编辑闹钟主流程必须可验证（保留修改历史）",
+      "fr_id": "FR-2",
+      "priority": "P0",
+      "match_keywords": ["编辑已保存闹钟且保留修改历史"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E3",
+      "text": "关键词过滤主流程必须可验证",
+      "fr_id": "FR-3",
+      "priority": "P1",
+      "match_keywords": ["闹钟列表支持关键词过滤"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E4",
+      "text": "全屏提醒循环响铃主流程必须可验证",
+      "fr_id": "FR-4",
+      "priority": "P1",
+      "match_keywords": ["到点弹出全屏提醒并循环响铃直到确认"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E5",
+      "text": "自定义铃声主流程必须可验证",
+      "fr_id": "FR-5",
+      "priority": "P2",
+      "match_keywords": ["提醒设置支持自定义铃声"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E6",
+      "text": "写操作串行化约束必须验证（不得重复提醒）",
+      "fr_id": "",
+      "priority": "P1",
+      "match_keywords": ["约束验证", "串行化"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E7",
+      "text": "AC1：创建后列表页可见新闹钟卡片",
+      "fr_id": "FR-1",
+      "priority": "P0",
+      "match_keywords": ["验收口径验证", "新闹钟卡片"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E8",
+      "text": "AC2（FR-2 侧）：保存后历史版本号递增",
+      "fr_id": "FR-2",
+      "priority": "P0",
+      "match_keywords": ["验收口径验证", "历史版本号递增"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E9",
+      "text": "AC2（FR-3 侧）：过滤结果刷新且历史链不丢",
+      "fr_id": "FR-3",
+      "priority": "P1",
+      "match_keywords": ["验收口径验证", "历史版本号递增"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E10",
+      "text": "AC3：响铃期间锁屏页面持续展示全屏提醒",
+      "fr_id": "FR-4",
+      "priority": "P1",
+      "match_keywords": ["验收口径验证", "锁屏页面持续展示全屏提醒"],
+      "must_test": true
+    },
+    {
+      "expert_id": "E11",
+      "text": "AC4（无 FR 链接）：静音开关日志留痕，归属留空不编造",
+      "fr_id": "",
+      "priority": "P2",
+      "match_keywords": ["验收口径验证", "静音开关状态"],
+      "must_test": true
+    }
+  ]
+}

@@ -40,7 +40,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（632 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（757 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -51,7 +51,14 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # S2.4 oracle 四源挖掘（AC/现有断言/事故义务句确定性三源、白名单模型补点、
 # AC3 探索性判定、草稿表/老库 v11 迁移）、
 # S2.5 人审回写（approval 纯逻辑/v12 迁移/MarkdownCaseRepository 策略守卫与
-# 内容寻址幂等/worker 单事务/outbox 派发/approval_api 七端点/审批页契约）；
+# 内容寻址幂等/worker 单事务/outbox 派发/approval_api 七端点/审批页契约）、
+# S2.6a L3 规则资产版本化（rule_assets 纯逻辑/v13 迁移/不可变版本链/
+# 字段级 diff/偏好回流 few_shot/asset_service/assets_api 六端点）、
+# S2.6b 用例关系派生（case_relations 纯逻辑/relations 独立 scope 零 schema
+# 变更/四源闭集派生/低置信阈值/证据 dossier fail-closed/knowledge_api 两端点）、
+# S2.6c 反馈/bad case 闭环（badcase 纯逻辑状态机/v14 迁移/负反馈投影幂等/
+# 分诊→golden→回归全链路/badcase_service/badcase_api 六端点）、
+# S2.6d S2 五门禁总验（oracle_eval 专家盲评纯逻辑/盲序封存/五门禁统一探针）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -559,14 +566,14 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（14 个自动门禁）
+## 一键验收（18 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 14 PASS / 0 FAIL；日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 18 PASS / 0 FAIL；日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、632 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、757 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -576,10 +583,22 @@ A11 需求骨架抽取（FR-TD-001：确定性解析 + 录制模型 AC↔FR 白�
 A12 测试点生成（FR-TD-002：确定性脊柱 + 白名单补点 + 幻觉死信形状断言）、
 A13 oracle 四源挖掘（FR-TD-003：确定性三源 + 录制模型补点，草稿不碰正式库）、
 A14 人审回写（FR-TD-004/WR-001：tmp 库 hermetic 全流程，不起端口，
-kill switch 拦截→开启→dispatch 落盘→解析器 round-trip→重放幂等→AC1 正式库零变更）。
+kill switch 拦截→开启→dispatch 落盘→解析器 round-trip→重放幂等→AC1 正式库零变更）、
+A15 L3 规则资产版本化（FR-KNO-002：tmp 库 hermetic，版本链单调/同 hash 幂等/
+kind 串档 fail-closed/字段级 diff/偏好回流 few_shot/重开无损/空样本拒入）、
+A16 用例↔符号关系派生（FR-ING-004：tmp 库 hermetic，独立 ground truth 三元组钉
+precision/recall=1.0（AC3 门 ≥.85）、低置信默认隐藏、证据 dossier unresolved
+fail-closed、scope 隔离零误伤、指纹增量与幽灵清扫、重开无损）、
+A17 反馈/bad case 闭环（FR-EV-005：tmp 库 hermetic，负反馈投影/👍 跳过/幂等巡检/
+内容寻址 ID/状态机 fail-closed/golden 溯源冻结/幽灵回归拒入/闭环统计/v13→v14 迁移/重开无损）、
+A18 S2 五门禁总验（S2.6d：合成夹具 hermetic，专家清单先封存再跑管线，结构合法 100%/
+覆盖 ≥.75/P0P1 漏点=0/幻觉 ≤.05/oracle 有效率 ≥.7 五门齐过，探索性用例正常出口、
+重放幂等、盲序守卫活体，纯 core 确定性链不起端口）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14 为纯进程内探针，可脱离整脚本单跑：
-`.venv/bin/python scripts/approval_probe.py`。
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18 为纯进程内探针，可脱离整脚本单跑：
+`.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
+`.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
+`.venv/bin/python scripts/s2_gate_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -939,3 +958,241 @@ S2.4 的 pending 草稿在本切片转正：专家在审批页对每条草稿**�
 - 全量 **632 passed**（S2.5 净增 52：core 17 + store 5 + 适配器 9 + factory 3 +
   worker/dispatch 10 + API 8，探针/前端不入 pytest）、import-lint OK；
   A14 单跑通过，不触碰 8765 端口与 PID 64634。
+
+## L3 规则资产版本化（S2.6a，FR-KNO-002）：不可变版本链、字段级 diff 与采纳 diff 回流
+
+S2.5 沉淀在 `preference_samples` 的人审修改在本切片回流为 L3 规则资产。prompt / few_shot /
+golden / glossary / tool_whitelist 五类资产一律**只增不改**：每次改动产生不可变新版本，
+版本间留可回放 diff，同内容重放不污染版本链。分层纪律不变——core 零三方纯函数算版本语义，
+worker 落账，store 只做持久化，API 是薄 HTTP 包装。
+
+| 防线 | 机制 |
+|---|---|
+| 不可变版本链 | `rule_assets` 自然键 `(asset_id, version)`，只 INSERT 不 UPDATE/DELETE；版本号 v1 起单调递增，重开库版本链与 content_seal 无损（探针 ⑩ 机器断言表行数=版本链长度） |
+| kind 身份不可变 | 同一 asset_id 的 kind 是资产身份，串档（如 prompt→golden）core fail-closed 抛 AssetValidationError，旧版本零污染；AssetKind 为 Literal 五值闭集，HTTP 层 pydantic 同步收口 |
+| 重放幂等双保险 | core 按 canonical JSON（sort_keys、ensure_ascii=False、紧凑分隔符）sha256 判同 hash 返回旧版；DB 再叠 `UNIQUE(asset_id, content_hash)` + `ON CONFLICT DO NOTHING`，报告 `inserted=false` |
+| 改动可回放 | diff 读时现算不冗余落库：递归拍平 dotted-path 叶子，added/removed/changed 三段，字符串叶子附 stdlib difflib unified diff 行级留痕；跨资产 diff、版本方向反向一律拒入 |
+| 采纳 diff 回流 | `build_fewshot_from_preferences` 把人审 modify 样本的 original/revised/diff 原样装入 few_shot entry，逐条带 sample_id/用例 URN/建议 URN 可溯源；空样本拒入不造空资产，sample_id 去重，`content_seal` 覆盖整包 canonical 内容供消费方验篡改 |
+| 输入收口 | asset_id 正则 `^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$`（同时是 URL 路径段）；content 必须非空 dict、name 非空；AssetValidationError 属 ValueError 系，errors.py 显式映射 422，缺失版本/资产 NotFoundError→404 |
+
+分层产出：
+
+- **core（零三方零 IO）`rule_assets.py`**：`RuleAssetRevision`/`AssetDiff`/`AssetFieldChange`
+  模型、`canonical_json`/`hash_content` 内容寻址、`validate_asset_id`、`append_revision`
+  （v1 起版、kind 不可变、同 hash 幂等）、`diff_revisions`（叶子级 + 字符串行级 unified
+  diff）、`build_fewshot_from_preferences`（空样本拒入、去重、content_seal）。
+- **schema v12→v13**：新表 `rule_assets`（PK `(asset_id, version)`、
+  UNIQUE `(asset_id, content_hash)`、kind 索引），`CREATE TABLE IF NOT EXISTS` 平滑升级，
+  老库 v12→v13 迁移有钉版测试（DROP 新表回滚→重开自动升级）；core `SCHEMA_VERSION=13`。
+- **adapters store**：`append_asset_revision`（DO NOTHING 返 inserted 旗标）、
+  `list_asset_revisions`/`get_asset_revision`（缺失返 None）/`list_latest_assets`
+  （MAX(version) 自连接，每资产只暴露最新版）。
+- **workers**：`asset_service`（`register_asset_revision`/`get_asset_diff`/
+  `promote_preferences_to_fewshot`，默认资产 ID `tp.fewshot:oracle-review`，回流报告
+  七键固定）+ CLI `testpilot-promote-fewshot`（`--asset-id/--name/--author/--note`，
+  ValueError 系 exit 2，空库冒烟已验证非零退出）。
+- **orchestrator `/api/assets` 六端点**：GET 资产清单（只含最新版）、
+  POST `/fewshot/promote` 偏好回流（静态路径注册在 `/{asset_id}` 通配之前防吞）、
+  GET 版本链、GET 单版本（404）、GET `diff?from=&to=`、POST 新版本；资产只增不改，
+  没有任何 update/delete 端点。
+
+```bash
+# 偏好回流 CLI（无偏好样本时 exit 2，不制造空 few_shot 资产）
+.venv/bin/testpilot-promote-fewshot --author qa-zhang --note "S2.5 人审修改回流"
+
+# hermetic 探针（tempfile 工作目录，生产装配路径，不碰 offline 库与语料仓，不起端口）
+.venv/bin/python scripts/asset_probe.py
+# 报告 out/eval/asset-probe.{json,md}
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 11 项检查全绿（A15 门禁）：空清单→v1/v2 单调且 hash 随内容变化→同内容重放
+  inserted=false 不增生→kind 串档 fail-closed 旧链零污染→字段级 diff + 字符串 unified
+  diff→缺失版本 NotFound（API 404）→偏好回流报告七键齐全→latest 可见且 entry 带
+  sample_id 溯源与 content_seal→二次回流幂等→只 INSERT 不可变且重开库版本链无损→
+  空样本回流被拒。
+- 契约测试净增 **40 个**：core `test_rule_assets.py` 24（每条校验分支含跨资产/反向
+  diff、坏 ID、空内容、去重、seal）、store 4（含 v12 老库 DROP 回滚→重开升级钉版）、
+  worker 5（shim 容器，含 kind 漂移在写库前被拒）、API 7（六端点 + 422/404 映射 +
+  pydantic 原生请求体校验 + 回流全链路）。
+- 全量 **672 passed**（632+40，探针不入 pytest）、import-lint OK（core 仍零三方）、
+  `bash -n scripts/verify_s0.sh` 通过；A15 单跑通过，不触碰 8765 端口与 PID 64634；
+  tree-sitter 可选 extra 25 测在 `--no-deps` 重装后无损。
+
+## 用例↔符号关系可浏览（S2.6b，FR-ING-004）：闭集派生、独立 scope 与证据 dossier
+
+把 S2.1～S2.4 已落库的四类产物（用例 FR tags、oracle 草稿 source_refs、测试点
+source_refs/fr_id、需求骨架）派生成**闭集两类关系**——`case_validates_requirement`
+（用例验证需求条目）与 `case_references_symbol`（用例引用代码符号），不引入任何新抽取、
+不调用模型。本切片 **schema 不升版**：复用既有 `relations` 表，以独立 scope URN
+（`urn:testpilot:case-relations:` 前缀写入 `doc_urn` 列）与摄入管线的真实文档关系物理隔离。
+
+| 防线 | 机制 |
+|---|---|
+| scope 物理隔离 | 整组替换只 `DELETE WHERE doc_urn=本 scope`；摄入 calls 等关系 doc_urn 是真实文档 URN，探针/单测双重断言重建后零误伤；scope 前缀守卫非法命名空间 fail-closed（回滚不留半组） |
+| 闭集派生防幻觉 | 只从四类既有 S2 产物派生两种关系；相似用例/文档/切块引用只作证据不产闭集外关系；非 testpilot URN 记 `unparseable_refs` 跳过，绝不基于坏 URN 造关系 |
+| 置信度硬编码 | 模型不可自标高置信：FR tag 直连 0.90 > 确定性需求引用 0.80 > 确定性符号 0.70 > 测试点反推 0.60（阈值边界恰好可见）> 模型需求 0.55 > 模型符号/FR 邻接 0.50；低于 0.60 默认不面向用户，仅检索降权素材（`include_low` 可显式展开） |
+| 内容寻址幂等 | 关系 URN = sha1(source\|kind\|target)；同三元组合并（置信取 max、证据并集、provenance 并集），同输入重跑 URN 稳定；输入指纹落 meta，未变 `skipped_unchanged`，`--full` 强制重建 |
+| 幽灵清扫 | 整组替换语义：输入收缩（草稿/测试点删除）后旧关系随重建消失，无外键悬挂；取消态用例整体跳过并计数 |
+| 证据 fail-closed | dossier 在读取侧现算，证据 URN 经六来源（chunks/entities/test_cases/test_points/oracle_suggestions/骨架 FR·NFR·AC 重建）解析；解析不了标 `unresolved`、`complete=false`，绝不编造原文 |
+| 歧义 fail-closed | 同一裸 fr_id 跨骨架撞 URN 时不进索引、不猜目标，记 `ambiguous_fr_tags`；未知 tag 记 `unknown_fr_tags`，诊断随报告如实暴露 |
+
+分层产出：
+
+- **core（零三方零 IO）`case_relations.py`**：`CaseRelation`/`SuggestionRef`/`PointRef`/
+  `CaseRelationBuildResult`/`EvidenceRow`/`EvidenceDossier` 模型、`case_relation_urn`
+  内容寻址、`ensure_relation_scope` 守卫、`build_fr_index`（跨骨架碰撞剔除）、
+  `build_case_relations`（四条派生路径 + 合并器）、`assemble_evidence_dossier`。
+- **adapters store（无 schema 变更）**：`replace_case_relations`（显式事务，异常回滚）、
+  `list_case_relations`（kind 过滤 + 低置信视图）、`get_case_relation`（scope 守卫防读到
+  摄入关系，缺失返 None）、`count_case_relations`、`get_evidence_rows`（六来源去重保序，
+  查不到的 URN 不返回交 core 标 unresolved）、`list_test_point_rows`。
+- **workers**：`relation_building`（四类输入汇聚 + canonical 指纹 + 空用例库 ValueError
+  fail-closed + 固定报告键）+ CLI `testpilot-build-relations [--full]`（ValueError exit 2）。
+- **orchestrator `/api/knowledge` 两端点**：GET `/relations?kind=&include_low=`（闭集外
+  kind → CaseRelationError 422，响应回显阈值 0.60）、GET
+  `/relations/{urn}/evidence`（不存在 404，dossier 含 unresolved 标记）；关系只读，
+  没有任何写端点（构建只走 worker/CLI）。
+
+```bash
+# 关系构建 CLI（空用例库 exit 2，不造空关系；输入未变 skipped_unchanged）
+.venv/bin/testpilot-build-relations --full
+
+# hermetic 探针（tempfile 工作目录，生产装配路径，不碰 offline 库与语料仓，不起端口）
+.venv/bin/python scripts/relation_probe.py
+# 报告 out/eval/relation-probe.{json,md}
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 10 项检查全绿（A16 门禁）：空库 fail-closed→6 关系与独立手写 ground truth
+  三元组**精确一致（precision/recall=1.0，AC3 门 ≥.85）**→低置信 2 条默认隐藏/
+  include_low 全量→dossier resolved 与幽灵 URN unresolved 不编造→摄入 calls 关系
+  整组替换零误伤→指纹 skipped/--full 重建→输入收缩幽灵清扫→unknown/ambiguous/
+  unparseable/取消诊断齐全→重开库关系与指纹无损。
+- 契约测试净增 **36 个**：core `test_case_relations.py` 16（URN 稳定/scope 守卫/
+  撞 ID/四路径置信度与 provenance/合并语义/取消跳过/dossier 不编造）、store
+  `test_relation_store.py` 9（round-trip/摄入隔离双断言/坏 scope 回滚/幽灵清扫/
+  六来源证据）、worker `test_relation_building.py` 6（shim 容器全链路/增量/空库/
+  取消/诊断）、API `test_knowledge_api.py` 5（TestClient 注入容器，422/404/过滤/
+  dossier/scope 不可见）。
+- 全量 **708 passed**（672+36，探针不入 pytest）、import-lint OK（core 仍零三方）、
+  `bash -n scripts/verify_s0.sh` 通过；A16 单跑通过，不触碰 8765 端口与 PID 64634；
+  CLI 经 `--no-deps` 重装注册，空库 exit 2 + stderr 文案冒烟通过，tree-sitter 25 测无损。
+
+## 反馈/bad case 闭环（S2.6c，FR-EV-005）：状态机台账、golden 回流与 v14 迁移
+
+把知识问答的 👎 负反馈收敛成**可分诊、可回流、可验证修复**的闭环台账：负反馈经巡检投影
+成 bad case（open），人工分诊 accept/reject，accepted 转 golden 回归题（eval_cases 冻结，
+kind=`bad_case`），修复后关联回归评测 run——pass 才闭环 fixed，fail 落 regression_failed
+继续跟踪。纯确定性逻辑，无模型调用；**schema v13→v14** 新增 `bad_cases` 表。
+
+| 防线 | 机制 |
+|---|---|
+| 状态机闭集 fail-closed | open→triaged→accepted/rejected→promoted→fixed/regression_failed 七态迁移表在 core 冻结；非法迁移/终态再迁移抛 BadCaseError（ValueError 系 → CLI exit 2、HTTP 422）；rejected/fixed 终态 frozenset 不可迁 |
+| 负反馈幂等三层 | core 内容寻址 `bc-`+sha1(source\|source_ref)；DB `UNIQUE(source,source_ref)`；`feedback_id` 部分唯一索引（`WHERE feedback_id<>''`，manual/eval 源空串可多行共存）；巡检重放 skipped_duplicate 不增生 |
+| 👍 不是坏例 | 只有 not_useful 可投影，useful 巡检跳过且 core 强投影直接拒入；qa_feedback 源强制带 feedback_id |
+| 题先建状态后翻 | promote 先幂等 upsert golden 题（同 case_id 重放只写同内容）再翻 promoted；崩溃重放自愈，不留「题已建状态未翻」交错态；reject 路径零 golden 幻影 |
+| 幽灵回归拒入 | 关联回归 run 前先查 eval_runs 存在性，不存在 → NotFoundError（HTTP 404），禁止挂账到虚构运行 |
+| 快照可复算 | 四元组（data/model/prompt/params 版本）从 qa_runs 关联补齐，与 docs/06 §6.1 评测口径对齐；孤儿反馈防御性留空不编造 |
+| 审计不可篡改 | 每次迁移追加事件（from/to/actor/note/at），core 返回深拷贝新副本不改入参；闭环时间戳 closed_at 仅终态落值，regression_failed 不闭环 |
+
+分层产出：
+
+- **core（零三方零 IO）`badcase.py`**：七态迁移闭集、`BadCase`/`BadCaseEvent`/`BadCaseSnapshot`/
+  `CycleStats` 模型、内容寻址 ID、反馈投影、triage（open 自动补 triaged 中转事件）、
+  promote 映射（只映射不改状态，ground_truth 带 provenance 四要素）、回归关联、周期统计（空样本安全）。
+- **adapters store（schema v14）**：`bad_cases` 表 + 状态/来源索引 + feedback 部分唯一索引；
+  `insert_bad_case`/`get_bad_case`/`get_bad_case_by_feedback`/`list_bad_cases`/
+  `update_bad_case`（rowcount=0 双击守卫），另加 `list_feedback`（巡检扫描）与
+  `get_eval_run`（幽灵校验）；老库 IF NOT EXISTS 幂等补建。
+- **workers**：`badcase_service`（巡检/分诊/promote/回归/统计，core 出计划 store 落账）+
+  CLI `testpilot-badcase`（ingest/list/triage/promote/resolve/stats 六子命令，ValueError/NotFound exit 2）。
+- **orchestrator `/api/bad-cases` 六端点**：GET ``（status/source 过滤）、GET `/stats`、
+  POST `/ingest-feedback`、POST `/{id}/triage`、POST `/{id}/promote`、POST `/{id}/regression`；
+  BadCaseError→422、NotFoundError→404，请求体枚举/actor 校验走 FastAPI 原生 422。
+
+```bash
+# 闭环 CLI（临时库可用 TESTPILOT_PROFILE 指向独立 profile）
+.venv/bin/testpilot-badcase ingest-feedback   # 巡检投影（空表全零报告，不报错）
+.venv/bin/testpilot-badcase list --status open
+.venv/bin/testpilot-badcase triage --id bc-xxx --decision accept --actor qa-li
+.venv/bin/testpilot-badcase promote --id bc-xxx --actor qa-li
+.venv/bin/testpilot-badcase resolve --id bc-xxx --eval-run-id eval-42 --outcome pass --actor ci-bot
+.venv/bin/testpilot-badcase stats
+
+# hermetic 探针（tempfile 工作目录，生产装配路径，不碰 offline 库与语料仓，不起端口）
+.venv/bin/python scripts/badcase_probe.py
+# 报告 out/eval/badcase-probe.{json,md}
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 11 项检查全绿（A17 门禁）：空库零报告→👎 投影/👍 跳过/孤儿防御与四元组快照→
+  重放幂等→内容寻址 ID 独立验算→全生命周期（golden 冻结+溯源/幽灵 run 拒入/fail 不闭环/
+  pass 闭环）→非法迁移双拦截→reject 零幻影→统计闭环率与中位周期→v13→v14 钉版迁移→
+  重开库台账与六事件历史无损。
+- 契约测试净增 **37 个**：core `test_badcase_core.py` 21（ID/创世事件/空白拒入/全生命周期/
+  非法迁移与终态/入参不可变/promote 溯源/regression 双态/useful 拒入/幂等投影/空统计）、
+  store `test_badcase_store.py` 5（v13→v14 钉版/round-trip/过滤/UNIQUE 双保险/双击守卫）、
+  worker `test_badcase_service.py` 8（投影跳过幂等/孤儿防御/全链路/幽灵 404/reject 零幻影/统计）、
+  API `test_badcase_api.py` 3（TestClient 注入容器，六端点+422/404 映射+全链路）。
+- 全量 **745 passed**（708+37，探针不入 pytest）、import-lint OK（core 仍零三方）、
+  `bash -n scripts/verify_s0.sh` 通过；A17 单跑通过，不触碰 8765 端口与 PID 64634；
+  CLI 经 `--no-deps` 重装注册，help/stats/未知 ID exit 2 三冒烟通过，tree-sitter 25 测无损；
+  六处历史钉版断言（`=="13"` 终态）同步为 14，旧库低版本钉版（2–12）保持不动。
+
+## S2 五门禁总验（S2.6d）：专家盲标、oracle 有效率与统一探针
+
+把 docs/06 §3.2 场景② 的五条 POC 门禁收进一条纯 core 确定性探针（A18），用仓内合成夹具
+（`tests/fixtures/s2_gate/`，不含语料仓 V1 原文）验证门禁机制本身；真档 5 真实需求盲标
+走下方手动命令，语料仓只读、路径参数化。
+
+| # | 门禁（docs/06 §3.2） | 阈值 | 实现位置 |
+|---|---|---|---|
+| 1 | 结构合法率 | 100% | S2.1/S2.2 解析器零死信（死信即结构不合法，进 dead_letters 不进正式清单） |
+| 2 | 测试点覆盖率 | ≥.75 | `testpoint_eval.evaluate_blind` 专家盲标，同 fr_id + 关键词全命中 |
+| 3 | P0/P1 漏点 | =0 | 盲标报告 `p0p1_misses` 单列，优先级由 FR 强制映射、模型不可改 |
+| 4 | 幻觉点率 | ≤.05 | 白名单拒入 `rejected` 台账，纯确定性脊柱下为 0 |
+| 5 | oracle 有效率 | ≥.7 | **新增 `oracle_eval.evaluate_oracles`**：专家判「可执行且正确」，UI/日志/状态/人工四分类盘点 |
+
+盲标纪律（docs/06 §3.2：专家先于 AI 独立列点，否则被锚定）：
+
+- 两份专家清单（测试点 11 点 / oracle 4 用例判定）作为夹具入库，探针**先封存哈希
+  （`seal_expert_manifest`/`seal_oracle_manifest`，规范 JSON sha256[:16]）并把封存副本
+  写到 `out/eval/s2-gate-sealed-*.json`，再启动解析/生成/挖掘**——mtime 顺序即流程证据；
+- 守卫活体自检：空专家清单 → `BlindOrderError`，漏评用例/跨文档 → `OracleBlindError`，
+  探针反证两类守卫都会触发，防门禁被悄悄绕过；
+- oracle 盲评口径：可执行仅 UI/日志/状态三类（manual 单列不进分母）；探索性用例
+  （TC-G4 主观听感）不进有效率分母——docs/06 明确「剩余标探索性用例是正常出口」；
+  专家若对探索性用例给了非空期望，missing 照记、`coverage_complete=False`，不允许静默排除。
+
+合成夹具的叙事设计：TC-G3 是缺预期用例（`oracle_missing`），需求 AC3 以「锁屏页面持续
+展示全屏提醒」措辞提供 UI 可验证口径，经 requirement_ac 源补挖出可执行 oracle（挖掘覆盖率
+1/1）；TC-G4 纯人工预期保留为探索性出口样本；专家期望与挖掘结果精确对齐，五门实测全 1.0/0。
+
+```bash
+# hermetic 五门禁探针（纯 core 确定性链，不触库/不起端口/不调模型，报告 out/eval/s2-gate-probe.*）
+.venv/bin/python scripts/s2_gate_probe.py
+
+# 真档版手动命令（5 个真实需求单元；先以专家身份读需求独立列点封存，再跑管线，语料仓只读）
+# 1) 专家清单写到 out/eval（不入库），sealed_at 必须早于管线运行；
+# 2) 复用 oracle_probe/testpoint 探针链，把 external_id 指到语料仓真实文档：
+.venv/bin/python scripts/oracle_probe.py ~/Documents/Code/app-calendar-alarm/<用例目录> \
+    --requirements ~/Documents/Code/app-calendar-alarm/<需求.md>
+```
+
+### 验收证据（2026-11-10）
+
+- 探针 12 项检查全绿（A18 门禁）：盲序封存→需求/用例结构合法→脊柱 11 点→盲标四门
+  （coverage/precision=1.0、P0P1 漏 0、幻觉 0）→AC3 守卫→TC-G3 缺预期 AC 补挖→
+  oracle 有效率 1.0（6 条可执行全认可、0 invalid/0 missing）→探索性排除 1 例四分类齐全→
+  重放逐字段幂等→两类盲序守卫活体→封存哈希稳定。
+- **红证对照**：故意把专家关键词改成脊柱不存在的文本，探针 exit 1 且报 P0 漏点
+  （coverage=.9091）；还原后 exit 0——证明门禁真能抓失败，不是假绿。
+- 契约测试净增 **12 个**（`test_oracle_eval.py`，hostless）：全有效/类型错配拉低有效率/
+  missing 缺口/探索性期望非空照记/manual 单列/零分母保护/阈值常量/空清单/漏评/跨文档/
+  重复判定与数量不匹配/封存稳定与重放幂等。全量 **757 passed**（745+12，探针不入 pytest）、
+  import-lint OK、`bash -n scripts/verify_s0.sh` 通过、Web 静态导出构建通过；
+  A18 单跑通过，不触碰 8765 端口与 PID 64634；零 schema 变更（v14 不动）。

@@ -1,9 +1,13 @@
--- TestPilot schema（当前 schema_version = 4；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
+-- TestPilot schema（当前 schema_version = 14；docs/08 FR-CFG-003 AC2：迁移脚本版本化）
 -- v1：S0 骨架；v2：入库批次/文档加工状态、entities/relations 挂 doc_urn（S1.1）
 -- v3：chunks_fts 换 trigram 分词（CJK 子串召回，S1.2；老库由 _migrate_fts_to_trigram
 --     DROP+回填）、retrieval_events 各检索阶段命中率留痕（FR-KNO-001 AC1）
 -- v4：verification_events live-verify 每次校验留痕（S1.3，FR-QA-002 AC2：代码类问题
 --     100% 有 trace 可查的校验调用，含降级；CREATE IF NOT EXISTS 对老库幂等，无列迁移）
+-- v5~v12：qa_runs/反馈、test_cases/requirement_skeletons/test_points、
+--     oracle_suggestions（v11）+ 人审四列与 preference_samples（v12），见 core/__init__.py
+-- v13：rule_assets L3 规则资产版本链（S2.6a FR-KNO-002），新表 IF NOT EXISTS 幂等补建
+-- v14：bad_cases 反馈/bad case 闭环台账（S2.6c FR-EV-005），新表 IF NOT EXISTS 幂等补建
 
 PRAGMA journal_mode = WAL;
 
@@ -405,6 +409,25 @@ CREATE TABLE IF NOT EXISTS preference_samples (
 CREATE INDEX IF NOT EXISTS idx_preference_samples_case ON preference_samples(case_urn);
 CREATE INDEX IF NOT EXISTS idx_preference_samples_suggestion ON preference_samples(suggestion_urn);
 
+-- L3 规则资产版本链（S2.6a FR-KNO-002，schema v13）：术语表/prompt/few-shot/golden/
+-- 工具白名单统一为「资产 + 不可变版本」。只 INSERT、永不 UPDATE/DELETE；版本号在
+-- 资产内单调递增，(asset_id, content_hash) 唯一使同内容重放幂等不增生；diff 不落库，
+-- 读时由 core.rule_assets.diff_revisions 对两版 canonical 内容现算（留痕可回放）。
+CREATE TABLE IF NOT EXISTS rule_assets (
+    asset_id     TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    kind         TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    content_json TEXT NOT NULL,
+    author       TEXT NOT NULL DEFAULT '',
+    note         TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (asset_id, version),
+    UNIQUE (asset_id, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_rule_assets_kind ON rule_assets(kind);
+
 -- 任务队列（offline profile 的 QueuePort 实现）
 CREATE TABLE IF NOT EXISTS jobs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,3 +441,38 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status_type ON jobs(status, job_type);
+
+-- bad case 闭环台账（S2.6c FR-EV-005，v14）：完整模型以 raw_json 为唯一还原来源，
+-- 投影列供 SQL 盘点/过滤；四元组快照列对齐 qa_runs/eval_runs 口径（docs/06 §6.1）。
+-- UNIQUE(source, source_ref) 与 feedback_id 部分唯一索引双保险保证负反馈幂等。
+CREATE TABLE IF NOT EXISTS bad_cases (
+    bad_case_id              TEXT PRIMARY KEY,
+    source                   TEXT NOT NULL,
+    source_ref               TEXT NOT NULL,
+    feedback_id              TEXT NOT NULL DEFAULT '',
+    status                   TEXT NOT NULL,
+    title                    TEXT NOT NULL,
+    question                 TEXT NOT NULL DEFAULT '',
+    detail                   TEXT NOT NULL DEFAULT '',
+    reason                   TEXT NOT NULL DEFAULT '',
+    data_version             TEXT NOT NULL DEFAULT '',
+    model_version            TEXT NOT NULL DEFAULT '',
+    prompt_version           TEXT NOT NULL DEFAULT '',
+    params_version           TEXT NOT NULL DEFAULT '',
+    triaged_by               TEXT NOT NULL DEFAULT '',
+    triaged_at               TEXT,
+    decision_note            TEXT NOT NULL DEFAULT '',
+    golden_case_id           TEXT NOT NULL DEFAULT '',
+    regression_eval_run_id   TEXT NOT NULL DEFAULT '',
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    closed_at                TEXT,
+    history_json             TEXT NOT NULL DEFAULT '[]',
+    raw_json                 TEXT NOT NULL,
+    UNIQUE(source, source_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_bad_cases_status ON bad_cases(status);
+CREATE INDEX IF NOT EXISTS idx_bad_cases_source ON bad_cases(source);
+-- 仅 qa_feedback 行有 feedback_id：部分唯一索引允许其余源多行空串共存
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bad_cases_feedback
+    ON bad_cases(feedback_id) WHERE feedback_id <> '';

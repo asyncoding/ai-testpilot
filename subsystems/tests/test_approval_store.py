@@ -84,7 +84,7 @@ def test_v11_store_upgrades_with_review_columns_and_preference_table(tmp_path):
         # 重开：schema.sql 补建新表/索引，_COLUMN_MIGRATIONS 补四列，版本升 v12
         store2 = bootstrap_store(tmp_path)
         try:
-            assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "12"
+            assert store2.get_meta("schema_version") == str(SCHEMA_VERSION) == "14"
             assert "preference_samples" in _table_names(store2.conn)
             cols = _column_names(store2.conn, "oracle_suggestions")
             assert {"approval_id", "reviewed_by", "reviewed_at",

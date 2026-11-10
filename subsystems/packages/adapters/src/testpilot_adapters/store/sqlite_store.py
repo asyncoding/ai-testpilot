@@ -11,10 +11,18 @@ from typing import Any, Sequence
 
 from testpilot_core import SCHEMA_VERSION
 from testpilot_core.approval import CaseDecisionPlan
+from testpilot_core.badcase import BadCase
+from testpilot_core.case_relations import (
+    RELATION_SCOPE_URN,
+    CaseRelation,
+    EvidenceRow,
+    ensure_relation_scope,
+)
 from testpilot_core.enums import OutboxStatus
 from testpilot_core.oracle_mining import MinedOracle, suggestion_urn
 from testpilot_core.requirement import RequirementParseResult
-from testpilot_core.testpoint import point_urn
+from testpilot_core.rule_assets import RuleAssetRevision
+from testpilot_core.testpoint import acceptance_urn, point_urn
 from testpilot_core.models import (
     Approval,
     Entity,
@@ -1022,6 +1030,71 @@ class Store:
             for r in rows
         ]
 
+    # ── L3 规则资产版本链（schema v13，FR-KNO-002 S2.6a）──────────────────
+    @staticmethod
+    def _asset_row_to_model(r: sqlite3.Row) -> RuleAssetRevision:
+        return RuleAssetRevision(
+            asset_id=r["asset_id"],
+            version=r["version"],
+            kind=r["kind"],
+            name=r["name"],
+            content=json.loads(r["content_json"]),
+            content_hash=r["content_hash"],
+            author=r["author"],
+            note=r["note"],
+            created_at=datetime.fromisoformat(r["created_at"]),
+        )
+
+    def append_asset_revision(self, revision: RuleAssetRevision) -> bool:
+        """不可变版本只 INSERT；同 (asset_id, content_hash) 冲突 DO NOTHING。
+
+        返回 True=新写入，False=同内容版本已存在（幂等重放）。版本号由 core
+        按历史链计算，PK(asset_id, version) 撞键是接线 bug，不放行静默覆盖。
+        """
+        cur = self.conn.execute(
+            """INSERT INTO rule_assets
+               (asset_id, version, kind, name, content_hash, content_json,
+                author, note, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(asset_id, content_hash) DO NOTHING""",
+            (
+                revision.asset_id, revision.version, str(revision.kind),
+                revision.name, revision.content_hash,
+                json.dumps(revision.content, ensure_ascii=False),
+                revision.author, revision.note,
+                revision.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def list_asset_revisions(self, asset_id: str) -> list[RuleAssetRevision]:
+        rows = self.conn.execute(
+            "SELECT * FROM rule_assets WHERE asset_id=? ORDER BY version",
+            (asset_id,),
+        ).fetchall()
+        return [self._asset_row_to_model(r) for r in rows]
+
+    def get_asset_revision(
+        self, asset_id: str, version: int
+    ) -> RuleAssetRevision | None:
+        row = self.conn.execute(
+            "SELECT * FROM rule_assets WHERE asset_id=? AND version=?",
+            (asset_id, version),
+        ).fetchone()
+        return self._asset_row_to_model(row) if row else None
+
+    def list_latest_assets(self) -> list[RuleAssetRevision]:
+        """每个 asset_id 只取最大版本行（资产清单视图），按 asset_id 排序稳定。"""
+        rows = self.conn.execute(
+            """SELECT a.* FROM rule_assets a
+               JOIN (SELECT asset_id, MAX(version) AS v
+                     FROM rule_assets GROUP BY asset_id) m
+                 ON a.asset_id=m.asset_id AND a.version=m.v
+               ORDER BY a.asset_id"""
+        ).fetchall()
+        return [self._asset_row_to_model(r) for r in rows]
+
     def persist_case_decision(self, plan: CaseDecisionPlan, *, reviewed_at: str) -> None:
         """单事务落人审四件套：Approval + outbox + 偏好样本 + 草稿状态翻转。
 
@@ -1368,6 +1441,22 @@ class Store:
         ).fetchall()
         return [{"kind": r["kind"], "reason": r["reason"], "n": r["n"]} for r in rows]
 
+    def list_feedback(self) -> list[dict[str, Any]]:
+        """S2.6c bad case 摄入扫描：全量反馈行（含自增 id 幂等键），按 id 稳定排序。"""
+        rows = self.conn.execute(
+            """SELECT id, run_id, target_urn, kind, COALESCE(reason, '') AS reason,
+                      detail, model_version, created_at
+               FROM feedback ORDER BY id"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_eval_run(self, eval_run_id: str) -> dict[str, Any] | None:
+        """S2.6c 回归关联前的存在性校验：拒绝把坏例挂到幽灵评测运行上。"""
+        r = self.conn.execute(
+            "SELECT eval_run_id, metrics, created_at FROM eval_runs WHERE eval_run_id=?",
+            (eval_run_id,)).fetchone()
+        return dict(r) if r else None
+
     def add_eval_run(self, run: EvalRun) -> None:
         self.conn.execute(
             """INSERT INTO eval_runs
@@ -1402,4 +1491,294 @@ class Store:
                 int(case.holdout), locked_version,
             ),
         )
+        self.conn.commit()
+
+    # ── S2.6b 用例关系（FR-ING-004：复用 relations 表，独立 scope 命名空间）─────
+    def list_test_point_rows(self) -> list[dict[str, Any]]:
+        """关系构建 worker 输入：external_id 投影 + TestPoint（URN 由 point_urn 重算）。"""
+        rows = self.conn.execute(
+            "SELECT external_id, raw_json FROM test_points "
+            "ORDER BY external_id, fr_id, kind"
+        ).fetchall()
+        return [
+            {"external_id": r["external_id"],
+             "point": TestPoint.model_validate_json(r["raw_json"])}
+            for r in rows
+        ]
+
+    @staticmethod
+    def _row_to_case_relation(r: sqlite3.Row) -> CaseRelation:
+        payload = json.loads(r["evidence_json"])
+        return CaseRelation(
+            urn=r["urn"],
+            source_urn=r["source_urn"],
+            target_urn=r["target_urn"],
+            kind=r["kind"],
+            confidence=r["confidence"],
+            evidence_urns=payload.get("urns", []),
+            provenance=payload.get("provenance", []),
+        )
+
+    def replace_case_relations(
+        self, scope_urn: str, relations: Sequence[CaseRelation]
+    ) -> int:
+        """单事务整组替换本 scope 关系（文档级清扫防幽灵）。
+
+        scope 守卫确保只删 ``urn:testpilot:case-relations:`` 命名空间，摄入管线
+        的 calls 等关系 doc_urn 是真实文档 URN，物理隔离永不误伤。URN 撞车直接
+        报错回滚（fail-closed），不做静默 DO NOTHING。
+        """
+        ensure_relation_scope(scope_urn)
+        cur = self.conn
+        try:
+            cur.execute("BEGIN")
+            cur.execute("DELETE FROM relations WHERE doc_urn=?", (scope_urn,))
+            for rel in relations:
+                cur.execute(
+                    """INSERT INTO relations
+                       (urn, source_urn, target_urn, kind, confidence,
+                        evidence_json, doc_urn)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (
+                        rel.urn, rel.source_urn, rel.target_urn, rel.kind,
+                        rel.confidence,
+                        json.dumps(
+                            {"urns": rel.evidence_urns, "lines": [],
+                             "provenance": rel.provenance},
+                            ensure_ascii=False),
+                        scope_urn,
+                    ),
+                )
+            cur.commit()
+        except Exception:
+            cur.rollback()
+            raise
+        return len(relations)
+
+    def list_case_relations(
+        self,
+        *,
+        kind: str | None = None,
+        include_low: bool = False,
+        scope_urn: str = RELATION_SCOPE_URN,
+    ) -> list[CaseRelation]:
+        """浏览口：默认藏低置信（FR-ING-004：低置信不面向用户，仅检索降权）。"""
+        sql = "SELECT * FROM relations WHERE doc_urn=?"
+        params: list[Any] = [scope_urn]
+        if kind is not None:
+            sql += " AND kind=?"
+            params.append(kind)
+        sql += " ORDER BY source_urn, kind, target_urn"
+        relations = [
+            self._row_to_case_relation(r) for r in self.conn.execute(sql, params).fetchall()
+        ]
+        if not include_low:
+            relations = [r for r in relations if not r.is_low_confidence]
+        return relations
+
+    def get_case_relation(self, urn: str) -> CaseRelation | None:
+        """单关系读取；WHERE 带 scope 前缀，绝不会返回摄入管线的同名资源。"""
+        row = self.conn.execute(
+            "SELECT * FROM relations WHERE urn=? "
+            "AND doc_urn LIKE 'urn:testpilot:case-relations:%'",
+            (urn,),
+        ).fetchone()
+        return self._row_to_case_relation(row) if row else None
+
+    def count_case_relations(self, *, scope_urn: str = RELATION_SCOPE_URN) -> int:
+        return int(self.conn.execute(
+            "SELECT COUNT(*) AS n FROM relations WHERE doc_urn=?", (scope_urn,)
+        ).fetchone()["n"])
+
+    def get_evidence_rows(self, urns: Sequence[str]) -> list[EvidenceRow]:
+        """证据 URN 批量解析为可读行（FR-ING-004 AC2：点开证据原文）。
+
+        依次查 chunks/entities/test_cases/test_points/oracle_suggestions/
+        requirement_skeletons 六个来源；查不到的 URN 不返回，由 core
+        assemble_evidence_dossier 标 unresolved（fail-closed，不编造原文）。
+        """
+        if not urns:
+            return []
+        wanted = list(dict.fromkeys(urns))  # 去重保序
+        placeholders = ",".join("?" for _ in wanted)
+        resolved: dict[str, EvidenceRow] = {}
+
+        chunk_rows = self.conn.execute(
+            f"""SELECT c.urn AS urn, c.raw_json AS raw_json, d.uri AS doc_uri
+                FROM chunks c JOIN source_documents d ON d.urn = c.doc_urn
+                WHERE c.urn IN ({placeholders})""",
+            wanted,
+        ).fetchall()
+        for r in chunk_rows:
+            chunk = KnowledgeChunk.model_validate_json(r["raw_json"])
+            resolved[r["urn"]] = EvidenceRow(
+                urn=r["urn"], status="resolved", kind=chunk.kind,
+                label=chunk.metadata_.get("title") or chunk.text[:40],
+                excerpt=chunk.text[:200], doc_uri=r["doc_uri"] or "")
+
+        entity_rows = self.conn.execute(
+            f"SELECT urn, raw_json FROM entities WHERE urn IN ({placeholders})",
+            wanted,
+        ).fetchall()
+        for r in entity_rows:
+            entity = Entity.model_validate_json(r["raw_json"])
+            resolved[r["urn"]] = EvidenceRow(
+                urn=r["urn"], status="resolved", kind=f"entity:{entity.kind}",
+                label=entity.name,
+                excerpt=str(entity.metadata_.get("signature", ""))[:200])
+
+        case_rows = self.conn.execute(
+            f"SELECT urn, raw_json FROM test_cases WHERE urn IN ({placeholders})",
+            wanted,
+        ).fetchall()
+        for r in case_rows:
+            case = TestCase.model_validate_json(r["raw_json"])
+            resolved[r["urn"]] = EvidenceRow(
+                urn=r["urn"], status="resolved", kind="test_case",
+                label=f"{case.external_id} {case.title}".strip(),
+                excerpt=" / ".join(case.steps[:2])[:200])
+
+        point_rows = self.conn.execute(
+            f"SELECT urn, raw_json FROM test_points WHERE urn IN ({placeholders})",
+            wanted,
+        ).fetchall()
+        for r in point_rows:
+            point = TestPoint.model_validate_json(r["raw_json"])
+            resolved[r["urn"]] = EvidenceRow(
+                urn=r["urn"], status="resolved", kind="test_point",
+                label=point.text[:80], excerpt=point.text[:200])
+
+        suggestion_rows = self.conn.execute(
+            f"SELECT urn, raw_json FROM oracle_suggestions WHERE urn IN ({placeholders})",
+            wanted,
+        ).fetchall()
+        for r in suggestion_rows:
+            oracle = MinedOracle.model_validate_json(r["raw_json"])
+            resolved[r["urn"]] = EvidenceRow(
+                urn=r["urn"], status="resolved", kind="oracle_suggestion",
+                label=oracle.expectation[:80],
+                excerpt=f"[{oracle.source_kind}] {oracle.expectation}"[:200])
+
+        # 需求条目 URN 在骨架 raw_json 内，重建 FR/NFR/AC 三类 URN 索引后匹配
+        for skel_row in self.conn.execute(
+            "SELECT external_id, raw_json FROM requirement_skeletons"
+        ).fetchall():
+            external_id = skel_row["external_id"]
+            skeleton = RequirementParseResult.model_validate_json(skel_row["raw_json"])
+            for feature in skeleton.features:
+                if feature.urn in wanted and feature.urn not in resolved:
+                    resolved[feature.urn] = EvidenceRow(
+                        urn=feature.urn, status="resolved", kind="requirement",
+                        label=f"{feature.fr_id} {feature.text[:60]}".strip(),
+                        excerpt=feature.text[:200])
+            for rule in skeleton.rules:
+                if rule.urn in wanted and rule.urn not in resolved:
+                    resolved[rule.urn] = EvidenceRow(
+                        urn=rule.urn, status="resolved", kind="requirement_rule",
+                        label=f"{rule.rule_id} {rule.text[:60]}".strip(),
+                        excerpt=rule.text[:200])
+            for ac in skeleton.acceptance:
+                ac_urn = acceptance_urn(external_id, ac)
+                if ac_urn in wanted and ac_urn not in resolved:
+                    resolved[ac_urn] = EvidenceRow(
+                        urn=ac_urn, status="resolved", kind="requirement_ac",
+                        label=f"AC-{ac.index + 1} {ac.text[:60]}",
+                        excerpt=ac.text[:200])
+
+        return [resolved[u] for u in wanted if u in resolved]
+
+    # ── S2.6c bad case 闭环（FR-EV-005：schema v14 bad_cases 表）──────────────
+    @staticmethod
+    def _row_to_bad_case(r: sqlite3.Row) -> BadCase:
+        # 完整模型以 raw_json 为唯一还原来源，投影列只服务 SQL 盘点/过滤
+        return BadCase.model_validate_json(r["raw_json"])
+
+    def insert_bad_case(self, case: BadCase) -> None:
+        """新坏例入账；撞 UNIQUE(source, source_ref)/feedback_id 由调用方先查重，
+        唯一约束是兜底防线——IntegrityError 直接抛穿代表幂等预检失效的接线 bug。"""
+        self.conn.execute(
+            """INSERT INTO bad_cases
+               (bad_case_id, source, source_ref, feedback_id, status, title,
+                question, detail, reason, data_version, model_version,
+                prompt_version, params_version, triaged_by, triaged_at,
+                decision_note, golden_case_id, regression_eval_run_id,
+                created_at, updated_at, closed_at, history_json, raw_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                case.bad_case_id, case.source, case.source_ref, case.feedback_id,
+                case.status, case.title, case.question, case.detail, case.reason,
+                case.snapshot.data_version, case.snapshot.model_version,
+                case.snapshot.prompt_version, case.snapshot.params_version,
+                case.triaged_by,
+                case.triaged_at.isoformat() if case.triaged_at else None,
+                case.decision_note, case.golden_case_id,
+                case.regression_eval_run_id, case.created_at.isoformat(),
+                case.updated_at.isoformat(),
+                case.closed_at.isoformat() if case.closed_at else None,
+                json.dumps([e.model_dump(mode="json") for e in case.history],
+                           ensure_ascii=False),
+                case.model_dump_json(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_bad_case(self, bad_case_id: str) -> BadCase | None:
+        r = self.conn.execute(
+            "SELECT raw_json FROM bad_cases WHERE bad_case_id=?",
+            (bad_case_id,)).fetchone()
+        return self._row_to_bad_case(r) if r else None
+
+    def get_bad_case_by_feedback(self, feedback_id: str) -> BadCase | None:
+        """负反馈幂等查询：ingest 扫描时跳过已入账的 feedback 行。"""
+        if not feedback_id:
+            return None
+        r = self.conn.execute(
+            "SELECT raw_json FROM bad_cases WHERE feedback_id=?",
+            (feedback_id,)).fetchone()
+        return self._row_to_bad_case(r) if r else None
+
+    def list_bad_cases(
+        self, *, status: str | None = None, source: str | None = None,
+    ) -> list[BadCase]:
+        sql = "SELECT raw_json FROM bad_cases"
+        clauses: list[str] = []
+        params: list[str] = []
+        if status is not None:
+            clauses.append("status=?")
+            params.append(status)
+        if source is not None:
+            clauses.append("source=?")
+            params.append(source)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at, bad_case_id"
+        return [self._row_to_bad_case(r)
+                for r in self.conn.execute(sql, params).fetchall()]
+
+    def update_bad_case(self, case: BadCase) -> None:
+        """状态机推进后的整行回写；rowcount=0 双击守卫（条目被删/ID 不存在）。"""
+        cur = self.conn.execute(
+            """UPDATE bad_cases SET
+                 status=?, title=?, question=?, detail=?, reason=?,
+                 data_version=?, model_version=?, prompt_version=?, params_version=?,
+                 triaged_by=?, triaged_at=?, decision_note=?,
+                 golden_case_id=?, regression_eval_run_id=?,
+                 updated_at=?, closed_at=?, history_json=?, raw_json=?
+               WHERE bad_case_id=?""",
+            (
+                case.status, case.title, case.question, case.detail, case.reason,
+                case.snapshot.data_version, case.snapshot.model_version,
+                case.snapshot.prompt_version, case.snapshot.params_version,
+                case.triaged_by,
+                case.triaged_at.isoformat() if case.triaged_at else None,
+                case.decision_note, case.golden_case_id,
+                case.regression_eval_run_id, case.updated_at.isoformat(),
+                case.closed_at.isoformat() if case.closed_at else None,
+                json.dumps([e.model_dump(mode="json") for e in case.history],
+                           ensure_ascii=False),
+                case.model_dump_json(), case.bad_case_id,
+            ),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"bad case 不存在，无法回写状态: {case.bad_case_id}")
         self.conn.commit()

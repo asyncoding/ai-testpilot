@@ -10,7 +10,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from testpilot_core.approval import ApprovalValidationError
+from testpilot_core.badcase import BadCaseError
+from testpilot_core.case_relations import CaseRelationError
+from testpilot_core.rule_assets import AssetValidationError
 from testpilot_core.errors import (
+
     AdapterUnavailableError,
     EvidenceInsufficientError,
     NotFoundError,
@@ -61,3 +65,29 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=422, content=_error_body(exc))
 
     app.add_exception_handler(ApprovalValidationError, approval_validation_handler)
+
+    # S2.6a：L3 资产版本语义错误（坏 ID/kind 串档/空内容/空样本回流）同为
+    # ValueError 子类，映射 422；NotFoundError 已在 _STATUS_MAP 映射 404。
+    async def asset_validation_handler(
+        _request: Request, exc: AssetValidationError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content=_error_body(exc))
+
+    app.add_exception_handler(AssetValidationError, asset_validation_handler)
+
+    # S2.6b：关系派生语义错误（坏 scope/闭集外 kind）同为 ValueError 子类，映射 422。
+    async def case_relation_handler(
+        _request: Request, exc: CaseRelationError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content=_error_body(exc))
+
+    app.add_exception_handler(CaseRelationError, case_relation_handler)
+
+    # S2.6c：bad case 状态机语义错误（非法迁移/非 accepted 转 golden/👍 强投影）
+    # 同为 ValueError 子类，映射 422；NotFoundError 已在 _STATUS_MAP 映射 404。
+    async def bad_case_handler(
+        _request: Request, exc: BadCaseError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content=_error_body(exc))
+
+    app.add_exception_handler(BadCaseError, bad_case_handler)

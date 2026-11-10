@@ -8,7 +8,16 @@
 # A13 为 S2.4 oracle 四源挖掘探针（确定性三源 12 草稿 + 录制模型补 TC-N2，2 投毒行进
 # oracle-mine 死信；v11 oracle_suggestions 草稿表不碰正式用例库），A14 为 S2.5
 # 人审回写探针（tmp 库 hermetic：kill switch 拦截→开启→dispatch 落盘→解析器
-# round-trip→重放幂等→AC1 正式库零变更，全程不起端口、不碰 store/offline-demo）。
+# round-trip→重放幂等→AC1 正式库零变更，全程不起端口、不碰 store/offline-demo），
+# A15 为 S2.6a L3 规则资产版本化探针（tmp 库 hermetic：不可变版本链/同内容幂等/
+# kind 不可变/字段+行级 diff/偏好样本回流 few-shot，不起端口、不碰 store/offline-demo），
+# A16 为 S2.6b 用例↔符号关系探针（tmp 库 hermetic：四源闭集派生 precision/recall=1.0
+# 钉 AC3≥.85、低置信阈值、证据 dossier fail-closed、scope 隔离与幽灵清扫，不起端口），
+# A17 为 S2.6c 反馈/bad case 闭环探针（tmp 库 hermetic：负反馈投影/幂等巡检/状态机
+# fail-closed/golden 溯源/幽灵回归拒入/闭环统计/v13→v14 迁移，不起端口），
+# A18 为 S2.6d S2 五门禁总验探针（合成夹具 hermetic：专家清单先封存再跑管线，
+# 结构合法/覆盖≥.75/P0P1 漏点=0/幻觉≤.05/oracle 有效率≥.7 五门齐过，探索性用例
+# 正常出口、重放幂等、盲序守卫活体，纯 core 确定性链不起端口）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -199,7 +208,42 @@ $PY scripts/approval_probe.py > /tmp/tp_approval_a14.log 2>&1 \
   && { echo "PASS  $(grep -c '✅' /tmp/tp_approval_a14.log) 项检查全绿（AC1 零触碰/blocked→confirmed/round-trip/重放幂等）"; pass_n=$((pass_n+1)); } \
   || { echo "FAIL  见 /tmp/tp_approval_a14.log 与 out/eval/approval-probe.json"; fail_n=$((fail_n+1)); }
 
+echo "=== A15. L3 规则资产版本化（S2.6a FR-KNO-002：tmp 库 hermetic，版本链/diff/偏好回流，不起端口） ==="
+# 探针内部 tempfile 工作目录；rule_assets 只 INSERT 不可变，同内容重放幂等，报告落 out/eval（gitignore）。
+$PY scripts/asset_probe.py > /tmp/tp_asset_a15.log 2>&1 \
+  && grep -q '✅ asset_probe 全部通过' /tmp/tp_asset_a15.log \
+  && grep -q '⑦ 偏好回流 few_shot 报告键齐全' /tmp/tp_asset_a15.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_asset_a15.log) 项检查全绿（版本单调/幂等/kind 不可变/diff/回流/seal/重开无损）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_asset_a15.log 与 out/eval/asset-probe.json"; fail_n=$((fail_n+1)); }
+
+echo "=== A16. 用例↔符号关系（S2.6b FR-ING-004：tmp 库 hermetic，闭集派生 AC3≥.85/证据/scope 隔离，不起端口） ==="
+# 探针内部 tempfile 工作目录 + 生产装配路径，独立手写 ground truth 三元组对账；
+# 报告落 out/eval/relation-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/relation_probe.py > /tmp/tp_relation_a16.log 2>&1 \
+  && grep -q '✅ relation_probe 全部通过' /tmp/tp_relation_a16.log \
+  && grep -q '③ AC3 precision/recall 过门且确定性构建无错配' /tmp/tp_relation_a16.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_relation_a16.log) 项检查全绿（precision/recall=1.0/低置信/dossier/scope 隔离/幽灵清扫/重开无损）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_relation_a16.log 与 out/eval/relation-probe.json"; fail_n=$((fail_n+1)); }
+
+echo "=== A17. 反馈/bad case 闭环（S2.6c FR-EV-005：tmp 库 hermetic，投影/幂等/状态机/golden/回归/统计/v14 迁移，不起端口） ==="
+# 探针内部 tempfile 工作目录 + 生产装配路径，schema v14 bad_cases 表内容寻址幂等；
+# 报告落 out/eval/badcase-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/badcase_probe.py > /tmp/tp_badcase_a17.log 2>&1 \
+  && grep -q '✅ badcase_probe 全部通过' /tmp/tp_badcase_a17.log \
+  && grep -q '⑤ 全生命周期：golden 冻结/幽灵拒入/fail 不闭环/pass 闭环' /tmp/tp_badcase_a17.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_badcase_a17.log) 项检查全绿（投影/幂等/内容寻址/生命周期/fail-closed/零幻影/统计/v14 迁移/重开无损）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_badcase_a17.log 与 out/eval/badcase-probe.json"; fail_n=$((fail_n+1)); }
+
+echo "=== A18. S2 五门禁总验（S2.6d：合成夹具 hermetic，结构合法/覆盖/P0P1 漏点/幻觉/oracle 有效率，不起端口） ==="
+# 专家清单先封存再跑管线（封存副本落 out/eval，盲序留痕），core 纯函数全链确定性；
+# 报告落 out/eval/s2-gate-probe.{json,md}（gitignore），重复执行幂等。
+$PY scripts/s2_gate_probe.py > /tmp/tp_s2gate_a18.log 2>&1 \
+  && grep -q '✅ s2_gate_probe 全部通过' /tmp/tp_s2gate_a18.log \
+  && grep -q '⑤ 盲标四门禁：覆盖/精确率/P0P1 漏点/幻觉全部过门' /tmp/tp_s2gate_a18.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_s2gate_a18.log) 项检查全绿（盲序封存/结构合法/脊柱 11 点/盲标四门/oracle 有效率/探索性出口/重放幂等/守卫活体）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_s2gate_a18.log 与 out/eval/s2-gate-probe.json"; fail_n=$((fail_n+1)); }
+
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5）"
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

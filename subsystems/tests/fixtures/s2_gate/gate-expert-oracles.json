@@ -1,0 +1,27 @@
+{
+  "cases_doc_external_id": "s2_gate/gate-cases.md",
+  "sealed_at": "2026-11-10T08:00:00+08:00",
+  "expert": "blind-expert",
+  "cases": [
+    {
+      "case_external_id": "TC-G1",
+      "expected_executable": ["ui_assertion", "log_assertion"],
+      "note": "卡片可见性属 UI 自动断言；落盘记录有固定日志 token，属日志断言"
+    },
+    {
+      "case_external_id": "TC-G2",
+      "expected_executable": ["state_assertion"],
+      "note": "历史版本号递增是可查询的状态/数据断言"
+    },
+    {
+      "case_external_id": "TC-G3",
+      "expected_executable": ["ui_assertion"],
+      "note": "用例本身缺预期，但需求 AC3 要求锁屏页面持续展示全屏提醒，应能补挖出 UI 断言"
+    },
+    {
+      "case_external_id": "TC-G4",
+      "expected_executable": [],
+      "note": "铃声一致性是主观听感，只能人工见证，专家判定无可自动断言（探索性出口）"
+    }
+  ]
+}
