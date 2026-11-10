@@ -21,6 +21,7 @@ from .approval_api import approval_router
 from .assets_api import assets_router
 from .badcase_api import badcase_router
 from .config_loader import load_profile
+from .execution_api import execution_router
 from .factory import Container, build_container
 from .knowledge_api import knowledge_router
 from .qa_api import api_router, register_exception_handlers
@@ -103,6 +104,7 @@ def create_app(
     app.include_router(approval_router)
     app.include_router(assets_router)
     app.include_router(badcase_router)
+    app.include_router(execution_router)
     app.include_router(knowledge_router)
 
     @app.get("/health")

@@ -106,6 +106,93 @@ xcrun xcresulttool export attachments --path <result.xcresult> --output-path /tm
 - 真机走 `xcrun devicectl device install/launch --device <udid> --console <bundle>`，
   设备必须解锁；Demo 阶段用模拟器即可，真机路径在方案里作为"生产化扩展"讲。
 
+### 3.6 真机执行+取证 runbook（2026-11-11 据真机探针校准，**手动步骤永不进 verify_s0.sh**）
+
+把"建机→跑测→取制品→取日志→录屏抽帧→拆机"串成一条可照跑的命令序列。环境事实：
+Xcode 27.0、xcresulttool 25115（schema 0.4.0）、ffmpeg 7.1、iOS 26.4 模拟器 runtime；
+探针蒸馏报告 `subsystems/out/eval/real-device-probe.{md,json}`（out/ gitignore）。
+
+**安全纪律（先于一切命令）**：
+
+1. 只允许操作本序列新建的**专用一次性模拟器**（命名 `testpilot-probe`，用完即 delete）；
+   用户自己 Booted 的设备一条命令都不许碰。
+2. **每个 simctl 调用必须带显式 udid**（用变量 `PROBE_UDID`），禁止 `spawn booted`
+   之类依赖隐式"当前设备"的写法；**禁止裸 `simctl erase all`**，erase 只能
+   `simctl erase "$PROBE_UDID"` 且先 shutdown。
+3. 建机前与拆机后各存一份 `xcrun simctl list` 快照，diff 必须只剩专用机的
+   创建/删除两行，作为用户设备零接触的证据。
+4. 语料仓只读：不注入故障、不修改被测工程；失败路径证据用官方 `--schema` 报错与
+   合成夹具，不人为制造红测。
+5. 本序列是人工校准手段，**不进自动门禁**；自动化层（A19–A23）全部 hermetic，
+   不起模拟器、不起端口。
+
+```bash
+set -euo pipefail
+
+# ── 0. 建机前快照（取证基线）──────────────────────────────────────────────
+xcrun simctl list > /tmp/simlist-before.txt
+
+# ── 1. 建专用机并启动（runtime id 用 `xcrun simctl list runtimes` 查）────────
+PROBE_UDID=$(xcrun simctl create testpilot-probe "iPhone 17" \
+  "com.apple.CoreSimulator.SimRuntime.iOS-26-4")
+xcrun simctl boot "$PROBE_UDID"
+xcrun simctl bootstatus "$PROBE_UDID" -b          # 等启动完成再继续
+
+# ── 2. 录屏（可选，失败视觉取证）：先制造 UI 活动，否则静态屏只有 ~0.07s 空视频
+xcrun simctl launch "$PROBE_UDID" com.apple.mobilesafari
+xcrun simctl ui "$PROBE_UDID" appearance dark
+xcrun simctl ui "$PROBE_UDID" appearance light
+# 后台录制；停录只认 SIGINT（SIGTERM 会泄漏 SimRenderServer 句柄 → Resource busy）
+xcrun simctl io "$PROBE_UDID" recordVideo /tmp/probe.mp4 &
+RECORD_PID=$!
+
+# ── 3. 跑测试：resultBundlePath 已存在会被 xcodebuild 拒覆盖，先删 ───────────
+rm -rf /tmp/probe.xcresult
+xcodebuild test \
+  -workspace AlarmKitSpike.xcworkspace \
+  -scheme AlarmKitSpike \
+  -destination "platform=iOS Simulator,id=$PROBE_UDID" \
+  -only-testing:AlarmKitSpikeTests \
+  -resultBundlePath /tmp/probe.xcresult
+
+# ── 4. SIGINT 优雅停录，确认 mp4 完整（Wrote video to disk）─────────────────
+kill -INT "$RECORD_PID" && wait "$RECORD_PID" || true
+
+# ── 5. xcresulttool 两动词链路（旧 get attachments 已下线 rc=64）────────────
+xcrun xcresulttool get test-results tests --format json \
+  --path /tmp/probe.xcresult > /tmp/probe-tests.json
+rm -rf /tmp/probe-att                                 # 导出目录含 manifest 时工具拒覆盖
+xcrun xcresulttool export attachments \
+  --path /tmp/probe.xcresult --output-path /tmp/probe-att
+
+# ── 6. os_log：显式 udid + 显式时间窗（可复现），ndjson 才能逐行解析 ─────────
+#    工具只吃 '%Y-%m-%d %H:%M:%S' 空格格式（T 分隔 rc=64）；时间窗取 run 的
+#    started_at/finished_at（生产适配器自动传 ISO→工具格式的转换）。
+xcrun simctl spawn "$PROBE_UDID" log show \
+  --style ndjson \
+  --start "2026-11-10 21:30:00" --end "2026-11-10 21:40:00" \
+  --predicate 'subsystem == "com.thames.alarmkitspike"' \
+  > /tmp/probe-oslog.ndjson
+#    流尾信封行 {"count":N,"finished":1} 无时间戳，解析器识别后跳过；残缺形态仍 fail-closed。
+
+# ── 7. ffmpeg 抽帧（fps 白名单 1..30 整数，输出固定 frame_%03d.png）─────────
+mkdir -p /tmp/probe-frames
+ffmpeg -y -i /tmp/probe.mp4 -vf fps=2 /tmp/probe-frames/frame_%03d.png
+
+# ── 8. 拆机：shutdown→delete 专用机，快照 diff 对账用户设备零变化 ───────────
+xcrun simctl shutdown "$PROBE_UDID"
+xcrun simctl delete "$PROBE_UDID"
+xcrun simctl list > /tmp/simlist-after.txt
+diff /tmp/simlist-before.txt /tmp/simlist-after.txt   # 期望：无输出（列表还原）
+```
+
+与生产代码的对应：argv 不是手拼的，core 纯函数是唯一契约源——`xcode_commands.py`
+（xcodebuild/simctl）、`xcresult_tool.py`（两动词）、`oslog_commands.py`
+（ndjson/空格时间窗）、`ffmpeg_commands.py`（fps 白名单）；适配器经
+`SubprocessProcess` 起进程，普通终止走 SIGTERM、录屏停录走 `interrupt()` 的 SIGINT。
+模拟器环境的能力边界（签名/后台音频/真机设备层验不了）在 TestRun `uncovered_layers`
+显式声明，页面与报告均如实展示"哪层已验、哪层只能生产验"。
+
 ## 4. 对 Demo 各模块的喂料方式
 
 | 模块 | 怎么用这个工程 |

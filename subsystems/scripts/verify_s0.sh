@@ -31,7 +31,11 @@
 # 零 ffmpeg、不碰用户设备、不起端口），
 # A22 为 S3.4 失败归因探针（纯 hermetic：五候选规则/AC1 四历史原型/不对称护栏/
 # needs_human 三场景/40 例盲标混淆矩阵四门禁/误误导口径/组包服务/封存哈希，
-# 零端口零网络零真机状态）。
+# 零端口零网络零真机状态），
+# A23 为 S3.5 S3 五门禁总验探针（tempfile 临时库走生产装配：40 例盲标先封存再
+# 评测/执行成功率结构化产出率且 error/timeout 单列/归因三指标/证据充分率/提交取消
+# 预算四路幂等零增生/配额拒入零幻影/红证对照证门禁有牙/空清单守卫/v15 重开无损，
+# 不起端口、不碰 store/offline-demo、零真机零模拟器）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
 set -u
@@ -296,6 +300,16 @@ $PY scripts/attribution_probe.py > /tmp/tp_attribution_a22.log 2>&1 \
   || { echo "FAIL  见 /tmp/tp_attribution_a22.log 与 out/eval/attribution-probe.json"; fail_n=$((fail_n+1)); }
 
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3 / A22 S3.4）"
+echo "=== A23. S3 五门禁总验（S3.5：tempfile 临时库生产装配 hermetic，执行成功率/归因三指标/证据充分率/幂等/重跑预算，不起端口不触真机） ==="
+# 盲标先封存再评测（封存副本落 out/eval，盲序留痕），执行段走 load_profile→build_container
+# 但 data_dir 指向 tempfile，不碰 offline-demo；报告落 out/eval/s3-gate-probe.{json,md}（gitignore）。
+$PY scripts/s3_gate_probe.py > /tmp/tp_s3gate_a23.log 2>&1 \
+  && grep -q '✅ s3_gate_probe 全部通过' /tmp/tp_s3gate_a23.log \
+  && grep -q '门禁① 执行成功率' /tmp/tp_s3gate_a23.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_s3gate_a23.log) 项检查全绿（盲序封存/归因三门/证据充分/红证对照/空清单守卫/重放幂等/结构化产出率/装配归因/四路幂等/预算零幻影/异常单列/v15）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_s3gate_a23.log 与 out/eval/s3-gate-probe.json"; fail_n=$((fail_n+1)); }
+
+echo
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3 / A22 S3.4 / A23 S3.5）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

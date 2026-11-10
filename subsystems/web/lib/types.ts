@@ -274,3 +274,119 @@ export interface DispatchReport {
   skipped_unsupported: number;
   results: unknown[];
 }
+
+// ── S3.5 测试执行账本与失败归因（/api/runs/*，FR-EX-001/002/007）──────────────
+// 镜像 workers.execution_service 投影与 core TestRun/AttributionVerdict 的
+// model_dump(mode="json") 载荷；枚举均为字符串字面量，老 run 缺字段时渲染侧 ?? 兜底。
+
+export type ExecutionRunStatus =
+  | "queued"
+  | "running"
+  | "passed"
+  | "failed"
+  | "error"
+  | "timeout"
+  | "canceled";
+export type CaseStatusStr = "passed" | "failed" | "skipped" | "error";
+export type FailureCategoryStr =
+  | "real_defect"
+  | "case_outdated"
+  | "flaky"
+  | "environment"
+  | "product_change"
+  | "needs_human";
+
+export interface ExecutionRunListItem {
+  run_id: string;
+  idempotency_key: string;
+  project: string;
+  commit_sha: string;
+  status: ExecutionRunStatus | string;
+  error: string;
+  created_at: string;
+  updated_at: string;
+  // S3.5a 归因投影：queued/running 行恒为 0（raw_json 尚未回写）
+  verdict_total: number;
+  needs_human: number;
+}
+
+export interface EnvironmentInfoView {
+  provider: string;
+  env_id: string;
+  capabilities: string[];
+  version: string;
+}
+
+export interface ArtifactRefView {
+  type: string;
+  uri: string;
+  content_hash: string | null;
+  retention_days: number;
+}
+
+export interface CaseResultView {
+  external_case_id: string;
+  node_id: string;
+  status: CaseStatusStr | string;
+  duration_ms: number | null;
+  failure_type: string | null;
+  message: string;
+  stack_top: string;
+  artifact_urns: string[];
+}
+
+export interface AttributionCandidateView {
+  category: FailureCategoryStr | string;
+  confidence: number;
+  reasons: string[];
+  evidence_refs: string[];
+}
+
+export interface AttributionVerdictView {
+  case_id: string;
+  category: FailureCategoryStr | string;
+  confidence: number;
+  candidates: AttributionCandidateView[];
+  evidence_refs: string[];
+  uncovered_layers: string[];
+  needs_human_reason: string;
+  rule_version: string;
+}
+
+export interface TestRunView {
+  run_id: string;
+  idempotency_key: string;
+  project: string;
+  commit_sha: string;
+  build_id: string | null;
+  status: ExecutionRunStatus | string;
+  environment: EnvironmentInfoView;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  case_results: CaseResultView[];
+  artifacts: ArtifactRefView[];
+  raw_report_ref: string | null;
+  runner_capability_version: string;
+  uncovered_layers: string[];
+  attributions: AttributionVerdictView[];
+}
+
+export interface ExecutionRunDetail {
+  run_id: string;
+  idempotency_key: string;
+  project: string;
+  commit_sha: string;
+  status: ExecutionRunStatus | string;
+  error: string;
+  created_at: string;
+  updated_at: string;
+  // queued/running 行 raw_json 为空：只有账本投影，run=null（前端必须显式处理）
+  run: TestRunView | null;
+}
+
+export interface CancelRunResult {
+  run_id: string;
+  cancel_requested: boolean;
+  status: string;
+}

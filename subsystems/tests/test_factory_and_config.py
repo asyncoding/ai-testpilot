@@ -58,6 +58,9 @@ def test_container_wires_every_adapter(tmp_path, monkeypatch):
         assert isinstance(container.get("requirements"), RequirementDocumentAdapter)
         # 离线 profile 不装向量适配器：入库跳过 embed、检索为 FTS-only
         assert container.get("vectors") is None
+        # S3.5：归因服务默认装配（Null 证据 → needs_human 兜底，不硬归因）
+        from testpilot_workers.attribution_service import AttributionService
+        assert isinstance(container.get("attribution"), AttributionService)
         # 文档/检索默认分支来自 project.default_branch（branch 一致性修复）
         assert container.get("docs").branch == "alarmkit-spike"
         assert container.get("search").default_branch == "alarmkit-spike"

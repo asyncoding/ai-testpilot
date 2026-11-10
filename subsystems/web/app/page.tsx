@@ -66,6 +66,8 @@ export default function Home() {
       <p className="subtitle">对话页雏形（FR-UI-001）：问答 · 可溯源引用 · 三态版本标注 · 反馈 · trace</p>
       <nav className="top-nav">
         <Link href="/approvals">用例草稿人审与回写审批页（FR-UI-002）→</Link>
+        {" · "}
+        <Link href="/runs">测试执行账本与失败归因（FR-EX-002/007）→</Link>
       </nav>
 
       <Banner config={config} />

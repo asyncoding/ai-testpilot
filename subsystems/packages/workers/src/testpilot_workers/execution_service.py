@@ -17,7 +17,7 @@ import contextlib
 from datetime import datetime, timezone
 from typing import Any
 
-from testpilot_core.enums import RunStatus
+from testpilot_core.enums import FailureCategory, RunStatus
 from testpilot_core.errors import AdapterUnavailableError, NotFoundError, PolicyDeniedError
 from testpilot_core.execution import (
     JOB_TYPE_TEST_EXECUTION,
@@ -114,6 +114,20 @@ async def request_cancel(container, run_id: str) -> dict[str, Any]:
     return {"run_id": run_id, "cancel_requested": marked, "status": row["status"]}
 
 
+def _verdict_summary(store, row) -> dict[str, int]:
+    """从 raw_json 读归因计数；queued/running 行尚无 TestRun，计 0。"""
+    run = store.row_to_test_run(row)
+    if run is None:
+        return {"verdict_total": 0, "needs_human": 0}
+    return {
+        "verdict_total": len(run.attributions),
+        "needs_human": sum(
+            1 for v in run.attributions
+            if v.category == FailureCategory.NEEDS_HUMAN
+        ),
+    }
+
+
 def list_runs(
     container, *, status: str | None = None, project: str | None = None
 ) -> list[dict[str, Any]]:
@@ -129,9 +143,34 @@ def list_runs(
             "error": r["error"],
             "created_at": r["created_at"],
             "updated_at": r["updated_at"],
+            **_verdict_summary(store, r),
         }
         for r in rows
     ]
+
+
+def get_run_detail(container, run_id: str) -> dict[str, Any]:
+    """单 run 全量详情：账本投影 + TestRun（用例/制品/归因/未覆盖层）。
+
+    幽灵 run_id → NotFoundError（HTTP 层映射 404）；queued/running 行
+    raw_json 为空时 run=None，调用方只看账本投影。
+    """
+    store = container.get("store")
+    row = store.get_test_run_row(run_id)
+    if row is None:
+        raise NotFoundError(f"未知 run_id: {run_id}")
+    run = store.row_to_test_run(row)
+    return {
+        "run_id": row["run_id"],
+        "idempotency_key": row["idempotency_key"],
+        "project": row["project"],
+        "commit_sha": row["commit_sha"],
+        "status": row["status"],
+        "error": row["error"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "run": run.model_dump(mode="json") if run is not None else None,
+    }
 
 
 # ── worker 侧（独立进程；orchestrator 不调这里）──────────────────────────────
@@ -253,6 +292,14 @@ async def _process_job(container, job: dict[str, Any]) -> dict[str, Any]:
         status = transition_run_status(RunStatus.RUNNING, event)  # type: ignore[arg-type]
         # 账本以 run_id_for(幂等键) 为权威身份，覆盖适配器内部 id
         normalized = adapter_run.model_copy(update={"run_id": run_id})
+        # S3.5 FR-EX-007：失败/错误用例归因随 TestRun 落 raw_json（零 schema 变更）。
+        # 容器未装配归因服务时跳过（手拼 Shim/老剖面）；默认 Null 证据提供者一律
+        # 裁 needs_human——证据不足不硬归因（AC4），全绿 run 得到空结论列表。
+        attribution_svc = container.get("attribution")
+        if attribution_svc is not None:
+            verdicts = await attribution_svc.attribute_run(normalized)
+            normalized = normalized.model_copy(
+                update={"attributions": verdicts})
         store.update_test_run(
             run_id,
             status=status.value,

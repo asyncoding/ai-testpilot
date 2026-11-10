@@ -3,10 +3,13 @@ import type {
   ApprovalRecord,
   AskRequest,
   AskResponse,
+  CancelRunResult,
   CaseDecisionHttpBody,
   CaseDecisionPlan,
   ConfigResponse,
   DispatchReport,
+  ExecutionRunDetail,
+  ExecutionRunListItem,
   FeedbackKind,
   FeedbackReason,
   FeedbackSummaryRow,
@@ -128,4 +131,31 @@ export function setWritePolicy(runtimeDisabled: boolean): Promise<WritePolicyVie
     method: "POST",
     body: JSON.stringify({ runtime_disabled: runtimeDisabled }),
   });
+}
+
+// ── S3.5 测试执行账本（/api/runs/*，FR-EX-001/002/007）────────────────────────
+
+export function listExecutionRuns(
+  filters: { status?: string; project?: string } = {},
+): Promise<{ runs: ExecutionRunListItem[] }> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.project) params.set("project", filters.project);
+  const qs = params.toString();
+  return request<{ runs: ExecutionRunListItem[] }>(
+    `/api/runs${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export function fetchExecutionRun(runId: string): Promise<ExecutionRunDetail> {
+  return request<ExecutionRunDetail>(
+    `/api/runs/${encodeURIComponent(runId)}`,
+  );
+}
+
+export function cancelExecutionRun(runId: string): Promise<CancelRunResult> {
+  return request<CancelRunResult>(
+    `/api/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST", body: "{}" },
+  );
 }

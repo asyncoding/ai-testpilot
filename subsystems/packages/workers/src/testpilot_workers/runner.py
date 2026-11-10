@@ -5,7 +5,8 @@
   run-once   单轮认领处理（探针/测试用，队列空即退出）
   worker     长循环（启动先回收过期租约，按 profile 并发上限协程化）
   cancel     对 queued/running 的 run 打协作式取消标记
-  list       执行账本盘点（可按 status/project 过滤）
+  list       执行账本盘点（可按 status/project 过滤，含归因计数投影）
+  show       单 run 详情：用例三态/制品 URN/归因结论与证据 refs/未覆盖层
   recover    显式触发过期租约回收（worker 启动时也会自动做一次）
 
 纪律：成功 JSON 走 stdout；ValueError/NotFound/策略拒绝/适配器不可用走 stderr
@@ -97,6 +98,9 @@ def main() -> None:
     p_list.add_argument("--status", default=None)
     p_list.add_argument("--project", default=None)
 
+    p_show = sub.add_parser("show", help="单 run 详情（用例/制品/归因/未覆盖层）")
+    p_show.add_argument("--run-id", required=True)
+
     sub.add_parser("recover", help="回收过期租约（worker 启动也会自动回收）")
 
     args = parser.parse_args()
@@ -127,6 +131,8 @@ def main() -> None:
         elif args.command == "list":
             result = svc.list_runs(
                 container, status=args.status, project=args.project)
+        elif args.command == "show":
+            result = svc.get_run_detail(container, args.run_id)
         else:  # recover
             result = asyncio.run(svc.recover_stale(container))
     except _CLI_ERRORS as exc:

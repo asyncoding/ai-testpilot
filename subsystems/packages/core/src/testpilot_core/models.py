@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .attribution import AttributionVerdict
 from .enums import (
     ActionLevel,
     ApprovalDecision,
@@ -339,6 +340,9 @@ class TestRun(BaseModel):
     raw_report_ref: str | None = None
     runner_capability_version: str = "unknown"
     uncovered_layers: list[str] = Field(default_factory=list)  # 显式声明未覆盖层（真机/签名…）
+    # S3.5 FR-EX-007：失败用例归因结论随 run 落 raw_json，不加表/列（schema 仍 v15）；
+    # 老 raw_json 无此字段时 model_validate 自动补空列表，仅失败/错误用例有结论。
+    attributions: list[AttributionVerdict] = Field(default_factory=list)
 
 
 # ── 工单 ──────────────────────────────────────────────────────────────────

@@ -398,4 +398,21 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.logs.type != "stub":
         raise ValueError(f"未知 logs 适配器类型: {a.logs.type}")
 
+    # ── 失败归因（S3.5 FR-EX-007）：StoreBacked 证据提供者组合账本历史 + 已装配
+    #    端口（logs/scm 可为 stub=None，缺谁降级谁，端口不可达回空证据），引擎对
+    #    证据不足的失败一律 needs_human（AC4）；断言/工单来源 POC 期不注入。
+    #    懒导入保持 workers→orchestrator 单向包依赖，不在模块顶层反向 import。──
+    from testpilot_workers.attribution_service import AttributionService
+    from testpilot_workers.evidence_provider import StoreBackedEvidenceProvider
+
+    evidence_provider = StoreBackedEvidenceProvider(
+        store,
+        repo=container.get("repo"),
+        logs=container.get("logs"),
+        scm=scm,
+        log_predicates=a.logs.settings.get("attribution_predicates", []),
+        diff_base=a.scm.settings.get("diff_base"),
+    )
+    container.adapters["attribution"] = AttributionService(evidence_provider)
+
     return container

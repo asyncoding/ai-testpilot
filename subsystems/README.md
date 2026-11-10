@@ -73,7 +73,10 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # 不硬归因、attribution_eval 混淆矩阵四门禁/误误导口径/盲标封存、
 # attribution_service 证据组包 Provider 接缝、40 例合成盲标夹具守护）、
 # 真机探针校准（xcresulttool 25115 两动词/os_log ndjson 与信封尾行/recordVideo
-# SIGINT/ffmpeg 真抽帧/cancel 与 XCUITest 端到端，四生产 bug 红→绿，探针不进门禁）；
+# SIGINT/ffmpeg 真抽帧/cancel 与 XCUITest 端到端，四生产 bug 红→绿，探针不进门禁）、
+# S3.5 执行收口与五门禁总验（TestRun.attributions 随 raw_json 落库零 schema 变更、
+# execution_api 四端点/StoreBackedEvidenceProvider 六 seam 真读账本与录制 scm、
+# Web /runs 与 /runs/detail 静态页、s3_gate_probe A23 五门禁 hermetic 总验）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -581,14 +584,14 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（22 个自动门禁）
+## 一键验收（23 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 22 个自动门禁；干净环境 22 PASS / 0 FAIL，日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 23 个自动门禁；干净环境 23 PASS / 0 FAIL，日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、1035 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、1065 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -622,15 +625,20 @@ A21 xcresult 制品与 os_log 查询（S3.3 FR-EX-005/006：假执行器 hermeti
 simctl 零 ffmpeg、不碰用户设备、不起端口）、
 A22 失败归因（S3.4 FR-EX-007：纯 hermetic，五候选规则/AC1 四历史原型/产品改动
 分界/不对称护栏/AC4 needs_human 三场景/40 例盲标混淆矩阵四门禁（准确率/真缺陷
-recall/误误导率/证据充分率）/误误导口径/组包服务/封存哈希，零 IO 零端口）。
+recall/误误导率/证据充分率）/误误导口径/组包服务/封存哈希，零 IO 零端口）、
+A23 S3 五门禁总验（S3.5：tempfile 临时库走生产装配，40 例盲标先封存再评测/
+执行成功率=结构化 TestRun 产出率且 error/timeout/canceled 单列不混分母/
+归因三指标/证据充分率/提交·取消·预算四路幂等零增生/配额拒入零幻影/红证对照证
+门禁有牙/空清单守卫/v15 重开无损，不起端口不触真机）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21/A22 为纯进程内探针，可脱离整脚本单跑：
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21/A22/A23 为纯进程内探针，可脱离整脚本单跑：
 `.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
 `.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
 `.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`、
 `.venv/bin/python scripts/xcode_adapter_probe.py`、
 `.venv/bin/python scripts/xcresult_oslog_probe.py`、
-`.venv/bin/python scripts/attribution_probe.py`。
+`.venv/bin/python scripts/attribution_probe.py`、
+`.venv/bin/python scripts/s3_gate_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -1499,3 +1507,77 @@ xcresult 端到端 9 + os_log 13 + ffmpeg 5 + cancel/XCUITest 16，另有原始�
 - **四个生产 bug 红→绿**：acquire 能力判定抢道、spawn 管道不排空必挂死、export 目录
   manifest 覆盖拒绝、ndjson 尾行误计坏行 + 录屏信号语义。全量 **1035 passed**（1023+12）、
   import-lint OK、A21 10/10、**schema 仍 v15 零变更**。
+
+## 执行收口与 S3 五门禁总验（S3.5，FR-EX-001～007）：verdict 落库、HTTP API、真实证据 Provider、执行控制台
+
+S3 纵切收口片：S3.4 的归因结论此前只在进程内存在，本片把它**随 TestRun 落账、经 HTTP
+暴露、在 Web 控制台可浏览**，并以一条 hermetic 总验探针把 docs/07 §10 的 S3 五门禁一次
+跑齐。纪律延续：**schema 保持 v15 零变更**（verdict 是 TestRun 的字段、随 raw_json
+持久化，不新增表/列），core 仍零 IO 零三方，自动门禁不起端口、不触真机/模拟器。
+
+### 分层落点
+
+| 层 | 新增/改动 | 职责 |
+|---|---|---|
+| core | `models.TestRun.attributions`（默认 `[]`） | verdict 随 TestRun 走 raw_json 唯一还原来源；`model_validate_json` 给老行自动补默认字段，旧库零迁移可读 |
+| workers | `execution_service` 收口钩子（7 测） | worker 终态回写前调 `AttributionService.attribute_run`，未装配则跳过、Null 提供者一律 needs_human；全绿 run 结论列表为空 |
+| workers | `evidence_provider.py`（16 测） | `StoreBackedEvidenceProvider` 六 seam 真实接线（见下）；`NullEvidenceProvider` 仍是默认兜底 |
+| orchestrator | `execution_api/` 四端点（7 测） | `GET /api/runs`（status/project 过滤+归因计数投影）、`GET /api/runs/{id}`（幽灵 id 404、queued 行 run=null）、`POST /api/runs`（幂等重放 replayed=true）、`POST /api/runs/{id}/cancel`；请求体直接复用 core `TestExecutionRequest` 不另造 HTTP 模型，异常映射复用 qa_api/errors |
+| web | `app/runs/page.tsx` + `app/runs/detail/page.tsx` | 账本列表（过滤/needs_human 高亮/取消）与详情页（用例三态/证据 refs/五候选/未覆盖层/queued 空壳态）；`lib/executionLabels.ts` 中文标签与 `vc-*` 徽章 |
+| scripts | `s3_gate_probe.py`（A23，15 检查） | S3 五门禁 hermetic 总验，报告 `out/eval/s3-gate-probe.{json,md}` |
+
+### 关键语义（口径钉版，改动先改文档与 handoff）
+
+- **StoreBackedEvidenceProvider 六 seam，全部 fail-closed**：① reruns 真读 `test_runs`
+  账本（queued 幻影行/skipped/异 project/异用例排除，当前轮自身观察补末尾）；
+  ② assertion_check 仅在注入断言源时生效（POC 不注入 → None，不硬判过期）；
+  ③ log_signals 走可注入 os_log 端口，按 run 时间窗+谓词查询，缺窗口不查、零命中不入证、
+  端口不可达跳过；④ diff_signal 走 scm ChangeSet（`diff_base` 配置驱动，堆栈符号保守
+  后缀匹配，None 不缓存以便端口恢复自愈）；⑤ environment_signals 由日志关键词族分类
+  （纯函数 `classify_log_families`：authorization_race/capability_gap/lifecycle_background）；
+  ⑥ change_records 默认由 ChangeSet 派生一条 git 记录，可注入换工单源。**任一端口缺失/
+  不可达都降级为空证据，绝不硬归因**；offline-demo 下 logs=None、diff_base 未配，输出与
+  Null 等价，只凭账本 rerun 历史改变结论。
+- **账本即历史**：同一 project/commit/用例的第二次失败自动获得 2 条同 commit 失败观察，
+  消息属缺陷族（XCTAssert 等）即 real_defect 0.75（refs `ev-rerun`）；首跑只有自身一条
+  观察 → needs_human。证据 refs 命名闭集：`ev-rerun`/`ev-assert`/`ev-log-N`/`ev-diff`/
+  `ev-env-N`/`ev-change-N`，每个都能在证据账本回溯。
+- **静态导出路由约定**：站点是 `output: "export"` 纯静态，动态段 `[runId]` 要求
+  `generateStaticParams`（构建期没有 run 清单），故详情页用 `/runs/detail?runId=...`
+  查询参数 + `useSearchParams` 外包 Suspense。StaticFiles 不服务无扩展名目录路径，
+  入口 URL 用 `/runs.html`、`/runs/detail.html`（与 `/approvals.html` 同一约定），
+  进站后的前端路由再用漂亮路径。
+- **五门禁口径（docs/07 §10 / docs/06 §3.3）**：① 执行成功率=runner 任务成功产出
+  结构化 TestRun 的比例（基础设施口径，非用例通过率），error/timeout/canceled **单列不进
+  分母**；② 准确率 ≥.7 且真缺陷 recall ≥.95、误误导率 ≤.02；③ 证据充分率 hermetic 口径
+  = 引擎非弃权率（1−needs_human 弃权率），生产口径的人工抽检在报告注明为上线后环节；
+  ④ 幂等正确性=提交/取消/预算重放零增生（run/job/账本/预算四路）；⑤ 重跑预算=超配额
+  拒入且零幻影（无账本行/无 job/预算不增）。
+
+```bash
+# A23 五门禁总验（tempfile 临时库 + 生产装配，不起端口不触真机，报告 gitignore）
+.venv/bin/python scripts/s3_gate_probe.py
+# 报告：out/eval/s3-gate-probe.{json,md}，封存副本 out/eval/s3-gate-sealed-attribution.json
+
+# HTTP API（需先起 uvicorn；A4/A8 门禁同理）
+curl -s http://127.0.0.1:8765/api/runs | jq .
+curl -s "http://127.0.0.1:8765/api/runs?status=failed&project=AlarmKitSpike-demo" | jq .
+```
+
+### 验收证据（2026-11-11）
+
+- 探针 A23 **15 项检查全绿**（输出 16 个 ✅ 含总结行）：盲序封存（40 例 seal
+  `78654dec17110175`，封存副本先于评测落盘）、归因三门（acc 1.0 / recall 1.0 /
+  misleading 0.0）、证据充分率 0.925（弃权 3/40）、**红证对照**（翻转 1 条缺陷预测后
+  recall 0.667、误导 0.333 双破门禁，证明阈值有牙）、空清单守卫活体、评测重放逐字段
+  相等、12/12 结构化产出（rate 1.00，error/timeout/canceled 各 1 单列）、装配链路
+  首跑 needs_human→第 2 笔起 real_defect 0.75、四路幂等零增生、配额拒入零幻影、
+  v15 重开 18 行无损。
+- **探针自身红证**：临时把门禁①阈值变异为 1.01，探针如期 exit 1 且门禁行变红
+  （2 处 ❌），还原后复跑转绿，变异文件零残留。
+- 契约测试净增 **30 个**（S3.5a 落库 7 + b API 7 + c Provider 16；前端/Web 不入 pytest），
+  全量 **1065 passed**、import-lint OK、`bash -n scripts/verify_s0.sh` 通过；
+  `npm run build` 5 路由全静态（/、/approvals、/runs、/runs/detail、404），
+  TestClient 同源托管冒烟 `/runs.html`、`/runs/detail.html`、`/api/runs` 均 200（不起端口）。
+- 全门禁实测 **21 PASS / 2 FAIL**：A23 首次接入即 PASS；仅 A4/A8 因用户终端 uvicorn
+  （PID 64634，按约束不杀）占用 8765 失败，与本切片无关。**schema 仍 v15 零变更**。

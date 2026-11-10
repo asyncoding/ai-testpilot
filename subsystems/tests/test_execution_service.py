@@ -15,7 +15,8 @@ import pytest
 
 from testpilot_adapters.recorded_runner import RecordedTestRunner
 from testpilot_adapters.store import SqliteQueue, bootstrap_store
-from testpilot_core.enums import CaseStatus, RunStatus
+from testpilot_core.attribution import RerunRecord
+from testpilot_core.enums import CaseStatus, FailureCategory, RunStatus
 from testpilot_core.errors import AdapterUnavailableError, NotFoundError
 from testpilot_core.execution import run_id_for
 from testpilot_core.models import (
@@ -26,6 +27,10 @@ from testpilot_core.models import (
     TestRun,
 )
 from testpilot_workers import execution_service as svc
+from testpilot_workers.attribution_service import (
+    AttributionService,
+    NullEvidenceProvider,
+)
 from testpilot_workers.execution_service import RerunQuotaExceededError
 
 FIXTURES = __import__("pathlib").Path(__file__).parent / "fixtures"
@@ -45,15 +50,17 @@ class _Limits:
 
 
 class Shim:
-    """最小容器：真实 Store+SqliteQueue（tmp 库）+ 可替换 runner。"""
+    """最小容器：真实 Store+SqliteQueue（tmp 库）+ 可替换 runner/归因服务。"""
 
-    def __init__(self, tmp_path, runner):
+    def __init__(self, tmp_path, runner, *, attribution=None):
         store = bootstrap_store(tmp_path / "data")
         self._adapters = {
             "store": store,
             "queue": SqliteQueue(store.conn),
             "runner": runner,
         }
+        if attribution is not None:
+            self._adapters["attribution"] = attribution
         self.config = types.SimpleNamespace(limits=_Limits())
 
     def get(self, name):
@@ -375,5 +382,153 @@ async def test_worker_loop_empty_queue_without_jobs(tmp_path):
     try:
         stats = await svc.run_worker(c, max_iterations=2, poll_interval=0)
         assert stats["processed"] == 0
+    finally:
+        c.close()
+
+
+# ── S3.5a FR-EX-007：verdict 随 run 落库（零 schema 变更，走 raw_json）────────
+
+
+def _failed_run(request: TestExecutionRequest) -> TestRun:
+    return TestRun(
+        run_id="adapter-internal",
+        idempotency_key=request.idempotency_key,
+        project=request.project,
+        commit_sha=request.commit_sha,
+        status=RunStatus.FAILED,
+        environment=EnvironmentInfo(provider="junit-local", env_id="jdk21"),
+        case_results=[
+            CaseResult(external_case_id="T/t1", status=CaseStatus.PASSED,
+                       duration_ms=4),
+            CaseResult(external_case_id="T/t2", status=CaseStatus.FAILED,
+                       duration_ms=9, message="XCTAssertEqual failed"),
+        ],
+    )
+
+
+class _FlakyProvider(NullEvidenceProvider):
+    """同 commit 历史里 passed+failed 双态：flaky 规则的唯一充分证据。"""
+
+    async def reruns(self, case, run):
+        return [
+            RerunRecord(run_id="older-pass", commit_sha=run.commit_sha,
+                        status=CaseStatus.PASSED),
+            RerunRecord(run_id="older-fail", commit_sha=run.commit_sha,
+                        status=CaseStatus.FAILED),
+        ]
+
+
+async def test_failed_run_persists_needs_human_verdict_with_null_provider(tmp_path):
+    c = Shim(tmp_path, ScriptedRunner(_failed_run),
+             attribution=AttributionService())
+    try:
+        await svc.submit_execution(c, _req())
+        summary = await svc.run_once(c)
+        assert summary["outcome"] == RunStatus.FAILED.value
+
+        detail = svc.get_run_detail(c, summary["run_id"])
+        run = detail["run"]
+        assert len(run["attributions"]) == 1  # 只归因失败用例，passed 的 T/t1 不入
+        verdict = run["attributions"][0]
+        assert verdict["case_id"] == "T/t2"
+        assert verdict["category"] == FailureCategory.NEEDS_HUMAN.value
+        assert verdict["rule_version"]  # 规则版本戳随结论落库
+
+        # 列表投影带归因计数（S3.5 详情页/API 列表直接消费）
+        listing = svc.list_runs(c)
+        assert len(listing) == 1
+        assert listing[0]["verdict_total"] == 1
+        assert listing[0]["needs_human"] == 1
+    finally:
+        c.close()
+
+
+async def test_passed_run_persists_empty_attribution_list(tmp_path):
+    c = Shim(tmp_path, ScriptedRunner(_passed_run),
+             attribution=AttributionService())
+    try:
+        await svc.submit_execution(c, _req())
+        summary = await svc.run_once(c)
+        detail = svc.get_run_detail(c, summary["run_id"])
+        assert detail["run"]["attributions"] == []
+        assert svc.list_runs(c)[0]["verdict_total"] == 0
+    finally:
+        c.close()
+
+
+async def test_attribution_service_absent_keeps_legacy_behavior(tmp_path):
+    # 手拼 Shim/老剖面不装 attribution：执行链路一字不动，字段回填空列表
+    c = Shim(tmp_path, ScriptedRunner(_failed_run))
+    try:
+        await svc.submit_execution(c, _req())
+        summary = await svc.run_once(c)
+        row = c.get("store").get_test_run_row(summary["run_id"])
+        restored = c.get("store").row_to_test_run(row)
+        assert restored.attributions == []
+    finally:
+        c.close()
+
+
+async def test_scripted_provider_verdict_flows_through_to_ledger(tmp_path):
+    # 非 Null provider 的真实裁决（flaky 0.9）必须原样落库，证明接线不硬编码
+    c = Shim(tmp_path, ScriptedRunner(_failed_run),
+             attribution=AttributionService(_FlakyProvider()))
+    try:
+        await svc.submit_execution(c, _req())
+        summary = await svc.run_once(c)
+        verdict = svc.get_run_detail(c, summary["run_id"])["run"]["attributions"][0]
+        assert verdict["category"] == FailureCategory.FLAKY.value
+        assert verdict["confidence"] == 0.9
+    finally:
+        c.close()
+
+
+async def test_replay_returns_same_run_without_re_attributing(tmp_path):
+    c = Shim(tmp_path, ScriptedRunner(_failed_run),
+             attribution=AttributionService())
+    try:
+        await svc.submit_execution(c, _req())
+        await svc.run_once(c)
+        replay = await svc.submit_execution(c, _req())
+        assert replay["replayed"] is True
+        # 重放不重新处理：jobs 仍 1 条、归因结论仍 1 条
+        assert c.get("store").conn.execute(
+            "SELECT COUNT(*) n FROM jobs").fetchone()["n"] == 1
+        listing = svc.list_runs(c)
+        assert len(listing) == 1 and listing[0]["verdict_total"] == 1
+    finally:
+        c.close()
+
+
+async def test_get_run_detail_unknown_and_queued_projection(tmp_path):
+    c = Shim(tmp_path, ScriptedRunner())
+    try:
+        with pytest.raises(NotFoundError):
+            svc.get_run_detail(c, "run-ghost")
+        submitted = await svc.submit_execution(c, _req())
+        detail = svc.get_run_detail(c, submitted["run_id"])
+        # queued 行尚无 raw_json：账本投影在、TestRun 为 None
+        assert detail["status"] == RunStatus.QUEUED.value
+        assert detail["run"] is None
+    finally:
+        c.close()
+
+
+async def test_legacy_raw_json_without_attribution_hydrates_empty(tmp_path):
+    # v15 老库行（S3.5 前写入的 raw_json 无 attributions 字段）回填兼容
+    import json
+
+    c = Shim(tmp_path, ScriptedRunner())
+    try:
+        await svc.submit_execution(c, _req())
+        run_id = run_id_for("idem-req-1")
+        legacy_payload = _passed_run(_req()).model_dump(mode="json")
+        del legacy_payload["attributions"]  # 模拟 S3.5 之前的历史载荷
+        legacy_run = json.dumps(legacy_payload, ensure_ascii=False)
+        assert "attributions" not in legacy_run
+        c.get("store").update_test_run(
+            run_id, status=RunStatus.PASSED.value, raw_json=legacy_run)
+        detail = svc.get_run_detail(c, run_id)
+        assert detail["run"]["attributions"] == []
     finally:
         c.close()
