@@ -172,3 +172,110 @@ def test_evidence_missing_relation_404(container):
             "/api/knowledge/relations/urn:testpilot:case-relations:rel:nope/evidence")
         assert resp.status_code == 404
         assert resp.json()["error"]["type"] == "NotFoundError"
+
+
+# ── S4.3 影响面分析 / MR 摘要 / 精度回算（FR-FRS-003）────────────────────────
+
+_BASE = "1" * 40
+_HEAD = "2" * 40
+
+
+class _FakeImpactScm:
+    def __init__(self, change_set):
+        self._cs = change_set
+
+    async def head_sha(self, repo):
+        return _HEAD
+
+    async def get_change_set(self, repo, base, head):
+        return self._cs
+
+
+def _seed_impact_graph(store) -> None:
+    """符号切块 + 用例 + 引用关系，供影响链从变更符号走到用例。"""
+    from testpilot_core.enums import AuthorityLevel
+    from testpilot_core.models import (
+        KnowledgeChunk,
+        SourceDocument,
+    )
+
+    doc_urn = "urn:testpilot:fs-docs:document:a.swift"
+    store.upsert_document(SourceDocument(
+        urn=doc_urn, source_system="fs-docs", uri="file:///repo/a.swift",
+        title="A", version="v1", content_hash="h1",
+        authority_level=AuthorityLevel.L1_AUTHORITATIVE, acl_scope="default",
+        metadata_={"kind_hint": "swift"},
+    ))
+    store.upsert_chunk(KnowledgeChunk(
+        urn="urn:testpilot:fs-docs:chunk:a.swift#AlarmStore.arm",
+        doc_urn=doc_urn, index=0, kind="code_symbol",
+        text="func AlarmStore.arm() body", symbol_urn=_SYM1,
+        quality_score=0.9, valid_from=_BASE, content_hash="ch-0",
+    ))
+    store.upsert_test_case(
+        _CASE_DOC,
+        TestCase(urn=_CASE1, external_id="c.md#TC-1", title="响铃用例",
+                 steps=["步骤1"]),
+        content_hash="h-case-2")
+    store.replace_case_relations(RELATION_SCOPE_URN, [
+        CaseRelation(
+            urn=case_relation_urn(_CASE1, "case_references_symbol", _SYM1),
+            source_urn=_CASE1, target_urn=_SYM1,
+            kind="case_references_symbol", confidence=0.7,
+            provenance=["oracle_suggestion"]),
+    ])
+
+
+def _impact_change_set():
+    from testpilot_core.models import ChangeSet, RepoRef, SymbolChange
+    from testpilot_core.enums import ChangeType
+
+    return ChangeSet(
+        repo=RepoRef(project="demo", repo_path="/tmp/demo-repo"),
+        base_commit=_BASE, head_commit=_HEAD, changed_files=["a.swift"],
+        symbol_changes=[
+            SymbolChange(symbol_id="a.swift#AlarmStore.arm",
+                         change_type=ChangeType.MODIFIED),
+        ],
+    )
+
+
+def test_impact_endpoint_returns_analysis_and_diff_summary(container):
+    store = container.get("store")
+    _seed_impact_graph(store)
+    container.adapters["scm"] = _FakeImpactScm(_impact_change_set())
+
+    with _client(container) as client:
+        resp = client.post("/api/knowledge/impact", json={
+            "base_commit": _BASE, "head_commit": _HEAD,
+        })
+    assert resp.status_code == 200
+    body = resp.json()
+    external_ids = {c["external_id"] for c in body["analysis"]["cases"]}
+    assert "c.md#TC-1" in external_ids
+    assert body["analysis"]["classification_counts"]["runnable"] == 1
+    # summary 是 ChangeSummaryResult 包装：确定性脊柱在嵌套 summary 里
+    spine = body["summary"]["summary"]
+    assert spine["generated_from"] == "diff"
+    assert spine["symbols_modified"] == 1
+    assert body["summary"]["generation_source"] == "deterministic"
+
+
+def test_impact_endpoint_validates_body(container):
+    with _client(container) as client:
+        resp = client.post("/api/knowledge/impact", json={"base_commit": _BASE})
+    assert resp.status_code == 422
+
+
+def test_impact_precision_unknown_run_is_404(container):
+    store = container.get("store")
+    _seed_impact_graph(store)
+    container.adapters["scm"] = _FakeImpactScm(_impact_change_set())
+
+    with _client(container) as client:
+        resp = client.post("/api/knowledge/impact/precision", json={
+            "base_commit": _BASE, "head_commit": _HEAD,
+            "run_id": "run-ghost",
+        })
+    assert resp.status_code == 404
+    assert resp.json()["error"]["type"] == "NotFoundError"

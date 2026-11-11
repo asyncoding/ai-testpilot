@@ -24,7 +24,7 @@ from testpilot_adapters.git_repo import (
 )
 from testpilot_core.errors import AdapterUnavailableError, PathMissingAtCommitError
 from testpilot_core.enums import ChangeType
-from testpilot_core.models import EventCheckpoint, RepoRef
+from testpilot_core.models import EventCheckpoint, FileRename, RepoRef
 
 REPO = RepoRef(project="demo", repo_path="/tmp/demo-repo", default_branch="main")
 # 必须是合法 hex：适配器对完整 sha 零进程直采缓存，h/b 等非 hex 字符会触发 rev-parse
@@ -167,6 +167,28 @@ async def test_rename_paired_not_all_delete_add(ready_adapter):
     assert cs.changed_files == ["A.swift", "B.swift", "README.md"]
     # rename 两侧同内容：零符号增删
     assert cs.symbol_changes == []
+
+
+async def test_change_set_carries_file_renames_with_similarity(ready_adapter):
+    adapter, runner = ready_adapter
+    same_swift = "final class C {\n  func keep() {}\n}\n"
+
+    def show(args):
+        if args[1].endswith(("A.swift", "B.swift")):
+            return ok(same_swift.encode())
+        return fail(128, "missing")
+
+    # R100 带相似度分数；裸 R 无分数 → similarity=None（不臆造）
+    runner.on("show", show)
+    runner.on("diff", lambda a: ok(
+        b"R100\0old/A.swift\0new/B.swift\0R\0old/x.md\0new/y.md\0"))
+
+    cs = await adapter.get_change_set(REPO, BASE_SHA, HEAD_SHA)
+
+    assert cs.file_renames == [
+        FileRename(old_path="old/A.swift", new_path="new/B.swift", similarity=100),
+        FileRename(old_path="old/x.md", new_path="new/y.md", similarity=None),
+    ]
 
 
 async def test_added_swift_file_gives_added_symbols(ready_adapter):

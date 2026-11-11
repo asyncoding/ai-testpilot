@@ -23,6 +23,7 @@ testpilot-build-relations = "testpilot_workers.build_relations:main"
 testpilot-runner = "testpilot_workers.runner:main"
 testpilot-eval = "testpilot_workers.eval_worker:main"
 testpilot-badcase = "testpilot_workers.badcase_cli:main"
+testpilot-impact = "testpilot_workers.impact_cli:main"
 
 [build-system]
 requires = ["hatchling"]

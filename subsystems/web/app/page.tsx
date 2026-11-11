@@ -68,6 +68,8 @@ export default function Home() {
         <Link href="/approvals">用例草稿人审与回写审批页（FR-UI-002）→</Link>
         {" · "}
         <Link href="/runs">测试执行账本与失败归因（FR-EX-002/007）→</Link>
+        {" · "}
+        <Link href="/knowledge">知识管理（FR-UI-004）→</Link>
       </nav>
 
       <Banner config={config} />

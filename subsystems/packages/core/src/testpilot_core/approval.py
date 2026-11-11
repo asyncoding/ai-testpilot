@@ -42,6 +42,10 @@ from .urn import make_urn, parse_urn
 
 # 回写目标系统标识：Approval/Outbox 的 target_system 都用它，派发器据此选适配器
 CASE_REPO_TARGET_SYSTEM = "markdown-case-repo"
+# S4.4 FR-EX-008：CI 闭环草稿（建工单/评论）的目标系统，对齐 json-tickets URN 命名空间。
+# 派发器尚未接 TicketPort 写路由：pending 记录在 dispatch_pending_outbox 计
+# skipped_unsupported 并保留 pending，即 FR-WR-003 的 dry-run 默认姿态。
+TICKET_TARGET_SYSTEM = "json-tickets"
 # FR-TD-004：人审 confirmed 后置信度加成，仅对被采纳/修改接受的条目生效
 CONFIRMED_CONFIDENCE_BUMP = 0.3
 _CONFIDENCE_CEILING = 1.0

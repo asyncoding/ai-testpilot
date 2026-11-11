@@ -15,9 +15,9 @@ subsystems/
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
 ├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml
 ├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
-├── web/               # S1.5 对话页 + S2.5 审批页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
+├── web/               # 对话页/审批页/执行控制台/知识管理页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
-└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、recall/live_verify/qa_probe 探针、build_web
+└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、各期 *_probe 与 s2/s3/s4_gate_probe 总验探针、build_web
 ```
 
 ## 环境准备（venv 强制隔离，禁止污染系统 Python）
@@ -41,7 +41,7 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 ## 常用命令
 
 ```bash
-# 全量契约测试（1035 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
+# 全量契约测试（1176 个：URN/策略、适配器契约、SQLite+FTS5、队列幂等、装配、
 # 核心防腐、S1.1 切块/质量分/入库管线、S1.2 三通道融合、S1.3 live-verify、
 # S1.4 答案图纯函数/节点/全图/服务/真仓 stale-index E2E、S1.5 HTTP API（TestClient）、
 # P1–P4 引用治理（schema v6/v7 迁移、锚点渲染 fail-closed、符号路由、提示词投影快照、
@@ -76,7 +76,12 @@ uv sync                       # 创建 .venv 并以 editable 方式安装四个�
 # SIGINT/ffmpeg 真抽帧/cancel 与 XCUITest 端到端，四生产 bug 红→绿，探针不进门禁）、
 # S3.5 执行收口与五门禁总验（TestRun.attributions 随 raw_json 落库零 schema 变更、
 # execution_api 四端点/StoreBackedEvidenceProvider 六 seam 真读账本与录制 scm、
-# Web /runs 与 /runs/detail 静态页、s3_gate_probe A23 五门禁 hermetic 总验）；
+# Web /runs 与 /runs/detail 静态页、s3_gate_probe A23 五门禁 hermetic 总验）、
+# S4 事件驱动纵切（事件四关派发 event_dispatch/死信隔离/重放幂等、CommitPushed
+# 保鲜 rename→STALE→高价值 reindex 与 AC3 检索抑制、影响面分析与 MR 摘要纯逻辑、
+# PipelineFinished CI 闭环复用执行配额/归因/R3 草稿 dry-run、定时兜底 --scheduled
+# 与摄入延迟两段 P95、知识管理页 FR-UI-004 与治理 reindex 存活、s4_gate_probe
+# A24 四门禁 hermetic 总验，schema 全程 v15 零变更）；
 # 3 个 Chroma 真容器集成例在容器未起时自动 skip）
 .venv/bin/python -m pytest -q
 
@@ -584,14 +589,14 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e 'packages/adapters[tree-sitter]'
   单文件失败自动回退词法器并写 dead_letter），词法器同时是降级路径；待未来题集覆盖
   构造器/紧凑声明类问题、或语料出现词法盲区导致的真实检索 miss 时再重评切换。
 
-## 一键验收（23 个自动门禁）
+## 一键验收（24 个自动门禁）
 
 ```bash
 cd subsystems
-bash scripts/verify_s0.sh    # 23 个自动门禁；干净环境 23 PASS / 0 FAIL，日志在 /tmp/tp_*.log
+bash scripts/verify_s0.sh    # 24 个自动门禁；干净环境 24 PASS / 0 FAIL，日志在 /tmp/tp_*.log
 ```
 
-覆盖：venv 四包可 import、1065 个契约测试、core 防腐 import-lint、`/health` 真实 200、
+覆盖：venv 四包可 import、1176 个契约测试、core 防腐 import-lint、`/health` 真实 200、
 三个 worker 独立进程 ready、noop 空链路 trace 调用面、A7 离线问答探针
 （FR-QA-001～004 四类问题 + qa_runs/feedback 行数对账）、A8 问答 HTTP API 冒烟
 （真实 uvicorn + curl：chitchat 未知降级、幽灵反馈 404、`/api/config`）、
@@ -629,16 +634,22 @@ recall/误误导率/证据充分率）/误误导口径/组包服务/封存哈希
 A23 S3 五门禁总验（S3.5：tempfile 临时库走生产装配，40 例盲标先封存再评测/
 执行成功率=结构化 TestRun 产出率且 error/timeout/canceled 单列不混分母/
 归因三指标/证据充分率/提交·取消·预算四路幂等零增生/配额拒入零幻影/红证对照证
-门禁有牙/空清单守卫/v15 重开无损，不起端口不触真机）。
+门禁有牙/空清单守卫/v15 重开无损，不起端口不触真机）、
+A24 S4 四门禁总验（S4.5：tempfile 临时库 hermetic，摄入延迟两段 P95 合成时钟/
+stale 默认检索通道零命中与 include_stale 审计对照/高价值 reindex 批次实测
+<10min/影响推荐精度 ≥.8 与空分母纪律；另收 CI 闭环重放零增生、草稿 dry-run、
+scheduled 留痕、治理 reindex 存活、红证 301s·601s·0.5 精度·负延迟、v15 重开无损，
+不起端口不触真机）。
 A4/A8 就绪轮询带进程存活检测：端口被遗留 uvicorn 占用时直接判 FAIL，杜绝 curl 打到
-旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21/A22/A23 为纯进程内探针，可脱离整脚本单跑：
+旧进程的假绿（排障：`lsof -nP -iTCP:8765`）。A14/A15/A16/A17/A18/A19/A20/A21/A22/A23/A24 为纯进程内探针，可脱离整脚本单跑：
 `.venv/bin/python scripts/approval_probe.py`、`.venv/bin/python scripts/asset_probe.py`、
 `.venv/bin/python scripts/relation_probe.py`、`.venv/bin/python scripts/badcase_probe.py`、
 `.venv/bin/python scripts/s2_gate_probe.py`、`.venv/bin/python scripts/execution_probe.py`、
 `.venv/bin/python scripts/xcode_adapter_probe.py`、
 `.venv/bin/python scripts/xcresult_oslog_probe.py`、
 `.venv/bin/python scripts/attribution_probe.py`、
-`.venv/bin/python scripts/s3_gate_probe.py`。
+`.venv/bin/python scripts/s3_gate_probe.py`、
+`.venv/bin/python scripts/s4_gate_probe.py`。
 
 ## 基础设施（Docker）
 
@@ -1581,3 +1592,85 @@ curl -s "http://127.0.0.1:8765/api/runs?status=failed&project=AlarmKitSpike-demo
   TestClient 同源托管冒烟 `/runs.html`、`/runs/detail.html`、`/api/runs` 均 200（不起端口）。
 - 全门禁实测 **21 PASS / 2 FAIL**：A23 首次接入即 PASS；仅 A4/A8 因用户终端 uvicorn
   （PID 64634，按约束不杀）占用 8765 失败，与本切片无关。**schema 仍 v15 零变更**。
+
+## 事件驱动保鲜、影响面与 CI 闭环（S4.1–S4.5，FR-FRS / FR-EX-008 / FR-UI-004）
+
+事件 JSON 是 S4 的唯一驱动源：commit/pipeline 事件先落事件账本（event_id PK 即
+幂等键），经四关派发（解析→契约校验→幂等→路由 handler），handler 异常进死信不
+堵兄弟事件；重放只增内存计数，handler 绝不二次执行。定时器不冒充事件——进程内无
+定时器，定时兜底只留 `--scheduled` 入库口径，由外部 cron 挂接（docs/04 #14 纪律）。
+
+### 分层落点
+
+- **core（零 IO/零三方）**：`event_contract.py` 信封契约、`ingest_latency.py`
+  两段 P95 纯逻辑（intake / end-to-end，合成时钟可测，空样本 None 不造 0 秒）、
+  `freshness.py` rename 配对与 `is_high_value` 阈值纯函数、`impact.py` 影响链与
+  `regression_selection_precision`（空分母 None 纪律）、`governance.py` 治理编辑与
+  reindex 存活（不可变 model_copy + 审计历史只追加，上限 20 条）。
+- **adapters**：`sqlite_store` 事件/死信/ingestion_runs 留痕、stale 标记与 FTS
+  默认抑制（`include_stale=False` 过滤，数据只隐藏不删除）、知识盘点四查询与
+  `replace_document_index` 事务内 `preserve_governance` 回灌。
+- **workers**：`event_dispatch` 四关派发、`freshness.handle_commit_pushed`
+  （STALE→高价值 reindex→rename 链补挂）、`impact_service` MR 摘要、
+  `pipeline_loop.handle_pipeline_finished`（CI 闭环，复用 execution_service
+  配额/幂等/队列，不另起执行通道）、`ingest_latency.collect_latency_reports`。
+- **orchestrator**：事件/影响/知识三组 HTTP API；`/api/knowledge/*` 六端点
+  （documents/chunks/stale/entities/inventory-export/governance），治理写是
+  R1 内部库写，受 write_policy 同层约束，幽灵 URN 返回 404 零幻影。
+- **web**：`/knowledge` 静态页（FR-UI-004）——文档/切块/stale/实体一屏盘点，
+  owner 与权威等级内联编辑（只提交变更字段），stale 行展示
+  valid_from→valid_to 的 reindex 留痕，盘点表 JSON 附件导出。
+
+### 关键语义（口径钉版，改动先改文档与 handoff）
+
+1. **stale 不是删除**：重构后旧切块挂 `stale='stale'` + `valid_to`，默认检索通道
+   不可见、`include_stale=True` 审计通道仍可召回；rename 链 `doc_urn` 恒 NULL，
+   防单文档 reindex 级联清掉跨文档身份事实。
+2. **高价值双路**：质量分 ≥ 阈值 **或** 引用度 ≥ 阈值即立即 reindex（阈值走
+   profile freshness 段，默认 0.7 / 2）；低价值 lazy 保留 stale，等定时兜底。
+3. **CI 闭环零新表**：CI run 复用 `test_runs`（幂等键 `ci-run:<event_id>`），
+   重跑键 `pipeline-rerun:<event_id>` 内容寻址，草稿复用 approvals/outbox
+   （target=json-tickets，无 TicketPort 时 skipped_unsupported 保持 pending）；
+   事件与报告证据矛盾（commit/结果状态）响亮失败进死信，不写矛盾账本。
+4. **延迟两段**：intake=occurred_at→received_at；end-to-end=CommitPushed
+   occurred_at→event-reindex 批次 finished_at（按 `report_json.event_id` 回配，
+   一个事件一条样本）；负延迟 ValueError，禁止 abs() 掩盖时钟歪斜。
+5. **治理零 schema**：owner/权威/审计只存 `raw_json.metadata.governance`，
+   reindex 覆盖前必须回灌，否则人工编辑被适配器产物静默抹掉（有测试钉住）。
+
+### 运行方式
+
+```bash
+# 事件重放驱动（录制事件目录，四关派发 + handler 路由；坏件进死信并以 exit 1 收口）
+.venv/bin/testpilot-ingest --replay-events tests/fixtures/events
+.venv/bin/testpilot-ingest --replay-events tests/fixtures/events --event-source json-git
+
+# 定时全量兜底：外部 cron 挂这个入口，批次 trigger='scheduled' 留痕可区分
+# crontab 例（每小时第 7 分，避开 :00 拥塞；机器相关路径用 profile/环境变量传）：
+#   7 * * * * cd /opt/testpilot/subsystems && \
+#     TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
+#     .venv/bin/testpilot-ingest --scheduled >> logs/ingest-scheduled.log 2>&1
+.venv/bin/testpilot-ingest --scheduled
+
+# 摄入延迟 P95 报告（只读不入库；无样本段给 None 不放行，不造 0 秒假成绩）
+.venv/bin/testpilot-ingest --latency-report /tmp/latency.json
+
+# S4 四门禁总验（hermetic，不起端口不触真机，报告落 out/eval/s4-gate-probe.{json,md}）
+.venv/bin/python scripts/s4_gate_probe.py
+```
+
+### 验收证据（2026-11-11）
+
+- 探针 A24 **12 项检查全绿**（输出 13 个 ✅ 含总结行）：两段 P95（20 合成样本
+  P95=240s<300s）、红证 301s 咬红/空样本 None/负延迟 ValueError、stale 默认通道
+  零命中而审计通道召回（过期命中率 0.0）、reindex 21 条批次最大实测 420s<600s、
+  601s 红证、推荐精度 0.9 过门与 0.5 红证/空分母 None、CI 闭环 closed→replayed
+  零增生（run/outbox/预算三路）、草稿 dry-run pending、scheduled 留痕与 CLI 挂点、
+  治理 reindex 存活（hash 更新而 owner/L1/审计不丢）、v15 重开 20 事件/22 批次无损。
+- **探针自身红证**：临时破坏生产代码 stale 过滤（`include_stale` 守卫失效），
+  探针如期 exit 1、门②过期命中率冲到 1.0 变红，还原后复跑转绿，`git diff` 零残留。
+- 契约测试净增 **111 个**（S4.1–S4.5；前端/Web 不入 pytest），全量
+  **1176 passed**、import-lint OK、`bash scripts/verify_s0.sh` **24 PASS / 0 FAIL**；
+  `npx tsc --noEmit` 通过，`npm run build` 6 路由全静态（新增 /knowledge）。
+- **schema 全程 v15 零变更**：事件/死信复用 events/dead_letters，CI run/草稿复用
+  test_runs/approvals/outbox，治理进 raw_json，延迟进既有时间列与 report_json。

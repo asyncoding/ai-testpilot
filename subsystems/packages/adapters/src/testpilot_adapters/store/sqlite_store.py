@@ -20,6 +20,7 @@ from testpilot_core.case_relations import (
 )
 from testpilot_core.enums import OutboxStatus
 from testpilot_core.execution import BudgetEntry
+from testpilot_core.governance import preserve_governance
 from testpilot_core.oracle_mining import MinedOracle, suggestion_urn
 from testpilot_core.requirement import RequirementParseResult
 from testpilot_core.rule_assets import RuleAssetRevision
@@ -451,6 +452,17 @@ class Store:
         cur = self.conn
         try:
             cur.execute("BEGIN")
+            # S4.5：reindex 整行覆盖前回灌人工治理（owner/权威覆盖/审计历史），
+            # 否则知识管理页的编辑会在内容变更后被适配器产物静默抹掉（零 schema，
+            # 治理数据只存在 raw_json.metadata.governance）。
+            prev_row = cur.execute(
+                "SELECT raw_json FROM source_documents WHERE urn=?", (doc.urn,)
+            ).fetchone()
+            if prev_row is not None:
+                previous = SourceDocument.model_validate(
+                    json.loads(prev_row["raw_json"])
+                )
+                doc = preserve_governance(doc, previous)
             cur.execute(
                 """INSERT INTO source_documents
                    (urn, source_system, uri, title, version, content_hash,
@@ -671,6 +683,20 @@ class Store:
         )
         self.conn.commit()
 
+    def list_ingestion_runs(self) -> list[dict[str, Any]]:
+        """入库批次盘点口（S4.4 摄入延迟 P95 配对用）；report_json 反序列化后返回。"""
+        rows = self.conn.execute(
+            """SELECT run_id, source_system, trigger, status, started_at,
+                      finished_at, report_json
+                 FROM ingestion_runs ORDER BY started_at, run_id"""
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            item = dict(r)
+            item["report"] = json.loads(item.pop("report_json") or "{}")
+            out.append(item)
+        return out
+
     # ── 事件（幂等去重 + 死信）─────────────────────────────────────────
     def record_event_if_new(self, event: EventEnvelope) -> bool:
         """返回 True=新事件；False=重复投递（docs/08 FR-CON-005 AC1）。
@@ -696,6 +722,254 @@ class Store:
             (source, json.dumps(payload, ensure_ascii=False), error, _now_iso()),
         )
         self.conn.commit()
+
+    def mark_event_status(self, event_id: str, status: str) -> None:
+        """事件消费状态流转（received→processed/dead），复用 events.status 列。
+
+        零 schema 变更：事件行必先经 record_event_if_new 落账，无对应行时
+        不改任何数据（返回影响行数由调用方按需断言）。
+        """
+        self.conn.execute(
+            "UPDATE events SET status=? WHERE event_id=?", (status, event_id)
+        )
+        self.conn.commit()
+
+    def list_events(
+        self, *, status: str | None = None, event_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """事件盘点口（知识管理页/探针用）；过滤条件可选，按接收时间倒序。"""
+        sql = (
+            "SELECT event_id, event_type, source_system, status, payload_json,"
+            " occurred_at, received_at FROM events"
+        )
+        filters: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            filters.append("status=?")
+            params.append(status)
+        if event_type is not None:
+            filters.append("event_type=?")
+            params.append(event_type)
+        if filters:
+            sql += " WHERE " + " AND ".join(filters)
+        sql += " ORDER BY received_at DESC, event_id"
+        return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
+
+    def list_dead_letters(self, *, source: str | None = None) -> list[dict[str, Any]]:
+        """死信盘点口（FR-CON-005 AC2：坏事件可查可重试）。"""
+        if source is None:
+            rows = self.conn.execute(
+                "SELECT id, source, payload_json, error, created_at"
+                " FROM dead_letters ORDER BY id DESC"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT id, source, payload_json, error, created_at"
+                " FROM dead_letters WHERE source=? ORDER BY id DESC",
+                (source,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ── S4.2 保鲜：stale/reindex/rename 链（零 schema，复用 chunks.stale/relations）──
+
+    @staticmethod
+    def _escape_like(term: str) -> str:
+        return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    def find_symbol_urns_by_anchor(self, anchor: str) -> list[str]:
+        """裸锚点 → 库内符号 URN（chunk_swift 锚点不含路径，按 URN 后缀对账）。
+
+        覆盖去歧形态：精确 ``#<anchor>`` 结尾与 ``#<anchor>#L<n>`` 两种；
+        LIKE 转义防锚点中的 _/% 误配。解析不到返回空列表（调用方按未命中处理）。
+        """
+        escaped = self._escape_like(anchor)
+        rows = self.conn.execute(
+            "SELECT DISTINCT symbol_urn FROM chunks"
+            " WHERE symbol_urn IS NOT NULL"
+            " AND (symbol_urn LIKE ('%#' || ?) ESCAPE '\\'"
+            "      OR symbol_urn LIKE ('%#' || ? || '#L%') ESCAPE '\\')",
+            (escaped, escaped),
+        ).fetchall()
+        return [r["symbol_urn"] for r in rows]
+
+    def mark_stale_by_symbol_urns(
+        self, symbol_urns: list[str], valid_to: str
+    ) -> int:
+        """把符号 URN 名下仍 fresh 的切块标 STALE（含 valid_to 留痕），返回更新行数。"""
+        if not symbol_urns:
+            return 0
+        placeholders = ",".join("?" for _ in symbol_urns)
+        cur = self.conn.execute(
+            f"UPDATE chunks SET stale='stale',"
+            f" valid_to=COALESCE(valid_to, ?) WHERE stale='fresh'"
+            f" AND symbol_urn IN ({placeholders})",
+            [valid_to, *symbol_urns],
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def upsert_rename_relation(self, relation) -> bool:
+        """登记 renamed_to 关系（INSERT OR IGNORE，URN 主键即幂等键）。
+
+        doc_urn 恒 NULL：rename 链是跨文档身份事实，不能被单文档 reindex 的
+        级联删除（replace_document_index 按 doc_urn 清关系）带走。
+        返回 True=新登记，False=已存在。
+        """
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO relations"
+            " (urn, source_urn, target_urn, kind, confidence, evidence_json, doc_urn)"
+            " VALUES (?,?,?,?,?,?,NULL)",
+            (
+                relation.urn, relation.source_urn, relation.target_urn,
+                relation.kind, relation.confidence,
+                json.dumps(relation.evidence_urns, ensure_ascii=False),
+            ),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def get_rename_target(self, symbol_urn: str, *, max_hops: int = 8) -> str | None:
+        """沿 renamed_to 链取最终新 URN；环/超链防御性返回当前节点，永不死循环。"""
+        current = symbol_urn
+        seen = {symbol_urn}
+        for _ in range(max_hops):
+            row = self.conn.execute(
+                "SELECT target_urn FROM relations WHERE source_urn=? AND kind='renamed_to'",
+                (current,),
+            ).fetchone()
+            if row is None:
+                return None if current == symbol_urn else current
+            if row["target_urn"] in seen:
+                return current
+            seen.add(row["target_urn"])
+            current = row["target_urn"]
+        return current
+
+    def count_incoming_calls(self, symbol_urn: str) -> int:
+        """被引用计数（calls 关系入边），高价值判定的引用度信号。"""
+        row = self.conn.execute(
+            "SELECT COUNT(*) n FROM relations WHERE target_urn=? AND kind='calls'",
+            (symbol_urn,),
+        ).fetchone()
+        return int(row["n"])
+
+    def list_doc_urns_for_symbol_urns(self, symbol_urns: list[str]) -> list[str]:
+        if not symbol_urns:
+            return []
+        placeholders = ",".join("?" for _ in symbol_urns)
+        rows = self.conn.execute(
+            f"SELECT DISTINCT doc_urn FROM chunks WHERE symbol_urn IN ({placeholders})",
+            symbol_urns,
+        ).fetchall()
+        return [r["doc_urn"] for r in rows]
+
+    def map_symbol_urns_to_docs(self, symbol_urns: list[str]) -> dict[str, str]:
+        """符号 URN → 所属文档 URN（符号 URN 含 external_id，天然 1:1）。
+
+        保鲜按文档分组做高价值判定用；查不到的 URN 不出现在结果里。
+        """
+        if not symbol_urns:
+            return {}
+        placeholders = ",".join("?" for _ in symbol_urns)
+        rows = self.conn.execute(
+            f"SELECT DISTINCT symbol_urn, doc_urn FROM chunks"
+            f" WHERE symbol_urn IN ({placeholders})",
+            symbol_urns,
+        ).fetchall()
+        return {r["symbol_urn"]: r["doc_urn"] for r in rows}
+
+    def max_quality_for_doc(self, doc_urn: str) -> float:
+        row = self.conn.execute(
+            "SELECT MAX(quality_score) q FROM chunks WHERE doc_urn=?", (doc_urn,)
+        ).fetchone()
+        return float(row["q"] or 0.0)
+
+    def count_stale_chunks(self) -> int:
+        return int(
+            self.conn.execute(
+                "SELECT COUNT(*) n FROM chunks WHERE stale='stale'"
+            ).fetchone()["n"]
+        )
+
+    def list_stale_chunks(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """stale 盘点口（FR-UI-004 知识管理页，S4.5 接页面）。"""
+        rows = self.conn.execute(
+            "SELECT urn, doc_urn, symbol_urn, valid_from, valid_to, content_hash"
+            " FROM chunks WHERE stale='stale' ORDER BY doc_urn, idx LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── 知识管理页盘点/治理（FR-UI-004，S4.5；全部零 schema）──────────────
+
+    def list_knowledge_documents(
+        self, *, branch: str | None = None
+    ) -> list[dict[str, Any]]:
+        """文档盘点：切块数/stale 数/最高质量分一次聚合，owner 从 raw_json 治理段投影。"""
+        sql = (
+            "SELECT d.urn, d.source_system, d.uri, d.title, d.version,"
+            " d.authority_level, d.branch, d.mtime, d.content_hash, d.raw_json,"
+            " (SELECT COUNT(*) FROM chunks c WHERE c.doc_urn=d.urn) AS chunk_count,"
+            " (SELECT COUNT(*) FROM chunks c WHERE c.doc_urn=d.urn AND c.stale='stale')"
+            " AS stale_count,"
+            " (SELECT MAX(c.quality_score) FROM chunks c WHERE c.doc_urn=d.urn)"
+            " AS max_quality"
+            " FROM source_documents d"
+        )
+        params: tuple[Any, ...] = ()
+        if branch:
+            sql += " WHERE d.branch=?"
+            params = (branch,)
+        sql += " ORDER BY d.urn"
+        out: list[dict[str, Any]] = []
+        for r in self.conn.execute(sql, params).fetchall():
+            item = {k: r[k] for k in r.keys() if k != "raw_json"}
+            item["max_quality"] = r["max_quality"] or 0.0
+            raw = json.loads(r["raw_json"])
+            governance = (raw.get("metadata") or {}).get("governance") or {}
+            item["owner"] = governance.get("owner", "")
+            item["governance"] = governance
+            out.append(item)
+        return out
+
+    def list_doc_chunks(
+        self, doc_urn: str, *, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """单文档切块明细（质量分/stale 状态/符号锚点），不存在文档返回空列表。"""
+        rows = self.conn.execute(
+            "SELECT urn, idx, kind, symbol_urn, quality_score, stale,"
+            " valid_from, valid_to, content_hash"
+            " FROM chunks WHERE doc_urn=? ORDER BY idx LIMIT ?",
+            (doc_urn, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_entities_browse(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """实体盘点（L1 关系浏览的实体侧；关系侧走 list_case_relations）。"""
+        rows = self.conn.execute(
+            "SELECT urn, kind, name, branch, doc_urn FROM entities"
+            " ORDER BY kind, name LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_document_governance(self, doc: SourceDocument) -> bool:
+        """治理编辑落账：权威列与 raw_json 同事务更新。False=URN 不存在不臆造。"""
+        exists = self.conn.execute(
+            "SELECT 1 FROM source_documents WHERE urn=?", (doc.urn,)
+        ).fetchone()
+        if exists is None:
+            return False
+        self.conn.execute(
+            "UPDATE source_documents SET authority_level=?, raw_json=? WHERE urn=?",
+            (
+                str(doc.authority_level),
+                doc.model_dump_json(by_alias=True),
+                doc.urn,
+            ),
+        )
+        self.conn.commit()
+        return True
 
     # ── 结构化用例（S2.1 FR-CON-003）────────────────────────────────────
     def upsert_test_case(

@@ -35,6 +35,11 @@
 # A23 为 S3.5 S3 五门禁总验探针（tempfile 临时库走生产装配：40 例盲标先封存再
 # 评测/执行成功率结构化产出率且 error/timeout 单列/归因三指标/证据充分率/提交取消
 # 预算四路幂等零增生/配额拒入零幻影/红证对照证门禁有牙/空清单守卫/v15 重开无损，
+# 不起端口、不碰 store/offline-demo、零真机零模拟器），
+# A24 为 S4 四门禁总验探针（tempfile 临时库 hermetic：摄入延迟两段 P95 合成时钟/
+# stale 默认通道零命中与 include_stale 审计对照/高价值 reindex 批次实测 <10min/
+# 影响推荐精度 ≥.8 与空分母纪律/CI 闭环重放零增生与草稿 dry-run/定时兜底 scheduled
+# 留痕与 CLI 挂接点/治理 reindex 存活/红证 301s·601s·0.5 精度咬门/v15 重开无损，
 # 不起端口、不碰 store/offline-demo、零真机零模拟器）。
 # Langfuse 实链门禁需另跑 smoke_trace --expect langfuse。
 # 用法：cd subsystems && bash scripts/verify_s0.sh
@@ -310,6 +315,17 @@ $PY scripts/s3_gate_probe.py > /tmp/tp_s3gate_a23.log 2>&1 \
   || { echo "FAIL  见 /tmp/tp_s3gate_a23.log 与 out/eval/s3-gate-probe.json"; fail_n=$((fail_n+1)); }
 
 echo
-echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3 / A22 S3.4 / A23 S3.5）"
+echo "=== A24. S4 四门禁总验（S4.5：tempfile 临时库 hermetic，摄入延迟 P95/stale 过期命中/高价值 reindex/影响推荐精度，不起端口不触真机） ==="
+# 合成时钟 20 样本验两段 P95，stale 走真实 FtsSearchAdapter 通道，CI 闭环与治理存活
+# 走生产装配；红证（301s/601s/0.5 精度/负延迟/空样本）内置，报告落 out/eval/s4-gate-probe.{json,md}。
+$PY scripts/s4_gate_probe.py > /tmp/tp_s4gate_a24.log 2>&1 \
+  && grep -q '✅ s4_gate_probe 全部通过' /tmp/tp_s4gate_a24.log \
+  && grep -q '门禁① 摄入延迟 P95' /tmp/tp_s4gate_a24.log \
+  && grep -q '门禁② stale 过期命中' /tmp/tp_s4gate_a24.log \
+  && { echo "PASS  $(grep -c '✅' /tmp/tp_s4gate_a24.log) 项检查全绿（两段 P95/红证守卫/stale 零命中与审计对照/CI 闭环重放幂等/dry-run pending/reindex 预算/精度红证与空分母/治理存活/scheduled 留痕/v15）"; pass_n=$((pass_n+1)); } \
+  || { echo "FAIL  见 /tmp/tp_s4gate_a24.log 与 out/eval/s4-gate-probe.json"; fail_n=$((fail_n+1)); }
+
+echo
+echo "自动门禁结果：$pass_n PASS / $fail_n FAIL（A1–A6 S0 / A7 S1.4 / A8 S1.5 / A9 S1.6 / A10 S2.1 / A11 S2.2 / A12 S2.3 / A13 S2.4 / A14 S2.5 / A15 S2.6a / A16 S2.6b / A17 S2.6c / A18 S2.6d / A19 S3.1 / A20 S3.2 / A21 S3.3 / A22 S3.4 / A23 S3.5 / A24 S4）"
 [ $fail_n = 0 ] || exit 1
 echo "剩余手动门禁（Langfuse 服务端可见 trace、Web 对话页构建）按 subsystems/README.md「手动门禁」节执行。"

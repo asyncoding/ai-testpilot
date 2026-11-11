@@ -390,3 +390,77 @@ export interface CancelRunResult {
   cancel_requested: boolean;
   status: string;
 }
+
+// ── S4.5 知识管理页（FR-UI-004，/api/knowledge/*）────────────────────────────
+
+export interface KnowledgeGovernance {
+  owner: string;
+  authority_level: string | null;
+  updated_by: string;
+  updated_at: string;
+  history: {
+    at: string;
+    by: string;
+    owner: string | null;
+    authority_level: string | null;
+  }[];
+}
+
+export interface KnowledgeDocumentRow {
+  urn: string;
+  source_system: string;
+  uri: string;
+  title: string;
+  version: string | null;
+  authority_level: string;
+  branch: string;
+  mtime: string | null;
+  content_hash: string;
+  chunk_count: number;
+  stale_count: number;
+  max_quality: number;
+  owner: string;
+  governance: KnowledgeGovernance | Record<string, never>;
+}
+
+export interface KnowledgeChunkRow {
+  urn: string;
+  idx: number;
+  kind: string;
+  symbol_urn: string | null;
+  quality_score: number;
+  stale: "fresh" | "stale" | string;
+  valid_from: string | null;
+  valid_to: string | null;
+  content_hash: string;
+}
+
+export interface StaleChunkRow {
+  urn: string;
+  doc_urn: string;
+  symbol_urn: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  content_hash: string;
+}
+
+export interface KnowledgeEntityRow {
+  urn: string;
+  kind: string;
+  name: string;
+  branch: string;
+  doc_urn: string | null;
+}
+
+export interface GovernanceEditBody {
+  owner?: string;
+  authority_level?: string;
+  edited_by?: string;
+}
+
+export interface GovernanceEditResult {
+  urn: string;
+  owner: string;
+  authority_level: string;
+  governance: KnowledgeGovernance;
+}

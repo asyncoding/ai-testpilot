@@ -192,6 +192,8 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
         container.adapters["ci_events"] = JsonReplayEventSource(fixtures_dir / "events")
     elif a.ci_events.type != "stub":
         raise ValueError(f"未知 ci_events 适配器类型: {a.ci_events.type}")
+    # S4.4：PipelineFinished handler 解析 file://fixtures/... 相对 URI 的锚点
+    container.adapters["fixtures_dir"] = fixtures_dir
 
     # ── 制品（先于执行器装配：xcode runner 的 xcresult parser 要注入制品端口）──
     if a.artifact.type == "localfs":

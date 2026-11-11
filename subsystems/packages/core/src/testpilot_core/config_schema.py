@@ -64,3 +64,5 @@ class ProfileConfig(BaseModel):
     external_write_enabled: bool = False  # 全局停用开关，默认只 dry-run
     # S1.6 标定接缝：问答图参数（如 retrieval_limit）；缺省即 QaParams 保守默认，行为不变
     qa: dict[str, Any] = Field(default_factory=dict)
+    # S4.2 FR-FRS-002：保鲜阈值（高价值判定/rename 相似度）；缺省由 workers 侧常量兜底
+    freshness: dict[str, Any] = Field(default_factory=dict)

@@ -35,6 +35,7 @@ from testpilot_core.models import (
     CodeSymbol,
     EventCheckpoint,
     EventEnvelope,
+    FileRename,
     RepoRef,
     SymbolChange,
     SymbolSnapshot,
@@ -304,10 +305,17 @@ class GitCodeRepository:
 
         changed_files: list[str] = []
         symbol_changes: list[SymbolChange] = []
+        file_renames: list[FileRename] = []
         for status, old_path, new_path in entries:
             code = status[:1]
             if code in {"R", "C"}:
                 changed_files.extend(p for p in (old_path, new_path) if p not in changed_files)
+                # S4.2：git -M 相似度后缀（R100/C75）；裸 R/C 无分数时给 None 不臆造
+                score = status[1:]
+                similarity = int(score) if score.isdigit() else None
+                file_renames.append(
+                    FileRename(old_path=old_path, new_path=new_path, similarity=similarity)
+                )
             else:
                 p = old_path
                 if p not in changed_files:
@@ -331,6 +339,7 @@ class GitCodeRepository:
             head_commit=head_sha,
             changed_files=changed_files,
             symbol_changes=symbol_changes,
+            file_renames=file_renames,
         )
 
     async def get_symbol_at_commit(

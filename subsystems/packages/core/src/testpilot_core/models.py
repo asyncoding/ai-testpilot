@@ -228,12 +228,29 @@ class SymbolChange(BaseModel):
     change_type: ChangeType
 
 
+class FileRename(BaseModel):
+    """文件级重命名/移动（git diff -M 的 R/C 记录，FR-FRS-002）。"""
+    old_path: str
+    new_path: str
+    similarity: int | None = None  # git R 分数 0..100；合成事件可空
+
+
+class SymbolRename(BaseModel):
+    """符号级重命名配对：旧 symbol_id → 新 symbol_id（FR-FRS-002 AC2 名称解析用）。"""
+    old_symbol_id: str
+    new_symbol_id: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str  # file_move / selector_rename / file_move_and_selector_rename
+
+
 class ChangeSet(BaseModel):
     repo: RepoRef
     base_commit: str
     head_commit: str
     changed_files: list[str] = Field(default_factory=list)
     symbol_changes: list[SymbolChange] = Field(default_factory=list)
+    # S4.2：文件 rename 对（默认空，老录制夹具/老事件反序列化自动补默认）
+    file_renames: list[FileRename] = Field(default_factory=list)
     diff_uri: str | None = None
     merge_request: str | None = None
 

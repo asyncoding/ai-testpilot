@@ -26,3 +26,18 @@ class JsonReplayEventSource:
             if not source or event.source_system == source:
                 events.append(event)
         return events
+
+    async def replay_raw(self, source: str) -> list[tuple[Path, dict]]:
+        """同 replay，但只解析 JSON 不做模型校验（FR-CON-005 AC2 用）。
+
+        事件消费侧逐信封 model_validate：单个坏文件进死信不阻断整批；
+        replay() 保持"响亮失败"语义服务契约测试与其他调用方。
+        """
+        if not self.events_dir.exists():
+            return []
+        raw_events: list[tuple[Path, dict]] = []
+        for path in sorted(self.events_dir.glob("*.json")):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not source or data.get("source_system") == source:
+                raw_events.append((path, data))
+        return raw_events

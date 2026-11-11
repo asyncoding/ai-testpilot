@@ -23,6 +23,8 @@ venv/
 /subsystems/web/node_modules/
 /subsystems/web/.next/
 /subsystems/web/out/
+# tsc --noEmit 增量编译信息（incremental 构建副产物，每次类型检查自动再生成）
+/subsystems/web/tsconfig.tsbuildinfo
 
 # 评测/运行临时产物（S1.6 评测报告 JSON/Markdown 落 subsystems/out/eval/）
 results/
@@ -38,6 +40,7 @@ videos/
 .obsidian/
 .vscode/
 .idea/
+*.swp
 
 # macOS
 .DS_Store

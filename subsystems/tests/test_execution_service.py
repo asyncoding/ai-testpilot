@@ -168,7 +168,10 @@ async def test_submit_persists_ledger_before_queue_and_is_idempotent(tmp_path):
         c.close()
 
 
-async def test_rerun_quota_denied_leaves_no_phantom_and_accounts(tmp_path):
+async def test_rerun_quota_denied_leaves_no_phantom_and_accounts(tmp_path, monkeypatch):
+    # 冻结记账时钟：预算键含 UTC 日期，硬编码日期在跨日后会与服务端真实 today
+    # 错位撞 request_id UNIQUE（2026-11-11 UTC 跨日实测变红），测试不得依赖运行当天
+    monkeypatch.setattr(svc, "_today_utc", lambda: "2026-11-10")
     c = Shim(tmp_path, ScriptedRunner())
     try:
         key = "demo:2026-11-10"
@@ -189,8 +192,10 @@ async def test_rerun_quota_denied_leaves_no_phantom_and_accounts(tmp_path):
         c.close()
 
 
-async def test_budget_replay_after_crash_does_not_double_count(tmp_path):
+async def test_budget_replay_after_crash_does_not_double_count(tmp_path, monkeypatch):
     # 模拟崩溃在「预算已记账、run 账本未建」之间：同请求重提应放行且不双扣
+    # 同样冻结记账时钟，理由同 test_rerun_quota_denied_leaves_no_phantom_and_accounts
+    monkeypatch.setattr(svc, "_today_utc", lambda: "2026-11-10")
     c = Shim(tmp_path, ScriptedRunner())
     try:
         from testpilot_core.execution import BudgetEntry

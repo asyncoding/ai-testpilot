@@ -210,3 +210,33 @@ diff /tmp/simlist-before.txt /tmp/simlist-after.txt   # 期望：无输出（列
 - 语料在本机处理，本地 embedding/Ollama 不出域——对应私有化部署与安全合规要求；
 - 演示用"缺陷工单"用 JSON 夹具模拟，不接真实工单系统；
 - 评测集与入库语料严格分开：从 docs 事故文集中留 10–20 篇做留出问答集，**不入库、不进 prompt 示例**。
+
+## 6. 事件喂料与定时兜底 runbook（S4，2026-11-11）
+
+S4 起保鲜/CI 闭环由事件驱动，进程内**没有定时器**：事件 JSON 先落事件账本再派发，
+定时扫描只作为外部 cron 挂接的兜底入口（docs/04 #14：不用定时器扫描冒充事件）。
+
+```bash
+# 6.1 事件重放（主路径）：目录里每个 .json 是一个事件信封，坏件进死信不堵好件
+.venv/bin/testpilot-ingest --replay-events tests/fixtures/events
+# 可选按 source_system 过滤（json-git=CommitPushed，json-ci=PipelineFinished）
+.venv/bin/testpilot-ingest --replay-events tests/fixtures/events --event-source json-ci
+
+# 6.2 定时全量兜底（外部 cron 挂这个，不要自己写 while-sleep 轮询）
+#     批次 trigger='scheduled' 留痕，与事件驱动的 'event-reindex' 可区分
+.venv/bin/testpilot-ingest --scheduled
+
+# 6.3 摄入延迟 P95 日报（只读不入库；无样本段输出 null 而非 0，不放假成绩）
+.venv/bin/testpilot-ingest --latency-report /tmp/ingest-latency.json
+```
+
+crontab 挂接示例（机器相关路径走 profile/环境变量，不写死在代码里；避开整点拥塞）：
+
+```cron
+7 * * * * cd /opt/testpilot/subsystems && TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml .venv/bin/testpilot-ingest --scheduled >> logs/ingest-scheduled.log 2>&1
+13 9 * * * cd /opt/testpilot/subsystems && .venv/bin/testpilot-ingest --latency-report logs/latency-$(date +\%F).json
+```
+
+巡检要点：① `ingestion_runs.trigger` 区分 event-reindex / scheduled / 手动扫描；
+② 延迟报告门限 P95<300s，任一段样本为空会显式 `gate_passed=false`，需先查事件链路
+而不是改阈值；③ 死信在 `dead_letters` 表可查可补偿，修复后重放同 event_id 幂等不重复。

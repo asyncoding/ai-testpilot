@@ -13,10 +13,16 @@ import type {
   FeedbackKind,
   FeedbackReason,
   FeedbackSummaryRow,
+  GovernanceEditBody,
+  GovernanceEditResult,
+  KnowledgeChunkRow,
+  KnowledgeDocumentRow,
+  KnowledgeEntityRow,
   OutboxRecordView,
   ReviewQueueItem,
   RunListItem,
   SourceEnvelope,
+  StaleChunkRow,
   TraceData,
   WritePolicyView,
 } from "./types";
@@ -159,3 +165,44 @@ export function cancelExecutionRun(runId: string): Promise<CancelRunResult> {
     { method: "POST", body: "{}" },
   );
 }
+
+// ── S4.5 知识管理页（/api/knowledge/*，FR-UI-004）────────────────────────────
+
+export function listKnowledgeDocuments(
+  branch?: string,
+): Promise<{ documents: KnowledgeDocumentRow[]; total: number }> {
+  const qs = branch ? `?branch=${encodeURIComponent(branch)}` : "";
+  return request(`/api/knowledge/documents${qs}`);
+}
+
+export function listDocumentChunks(
+  urn: string,
+): Promise<{ doc_urn: string; chunks: KnowledgeChunkRow[] }> {
+  return request(
+    `/api/knowledge/documents/${encodeURIComponent(urn)}/chunks`,
+  );
+}
+
+export function listStaleChunks(): Promise<{ stale_chunks: StaleChunkRow[] }> {
+  return request("/api/knowledge/stale");
+}
+
+export function listKnowledgeEntities(): Promise<{
+  entities: KnowledgeEntityRow[];
+}> {
+  return request("/api/knowledge/entities");
+}
+
+export function editGovernance(
+  urn: string,
+  body: GovernanceEditBody,
+): Promise<GovernanceEditResult> {
+  return request(
+    `/api/knowledge/documents/${encodeURIComponent(urn)}/governance`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+// 盘点导出走浏览器原生下载（JSON 附件），不经过 JSON 错误封装
+export const knowledgeInventoryExportUrl =
+  "/api/knowledge/inventory-export";
