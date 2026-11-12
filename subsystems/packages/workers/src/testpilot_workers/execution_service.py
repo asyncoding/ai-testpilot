@@ -34,6 +34,14 @@ class RerunQuotaExceededError(PolicyDeniedError):
     """超每日重跑配额（FR-EX-002 AC2：拒绝并记账，HTTP/CLI 层据此分型）。"""
 
 
+# E5 AC④：环境/执行适配器不可用（模拟器全忙、simctl/xcodebuild 失败等）的 run
+# 错误必须把人直接引到可照跑的排障 runbook，而不是只留一句机器错误；普通业务
+# 异常（UnsupportedCapability 等）不带此指引，避免信号稀释。截断时预留指引长度，
+# 防止 500 字上限把 runbook 指针截没。
+_ENV_RUNBOOK_HINT = "；环境排障见 docs/03 §3.6 真机执行+取证 runbook 与 docs/13 故障排查章"
+_ERROR_COLUMN_LIMIT = 500
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -310,10 +318,14 @@ async def _process_job(container, job: dict[str, Any]) -> dict[str, Any]:
         return {"job_id": job["job_id"], "run_id": run_id, "outcome": status.value}
     except Exception as exc:
         status = transition_run_status(RunStatus.RUNNING, "finish_error")
+        error_text = f"{type(exc).__name__}: {exc}"
+        if isinstance(exc, AdapterUnavailableError):
+            error_text = error_text[:_ERROR_COLUMN_LIMIT - len(_ENV_RUNBOOK_HINT)] + _ENV_RUNBOOK_HINT
+        error_text = error_text[:_ERROR_COLUMN_LIMIT]
         store.update_test_run(
             run_id, status=status.value,
-            error=f"{type(exc).__name__}: {exc}"[:500], finished_at=_now_iso())
-        await queue.fail(job["job_id"], str(exc)[:500])
+            error=error_text, finished_at=_now_iso())
+        await queue.fail(job["job_id"], error_text)
         return {"job_id": job["job_id"], "run_id": run_id, "outcome": status.value}
 
 

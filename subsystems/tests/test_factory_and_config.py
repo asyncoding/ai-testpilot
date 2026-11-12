@@ -24,6 +24,7 @@ from testpilot_orchestrator.factory import build_container
 SUBSYSTEMS = Path(__file__).resolve().parents[1]
 PROFILE = SUBSYSTEMS / "config" / "profiles" / "offline-demo.yaml"
 IOS_PROFILE = SUBSYSTEMS / "config" / "profiles" / "ios-local-poc.yaml"
+XCODE_IOS_PROFILE = SUBSYSTEMS / "config" / "profiles" / "ios-local-poc-xcode.yaml"
 
 
 def test_load_profile_and_validate():
@@ -404,6 +405,50 @@ def test_unknown_runner_and_environment_types_rejected(tmp_path):
     config.adapters.environment = AdapterRef(type="device-farm", settings={})
     with pytest.raises(ValueError, match="未知 environment"):
         build_container(config, SUBSYSTEMS)
+
+
+# ── E5（docs/12）：ios-local-poc-xcode 真实执行 profile 装配回归 ───────────────
+
+def test_xcode_profile_wires_real_execution_stack_and_keeps_recorded_profile_intact(tmp_path):
+    """新 profile 四切换（runner/environment/logs/data_dir）落位；原 recorded profile 零污染。"""
+    from testpilot_adapters.ios_simulator_env import SimctlEnvironment
+    from testpilot_adapters.localfs_artifact import LocalFsArtifactAdapter
+    from testpilot_adapters.os_log import OsLogQueryAdapter
+    from testpilot_adapters.xcode_runner import XcodeTestRunner
+
+    # 原 profile 保持 recorded/stub（私改不夹带纪律的回归守卫）
+    recorded = load_profile(IOS_PROFILE)
+    assert recorded.adapters.runner.type == "recorded"
+    assert recorded.adapters.environment.type == "stub"
+    assert recorded.adapters.logs.type == "stub"
+
+    config = load_profile(XCODE_IOS_PROFILE)
+    assert config.profile == "ios-local-poc-xcode"
+    assert config.adapters.runner.type == "xcode"
+    assert config.adapters.environment.type == "ios-simulator"
+    assert config.adapters.logs.type == "os-log"
+    assert config.adapters.artifact.type == "localfs"
+    # 执行账本与录制 profile 物理隔离
+    assert config.paths["data_dir"] == "store/ios-local-poc-xcode"
+    assert config.paths["data_dir"] != recorded.paths["data_dir"]
+    # 设备清单非空（空清单会在构造期 AdapterUnavailableError）
+    devices = config.adapters.environment.settings["devices"]
+    assert devices and all(d["udid"] for d in devices)
+    # logs 的 udid 与模拟器池显式一致，拒绝 booted 隐式目标
+    assert config.adapters.logs.settings["udid"] == devices[0]["udid"]
+
+    config.paths["data_dir"] = str(tmp_path / "data")
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        assert isinstance(container.get("runner"), XcodeTestRunner)
+        assert isinstance(container.get("environment"), SimctlEnvironment)
+        assert isinstance(container.get("logs"), OsLogQueryAdapter)
+        assert isinstance(container.get("artifact"), LocalFsArtifactAdapter)
+        # runner 与环境池共享同一显式 udid
+        assert container.get("logs").udid == devices[0]["udid"]
+        assert container.get("runner").scheme == "AlarmKitSpike"
+    finally:
+        container.get("store").close()
 
 
 def test_stub_environment_not_registered_and_os_log_wiring(tmp_path):
