@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.1 实施中**（2026-11-13：E1 已落地并红证，E2–E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
+> 状态：**v1.2 实施中**（2026-11-13：E1/E2 已落地，E3–E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -184,7 +184,7 @@
 | AC | ①导出 JSON 通过 schema 自校验（`test_case_export_core.py` 11 例）；②cancelled 不进 cases 只进 excluded；③同库两次导出同内容 hash 一致（实测 `7e546181…` 两次相同）；④空库导出响亮失败 exit 2，不产空壳文件（ios-local-poc 空库实测 exit=2） |
 | 红证 | 已执行：临时把 active 过滤改为全量 → `test_cancelled_case_never_enters_cases_but_is_listed_in_excluded` 等 2 测试变红；还原变绿（19/19 通过，全量 1207 通过） |
 
-### E2 外部 Agent 协作约定与演示分支 runbook（约 0.5 人日，纯文档）
+### E2 外部 Agent 协作约定与演示分支 runbook（约 0.5 人日，纯文档）——✅ 已落地（2026-11-13，附录 A/B）
 
 - 产出：docs/12 附录 A（prompt 模板全文）、docs/13 说明书对应章；演示分支创建/合入/只读对接的完整 git 命令；
 - 演示分支约定名 `demo/agent-generated-tests`，从 `alarmkit-spike` 切出，README 顶部加"演示分支不合主线"声明（人工操作步骤写入说明书）；
@@ -250,3 +250,144 @@
 3. 不做 XCUITest 自动生成约定（仅保留人工显式要求的口子）；不做自动分支创建/自动合入；
 4. 不做 schema v16（映射走 raw_json + 独立 map 文件）；不改动 S2/S3/S4 既有语义与探针封存值；
 5. 不把外部 Agent 生成的代码拷入本仓，不把演示分支合入语料仓主线。
+
+---
+
+## 附录 A：外部 Agent prompt 模板（E2 产出，可整段复制）
+
+> 适用对象：Claude / 任意编码 Agent，在 **app-calendar-alarm 仓的演示分支工作区** 内执行。
+> 输入：E1 导出的 `case-set-*.json`（`case-export-v1`）。输出：带 TC 标记的 XCTest
+> 代码 + 生成报告，全部留在语料仓演示分支；testpilot 不内置此模板的任何自动化。
+
+```text
+你是 AlarmKitSpike（iOS Swift 6 / XCTest）项目的测试工程师。本次任务是把一份
+TestPilot 导出的结构化用例集（case-export-v1 JSON，随消息附上或给出文件路径）
+实现为可编译、可执行的 XCTest 单元测试。
+
+【开工前必读】
+1. 先读本仓 AGENTS.md 与 docs/requirements.md、docs/architecture.md、docs/agent_pitfalls.md；
+2. 读 JSON 的 generation_convention 段：marker_comment / naming / target_target
+   是本次生成的硬性约定，逐字遵守；
+3. 只读 cases[] 中 lifecycle=active 且 exploratory=false 的用例；
+   exploratory=true 与 oracle_missing=true 且无任何 oracle 的用例不生成代码，
+   写入报告的 skipped 清单并逐条说明原因。
+
+【代码规则】
+1. 每个测试方法上方独占一行写标记：// testpilot-case: <TC-ID>
+   一个方法覆盖多个 TC 时，连续写多行标记，每行一个 TC-ID；
+2. 方法命名：func test_<TC-ID 去横线转驼峰>_<英文蛇形短描述>()，
+   例 TC-C1 → func test_TCC1_countdownSnapshots()；转换规则与 TestPilot
+   tc_id_to_swift_token 同源（去 "-"，各段首字母大写）；
+3. 新代码只允许落在 AlarmKitSpike/Tests/AgentGenerated/ 目录（新文件，按模块命名，
+   如 RoutineAlarmAgentTests.swift），类名用 Agent<Module>Tests，不与存量类重名；
+4. 断言必须能回溯到该 TC 的 oracles[].expectation；mined_oracle_suggestions 中
+   status=approved 的条目可作为补充断言来源，pending/rejected 不得作为断言依据，
+   每条断言在方法内注释标注来源（oracle 序号或 suggestion）；
+5. 禁止事项：不改 Sources/ 下任何生产代码；不修改/删除 Tests 与 UITests 下存量
+   测试；不引入第三方依赖与新 Pod；不写 UITests（XCUITest 需人工显式另行要求）；
+   不做网络/UI 跳转，只构造纯 Foundation 输入调被测类型（参考存量 RoutineAlarmTests
+   的 hostless 风格：Calendar.shanghai、直接 init 领域模型）；
+6. 前置条件（preconditions）用私有 helper 或 setUp 表达；步骤（steps）翻译成
+   方法内分段注释 // Step 1 ...，保持与 JSON 文本可对照；
+7. 编译门禁（必须自行跑通后才算交付）：
+   xcodegen generate（在 AlarmKitSpike/ 目录，让新文件进入 Tests group）
+   xcodebuild build-for-testing -workspace AlarmKitSpike.xcworkspace \
+     -scheme AlarmKitSpike -destination 'platform=iOS Simulator,id=<本机 udid>'
+   失败必须修到通过，不允许留无法编译的交付物。
+
+【交付物】
+1. AlarmKitSpike/Tests/AgentGenerated/ 下的 Swift 文件；
+2. generation-report.md：一张「TC-ID → Swift 类/方法 → 所用 oracle 序号」映射表、
+   skipped 清单（含原因）、build-for-testing 的结论与时间；
+3. 全部改动以 git diff / 补丁形式给出，等待人工评审，禁止自行 commit 到受保护分支。
+```
+
+模板纪律：
+
+- prompt 本身、输入 JSON 快照、Agent 产出的补丁与 `generation-report.md` 由人工归档到
+  testpilot 写根 `external-generation/<export hash8>/`（生成物 gitignore，不入库），
+  满足 §3.2 第 6 条的逐 TC 可溯源（报告内映射表逐 TC 列条）；
+- 演示话术中外部生成环节必须如实表述为「系统外 Agent + 人审」，不得演示成系统内自动生成。
+
+## 附录 B：演示分支 git runbook（E2 产出，命令可整段复制）
+
+> 事实基线（2026-11-13 核对）：语料仓 app-calendar-alarm 当前分支 `alarmkit-spike`；
+> 当前产品工程在子目录 `AlarmKitSpike/`（根目录 project.yml 是已作废的
+> CalendarStrongReminder 规格，勿用）；测试 target `AlarmKitSpikeTests`
+> （`AlarmKitSpike/project.yml:74`，sources 为 `path: Tests` group，新增文件需
+> `xcodegen generate` 重新生成工程）；UI target `AlarmKitSpikeUITests`；
+> 存量测试 5 个单测类（Tests/）+ 1 个 UI 测试（UITests/）。
+> 以下全部路径相对语料仓根目录，不出现任何机器绝对路径。
+
+### B.1 一次性：创建长期演示分支（人工执行）
+
+```bash
+cd app-calendar-alarm
+git checkout alarmkit-spike
+git pull --ff-only
+git checkout -b demo/agent-generated-tests
+# 分支声明：在 README.md 顶部加一行「演示分支，永不合入主线，仅承载 Agent 生成测试」
+git add README.md
+git commit -m "docs: demo branch declaration (agent-generated tests, never merge)"
+git push -u origin demo/agent-generated-tests
+```
+
+testpilot 侧只读对接（profile 的 `project.repo_path` 指向本仓工作区即可，
+连接器全程不发起 push/merge）：
+
+```bash
+# 让 testpilot 扫描时看到演示分支，只需人工把本地工作区切到该分支
+git checkout demo/agent-generated-tests
+```
+
+### B.2 每轮生成：工作分支 → 外部 Agent → 编译门禁 → 人审合入演示分支
+
+```bash
+cd app-calendar-alarm
+git checkout demo/agent-generated-tests
+git pull --ff-only
+git checkout -b gen/<export-hash8>          # 一轮导出一条工作分支，hash 取自 E1 文件名
+
+# ① 人工把 case-set-*.json 交给外部 Agent（附录 A 模板），产物落
+#    AlarmKitSpike/Tests/AgentGenerated/，并取得 generation-report.md
+# ② 工程再生成 + 编译门禁（在子目录执行）
+cd AlarmKitSpike
+xcodegen generate
+xcodebuild build-for-testing \
+  -workspace AlarmKitSpike.xcworkspace \
+  -scheme AlarmKitSpike \
+  -destination 'platform=iOS Simulator,id=<本机模拟器 udid>'
+cd ..
+
+# ③ 人审：逐条核对标记/命名/断言溯源（generation-report.md 映射表），
+#    确认无生产代码改动、无第三方依赖
+git diff --stat
+git diff -- AlarmKitSpike/Sources/      # 必须为空：禁止改生产代码
+
+# ④ 合入长期演示分支（人工，fast-forward 或 --no-ff 均可，保留一轮一分支轨迹）
+git add AlarmKitSpike/Tests/AgentGenerated/ AlarmKitSpike/AlarmKitSpike.xcodeproj
+git commit -m "test(agent): generated tests for <export-hash8> (human reviewed)"
+git checkout demo/agent-generated-tests
+git merge --no-ff gen/<export-hash8> -m "merge: agent-generated tests <export-hash8>"
+git push origin demo/agent-generated-tests
+```
+
+### B.3 回流后：testpilot 扫描与执行（系统内，E3/E4 实现，此处只给顺序）
+
+```bash
+# 回到 testpilot 工作区；语料仓已在 demo/agent-generated-tests 分支且含新测试
+cd ai-testpilot/subsystems
+TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml uv run testpilot-scan-automation
+# E4（切片实现后）：
+TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml \
+  uv run testpilot-impact-rerun --base <base-sha> --head <head-sha> --dry-run
+```
+
+### B.4 回滚与对账
+
+- 单轮回滚：`git revert -m 1 <merge commit>`（演示分支可强推的约定由仓库所有者定，
+  runbook 默认用 revert 保留轨迹）；
+- testpilot 侧重扫即重建 automation-map（E3 幂等），map 文件自身带 `head_commit`，
+  与语料仓 HEAD 不一致时 E4 拒绝提交执行并提示重扫，杜绝对着过期映射跑测试；
+- 演示分支永不合入 `alarmkit-spike`/`master`；如误合，按语料仓正常 revert 流程处理，
+  testpilot 不提供也不需要任何写语料仓的能力。
