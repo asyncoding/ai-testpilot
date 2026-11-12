@@ -1220,6 +1220,30 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    # ── E3 自动化身份映射投影（docs/12 §3.3，schema v15 零变更）──────────
+    def project_case_automation(
+        self, external_id: str, automation: dict[str, Any]
+    ) -> int:
+        """把 automation-map 投影合并进 test_cases.raw_json 的 ``automation`` 键。
+
+        只读写 raw_json 一个 JSON 键（读-改-写），不动表结构与既有键；
+        返回受影响行数（0 = 该 external_id 在用例库不存在，由调用方警告）。
+        """
+        rows = self.conn.execute(
+            "SELECT urn, raw_json FROM test_cases WHERE external_id=?",
+            (external_id,),
+        ).fetchall()
+        for row in rows:
+            data = json.loads(row["raw_json"])
+            data["automation"] = automation
+            self.conn.execute(
+                "UPDATE test_cases SET raw_json=? WHERE urn=?",
+                (json.dumps(data, ensure_ascii=False), row["urn"]),
+            )
+        if rows:
+            self.conn.commit()
+        return len(rows)
+
     # ── S2.5 人审留痕（FR-TD-004 / FR-WR-001）────────────────────────────
     @staticmethod
     def _suggestion_row_to_dict(r: sqlite3.Row) -> dict[str, Any]:

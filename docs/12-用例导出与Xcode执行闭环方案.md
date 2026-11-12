@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.2 实施中**（2026-11-13：E1/E2 已落地，E3–E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
+> 状态：**v1.2 实施中**（2026-11-13：E1/E2/E3 已落地，E4–E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -136,7 +136,7 @@
 
 ### 3.3 契约三：自动化映射文件（`automation-map-v1`，E3 产出）
 
-落盘 `store/<profile>/automation-map.json`，可人审编辑后重跑扫描合入。
+落盘 `store/<profile>/automation-map.json`（`--out` 可改路径），可人审编辑后重跑扫描合入，或用 `--bind/--review` CLI 登记。
 
 ```json
 {
@@ -145,6 +145,7 @@
   "repo_path": ".../app-calendar-alarm",
   "branch": "demo/agent-generated-tests",
   "head_commit": "<sha>",
+  "map_hash": "<sha256，剔除 generated_at/map_hash 自身后规范化哈希；head_commit 参与哈希——HEAD 移动 hash 必变>",
   "bindings": [
     {
       "case_external_id": "TC-C1",
@@ -167,10 +168,10 @@
 
 规则：
 
-- `origin=marker`：扫描器按 TC 标记自动绑定；`origin=manual`：人审对无标记存量测试的手工绑定（编辑本文件后由校验命令重新校验，Swift 方法必须真实存在）；
-- 一个 TC 可绑定多个方法（执行时标识符全量带入、xcresult 按方法分别回收）；一个方法标记多个 TC 时执行记录双向回链；
+- `origin=marker`：扫描器按 TC 标记自动绑定；`origin=manual`：人审对无标记存量测试的手工绑定（CLI `--bind <TC>=<Target/Class/method> --by <人>`，或编辑本文件后重扫合入；Swift 方法必须真实存在，悬空即 fail-closed）；
+- 一个 TC 可绑定多个方法（执行时标识符全量带入、xcresult 按方法分别回收，产生 exit 3 警告催人审）；一个方法标记多个 TC 时执行记录双向回链；
 - 映射同时投影到 `test_cases.raw_json.automation`（只追加、reindex 存活口径同知识治理），**schema 保持 v15 不动**；
-- 校验失败（TC 不存在、Swift 方法不存在、重复标记冲突）→ 非零退出 + 警告明细，不产出有效绑定。
+- 三档退出码：**exit 2 硬错误**（TC 不存在/非活跃、畸形标记、非法 OID、悬空 manual、旧 map 损坏）→ 不写 map、不覆盖旧 map；**exit 3 警告**（一 TC 多方法、探索性标记被剔除）→ map 照写催人审；**exit 0** 干净。重扫幂等：同 HEAD 同内容 map_hash 稳定，人审记录跨重扫保留。
 
 ## 4. 切片设计（E1–E5）
 
@@ -190,16 +191,19 @@
 - 演示分支约定名 `demo/agent-generated-tests`，从 `alarmkit-spike` 切出，README 顶部加"演示分支不合主线"声明（人工操作步骤写入说明书）；
 - AC：第三方按 runbook 从零操作可独立完成分支创建与一次示例生成；命令全部可复制执行，无机密/绝对路径。
 
-### E3 自动化身份映射器（约 1.5–2 人日，本方案核心）
+### E3 自动化身份映射器（约 1.5–2 人日，本方案核心）——✅ 已落地（2026-11-13）
 
 | 项 | 内容 |
 |---|---|
-| 新增 | `core/automation_mapping.py`（零 IO 纯函数：Swift 文件内容字典 → 测试方法清单 + 标记解析 + 绑定/未链接/未映射/警告）；`workers/scan_automation.py`（CLI `testpilot-scan-automation`，第 14 个入口）负责文件遍历与落盘 |
-| 扫描口径 | 正则识别 `class …Tests` 与 `func test\w+`（Swift 方法签名封闭形态，不引 Swift 解析器）；标记只认行首空白后 `// testpilot-case: TC-…`；target 按目录映射（Tests→AlarmKitSpikeTests，UITests→AlarmKitSpikeUITests） |
-| 人审 | `--review <TC-ID> --by <人>` 对 manual 绑定登记 reviewer；扫描默认保留已有人审绑定不覆盖 |
-| 投影 | 绑定结果写 `test_cases.raw_json.automation`（store 增 upsert 方法，零 schema 变更） |
-| AC | ①带标记样例文件绑定正确率 100%（含一方法多 TC、一 TC 多方法）；②不存在的 TC 标记、重复冲突标记进 warnings 且 exit 非零；③存量无标记测试全部进 unlinked_swift_tests；④manual 绑定指向已删除方法时校验失败；⑤重跑扫描幂等，map 内容 hash 稳定 |
-| 红证 | 删掉标记正则分支 → 样例绑定数归零、测试变红；还原变绿 |
+| 新增 | `core/automation_mapping.py`（零 IO 纯函数：Swift 文件内容字典 → 测试方法清单 + 标记解析 + 绑定/未链接/未映射/警告）；`workers/scan_automation.py`（CLI `testpilot-scan-automation`，第 14 个入口）负责文件遍历与落盘；`sqlite_store.project_case_automation()` 投影方法（schema v15 零 DDL） |
+| 扫描口径 | 正则识别 `class …Tests` 与 `func test\w+`（Swift 方法签名封闭形态，不引 Swift 解析器）；标记只认行首空白后 `// testpilot-case: TC-…`，挂在下方最近方法、遇 class 清空悬挂标记；target 按目录映射（Tests→AlarmKitSpikeTests，UITests→AlarmKitSpikeUITests）；非 ASCII 方法名（如 `test调休`）不被 `\w+` 识别，不计入台账 |
+| 人审 | `--review <TC-ID> --by <人>` 登记 marker 绑定 reviewer；`--bind <TC-ID>=<Target/Class/method>` 手工绑定无标记存量测试（必须配 `--by`）；重扫自动保留旧 map 的人审记录与 manual 绑定并重新校验，悬空 manual fail-closed 且不覆盖旧 map |
+| 三档退出码 | **0** 干净；**2** 硬错误（未知/非活跃 TC、畸形标记、非法 OID、悬空 manual、旧 map 损坏——不写 map）；**3** map 已产出但有警告（一 TC 多方法、探索性绑定被剔除），催人审 |
+| 投影 | 每个活跃用例写 `test_cases.raw_json.automation = {mapped, bindings, head_commit, map_hash, projected_at}`，未映射用例显式负态，零 schema 变更 |
+| AC | ①带标记样例文件绑定正确率 100%（含一方法多 TC、一 TC 多方法）；②不存在的 TC 标记、畸形标记 fail-closed exit 2；③存量无标记测试全部进 unlinked_swift_tests；④manual 绑定指向已删除方法时校验失败且旧 map 字节不变；⑤重跑扫描幂等，同 HEAD 下 map_hash 稳定，HEAD 移动 hash 必变 |
+| 测试 | hostless 纯函数 12 条 + worker hermetic 5 条 = 18 条全绿；全量 **1225 passed**（1207 基线 + 18），import-lint OK |
+| 红证 | 已执行：临时掐断 marker 入对分支（`if False and marker_match`）→ 7 条测试变红（marker 绑定/未知 TC/探索性剔除/投影/CLI 退出码全链路）；还原后 18/18 复绿 |
+| 真仓冒烟 | `ios-local-poc` profile 对真实语料仓 `app-calendar-alarm`（alarmkit-spike @ 7936295a）只读扫描：10 个 Swift 测试文件、110 个测试方法全部正确入册，双 target（AlarmKitSpikeTests / AlarmKitSpikeUITests）分流正确，空用例库下 bindings=0、unmapped=[]、exit 0；语料仓 git 状态前后不变（纯只读） |
 
 ### E4 影响面 → 选择执行接线（约 1–1.5 人日）
 
