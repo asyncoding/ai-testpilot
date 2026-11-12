@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.2 实施中**（2026-11-13：E1/E2/E3/E4 已落地，E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
+> 状态：**v1.3 五切片全部落地**（2026-11-13：E1/E2/E3/E4/E5 已落地并完成真实 xcodebuild 端到端验证；全量 1248 测试、verify_s0 24/24）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -203,7 +203,7 @@
 | AC | ①带标记样例文件绑定正确率 100%（含一方法多 TC、一 TC 多方法）；②不存在的 TC 标记、畸形标记 fail-closed exit 2；③存量无标记测试全部进 unlinked_swift_tests；④manual 绑定指向已删除方法时校验失败且旧 map 字节不变；⑤重跑扫描幂等，同 HEAD 下 map_hash 稳定，HEAD 移动 hash 必变 |
 | 测试 | hostless 纯函数 12 条 + worker hermetic 5 条 = 18 条全绿；全量 **1225 passed**（1207 基线 + 18），import-lint OK |
 | 红证 | 已执行：临时掐断 marker 入对分支（`if False and marker_match`）→ 7 条测试变红（marker 绑定/未知 TC/探索性剔除/投影/CLI 退出码全链路）；还原后 18/18 复绿 |
-| 真仓冒烟 | `ios-local-poc` profile 对真实语料仓 `app-calendar-alarm`（alarmkit-spike @ 7936295a）只读扫描：10 个 Swift 测试文件、110 个测试方法全部正确入册，双 target（AlarmKitSpikeTests / AlarmKitSpikeUITests）分流正确，空用例库下 bindings=0、unmapped=[]、exit 0；语料仓 git 状态前后不变（纯只读） |
+| 真仓冒烟 | `ios-local-poc` profile 对真实语料仓 `app-calendar-alarm`（alarmkit-spike @ 7936295a）只读扫描：10 个 Swift 测试文件、110 个测试方法全部正确入册，双 target（AlarmKitSpikeTests / AlarmKitSpikeUITests）分流正确，空用例库下 bindings=0、unmapped=[]、exit 0；语料仓 git 状态前后不变（纯只读）。**E5 注记（2026-11-13）**：该次冒烟的 110/10 含仓里根 `Tests/` 作废 SPM 包的 12 方法/4 文件，E5 真实 xcodebuild 联调前抓出并修复（工程根 containment），修复后口径为 98 方法/6 文件，详见 E5 章 |
 
 ### E4 影响面 → 选择执行接线（约 1–1.5 人日）——✅ 已落地（2026-11-13）
 
@@ -219,12 +219,19 @@
 | 红证 | 已执行：放开空选择守卫（`if True or ...` 提前 return）→ 2 条守卫测试精准变红（core + worker 各一）；还原后 19/19 复绿，与既有 `validate_only_testing` 空选择拒绝互证 |
 | 真 profile 冒烟 | `ios-local-poc` 对真实语料仓（alarmkit-spike 真实 sha 区间）：真 git diff 链路打通；缺 map → exit 2 带补映射提示；构造过期 map → "已过期" exit 2；鲜 map 零绑定 → "选择集为空" exit 2（冒烟 map 写 gitignored 的 store/ 工作区，验完即删） |
 
-### E5 xcode profile 与端到端验证（约 1 人日）
+### E5 xcode profile 与端到端验证（约 1 人日）——✅ 已落地（2026-11-13）
 
-- 新增 `config/profiles/ios-local-poc-xcode.yaml`：**复制** ios-local-poc 后仅改 `runner: {type: xcode, settings: {workspace/scheme/xcresult_work_dir/result_bundle_dir}}`、`environment: {type: ios-simulator, ...}`、`artifact: localfs`（factory 已强制）；原 profile 的 recorded 链路原样保留作离线兜底；
-- 不改 `ios-local-poc.yaml`（私改不夹带 + 回退零成本）；
-- 端到端：场景 A 全链跑通一次（导出→外部生成以预制备的演示分支产物替代现场生成→扫描→执行 1 条真实单测），场景 B 用演示分支两个真实 commit 跑 impact-rerun；
-- AC：①两 profile 装配自检均 ready；②xcode profile 下执行产生真实 xcresult 制品 URN 与 CaseResult；③录制 profile 回归零影响；④模拟器不可用时错误信息明确指向 docs/03 §3.6 runbook。
+| 项 | 内容 |
+|---|---|
+| 新增 profile | `config/profiles/ios-local-poc-xcode.yaml`：与 ios-local-poc 五处差异组——①runner recorded→**xcode**（真实 xcodebuild，SubprocessExecutor 永不 shell）；②environment stub→**ios-simulator**（simctl 设备池，先租后跑，udid 透传 labels）；③logs stub→**os-log**（显式 udid，拒绝 booted 隐式目标）；④data_dir 独立 `store/ios-local-poc-xcode`，执行账本与录制 profile 物理隔离；⑤xcresult 工作/产物根独立。limits 放宽 request_timeout 900s / lease 1200s（冷启动分钟级），daily_rerun_quota=20；其余适配器一字不差，原 `ios-local-poc.yaml` 零改动（私改不夹带，回退零成本） |
+| 实测抓出的 E3 精度缺陷 | 真仓首扫把仓里根 `Tests/CalendarStrongReminderTests/`（2026-08 已作废的 CalendarStrongReminder SPM 包，4 文件 12 方法，不被 AlarmKitSpike.xcworkspace 编译）误纳进 AlarmKitSpikeTests（110 = 98 真实 + 12 作废），其 OID 跑 xcodebuild 必然 suite-not-found。修复：`core.automation_mapping.target_for_path` 两道 containment——路径必须含工程根段 `AlarmKitSpike`，工程根内再按 Tests/UITests 分 target；worker 文件遍历改以 core 为唯一判定源。红证：先加 `test_target_for_path_rejects_stale_root_package_outside_workspace` 看红，再修变绿；修复后真扫 **98 方法（86 单元 + 12 UI）、scanned_files 10→6** |
+| 场景 A 真实全链 | 提交 `run-f9e66995606b` → runner run-once 真实 xcodebuild 冷启动 ~2m52s → **passed**；环境 provider=ios-simulator、env_id=5411787C-8AFF-4EBF-9000-EB5EFD1457D5；CaseResult `AlarmKitSpike/AlarmKitSpikeTests/RoutineAlarmTests/testWeekend()` passed；制品 `urn:testpilot:localfs-artifact:xcresult:fc6596af4f37-test-results.json@fc6596af4f37`（keys devices/testNodes/testPlanConfigurations，设备 iPhone 17 / iOS 27.0）；`.xcresult` bundle 含真实 `Data/database.sqlite3`+`Info.plist`（非 fail-closed 占位）；capability=xcresulttool-schema-0.4.0；uncovered_layers=[background_audio, codesigning, ios.device] 如实留档 |
+| 场景 B 真实全链（commit diff→影响→选择重跑） | 真实区间 `09b473b→7936295`（语料仓 alarmkit-spike）：①最小播种（脚本 `subsystems/out/e5_scenario_b_seed.py`，gitignored）按 hermetic 测试同口径播 1 文档/1 符号 chunk（锚点 `RoutineAlarmScheduler.runReconcile()` 取自该区间真实 git diff）/1 用例 TC-IMPACT-1/1 条 case_references_symbol 关系，打通「真实 diff→库内 URN→用例」唯一未覆盖接缝；②真实 scan-automation 落 map（map_hash `d7a0c2e5…`，head=7936295a，1 条 manual 绑定 → `AlarmKitSpikeTests/RoutineAlarmTests/testWeekend`，97 未链接，6 文件，exit 0）；③dry-run：runnable=1、选择集恰为该 OID、幂等键 `impact:7936295a700c:da647889db8e51ba`、账本零写入；④真实提交 `run-aadf932176c1`（queued, replayed=false），同参重放返回**同 run_id 且 replayed=true、jobs 零增生**，rerun_budget 桶 `impact:7936295a700c` 仅 1 行；⑤run-once 真实 xcodebuild **passed**，制品 `…:82fab885eeb5-test-results.json@82fab885eeb5`（testNodes 1 个 Passed，同台 iPhone 17/iOS 27.0），真实 bundle `run-aadf932176c1.xcresult` |
+| 真机库负链守卫 | map 停在旧 head（--head 传父 sha）→ exit 2「automation-map 已过期…禁止拿旧映射跑新代码」；`--map` 指向不存在路径 → exit 2 带「请先运行 testpilot-scan-automation」可操作提示；两守卫均在真实进程 + 真实 git 链路上验证，零入队 |
+| AC④ runbook 指引 | `execution_service` 外层 except 对 `AdapterUnavailableError`（模拟器全忙/simctl/xcodebuild 失败族）统一追加「环境排障见 docs/03 §3.6 与 docs/13 故障排查章」，500 字截断预留指引长度防截没；run 账本 error 与 jobs 死信原因同文；普通业务异常不挂指引（负对照测试防信号稀释） |
+| 红证 | 已执行：临时 `if False and isinstance(...)` 掐断指引 → `test_adapter_unavailable_error_carries_runbook_hint` 精准变红、负对照保持绿；还原后复绿。另含 E3 containment 红证一条（见上） |
+| 测试与门禁 | 新增 4 条测试（containment 回归 1 + xcode profile 装配 1 + runbook 指引正/负 2），全量 **1248 passed**（1244→1246→1248），import-lint OK；verify_s0 **24/24 两轮全绿**（含 execution_service 改动后复跑），s3/s4/xcode-adapter/xcresult-oslog 探针全绿；schema 定格 **v15 零 DDL**（实测 34 表 = schema.sql 27 张业务表 + chunks_fts 6 张 FTS5 影子表 + sqlite_sequence） |
+| 验证边界（如实声明） | ①长期演示分支 `demo/agent-generated-tests` 尚不存在，由人工按附录 B 创建；本次 E2E 在 alarmkit-spike 工作区**纯只读**进行，map 的 branch 字段如实记录 alarmkit-spike，鲜度只锚 head_commit；②场景 B 知识侧用单锚点最小播种证明接缝，完整「需求→测试点→用例→关系」S2 管线由 A10–A18 hermetic 探针与既有入库流程覆盖，docs/13 给完整人工操作顺序；③模拟器三未覆盖层（后台音频/签名/真机）本地永不可验，只能真机/生产验，docs/03 §3.6 手动 runbook 永不进 verify_s0 |
 
 ## 5. 验收总表与红证清单
 
@@ -233,8 +240,8 @@
 | 单测 | 三个新 core 纯函数模块 hostless 测试 + 三个 CLI 的夹具测试，进 pytest 全量 |
 | 契约 | case-export-v1 / automation-map-v1 各一份封存样例 + schema 自校验测试 |
 | 红证（四条） | cancelled 混入、标记正则删除、空选择守卫放开、manual 绑定悬空——每条必须实测红→绿并留记录 |
-| 回归 | import-lint、verify_s0 全 PASS、A19–A24 既有探针零退化、schema 定格 v15（启动后 PRAGMA 对账 40 表不变） |
-| 端到端 | 场景 A/B 各一次真实跑通，证据（导出 JSON、map、xcodebuild 输出、xcresult 摘要、归因结论）入 `out/` 工作区并在 docs/13 给路径 |
+| 回归 | import-lint、verify_s0 全 PASS（E5 两轮 24/24）、A19–A24 既有探针零退化、schema 定格 **v15 零 DDL**（PRAGMA 实测 34 表 = 27 业务表 + 6 张 chunks_fts FTS5 影子表 + sqlite_sequence） |
+| 端到端 | 场景 A/B 各一次真实跑通并留证：A=`run-f9e66995606b`（制品 URN `fc6596af4f37…`），B=`run-aadf932176c1`（map_hash `d7a0c2e5…`、制品 URN `82fab885eeb5…`），均为真实 xcodebuild + 真实 .xcresult bundle；证据落 gitignored `store/ios-local-poc-xcode/`，复现命令与路径见 docs/13 |
 
 ## 6. 工期与切片顺序
 

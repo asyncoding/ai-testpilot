@@ -217,6 +217,23 @@ def test_target_for_path_directory_mapping():
     assert target_for_path("AlarmKitSpike/Sources/X.swift") is None
 
 
+def test_target_for_path_rejects_stale_root_package_outside_workspace():
+    """回归（E5 实测抓出）：根 Tests/ 是 2026-08 作废的 CalendarStrongReminder
+    SPM 包，不在 AlarmKitSpike.xcworkspace 内，其测试 OID 传给 xcodebuild
+    必然 suite-not-found；含 Tests 段但缺 AlarmKitSpike 工程根一律不映射。"""
+    assert target_for_path(
+        "Tests/CalendarStrongReminderTests/AlarmSchedulerTests.swift") is None
+    assert target_for_path(
+        "Tests/CalendarStrongReminderTests/StressTests.swift") is None
+    # 工程根内的 AgentGenerated 落点仍正常识别（附录 A 的生成目录）
+    assert target_for_path(
+        "AlarmKitSpike/Tests/AgentGenerated/RoutineAlarmAgentTests.swift"
+    ) == "AlarmKitSpikeTests"
+    # Windows 风格分隔符同样按工程根 containment 判定
+    assert target_for_path(
+        "Tests\\CalendarStrongReminderTests\\AnalyticsTests.swift") is None
+
+
 def test_map_payload_hash_idempotent_and_head_sensitive():
     result = _scan()
     map1 = build_automation_map(

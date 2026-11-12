@@ -31,6 +31,12 @@ from .case_export import DEFAULT_TEST_TARGET, DEFAULT_UI_TEST_TARGET
 
 AUTOMATION_MAP_SCHEMA_VERSION = "automation-map-v1"
 
+# 唯一在 Xcode workspace 内的工程根（AlarmKitSpike.xcworkspace）。仓里根 Tests/
+# 属于 2026-08 已作废的 CalendarStrongReminder SPM 包（根 project.yml 同为作废
+# 规格），其测试不被 workspace 编译，OID 传给 xcodebuild 会 suite-not-found。
+# E5 实测：旧口径把根 Tests/CalendarStrongReminderTests 的 12 个方法误纳进映射。
+PROJECT_ROOT_SEGMENT = "AlarmKitSpike"
+
 _CLASS_RE = re.compile(r"\bclass\s+(?P<name>[A-Za-z_]\w*)\b")
 _FUNC_RE = re.compile(r"\bfunc\s+(?P<name>test[A-Za-z0-9_]\w*)\s*\(")
 _MARKER_RE = re.compile(r"^\s*//\s*testpilot-case:\s*(?P<tc>[A-Za-z0-9_-]+)\s*$")
@@ -81,9 +87,16 @@ def target_for_path(
     path: str, *,
     unit_target: str = DEFAULT_TEST_TARGET,
     ui_target: str = DEFAULT_UI_TEST_TARGET,
+    project_root: str = PROJECT_ROOT_SEGMENT,
 ) -> str | None:
-    """目录 → Xcode target；非测试目录返回 None（调用方跳过该文件）。"""
+    """目录 → Xcode target；非 workspace 工程内的路径返回 None（调用方跳过）。
+
+    两道 containment：①路径必须含工程根段（AlarmKitSpike），挡掉仓里根 Tests/
+    的作废 SPM 包；②工程根内再按 Tests/UITests 目录段分 target。
+    """
     parts = path.replace("\\", "/").split("/")
+    if project_root not in parts:
+        return None
     if any(part == "UITests" or part.endswith("UITests") for part in parts):
         return ui_target
     if any(part == "Tests" or part.endswith("Tests") for part in parts):

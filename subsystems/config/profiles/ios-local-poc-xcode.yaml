@@ -1,0 +1,130 @@
+# ios-local-poc-xcode：Xcode 真实执行链路专用 profile（docs/12 E5，2026-11-13）
+# 与 ios-local-poc 的唯一差异组：
+#   1) runner: recorded → xcode（真实 xcodebuild，经 SubprocessExecutor 永不 shell）；
+#   2) environment: stub → ios-simulator（simctl 设备池，先租后跑，udid 透传 labels）；
+#   3) logs: stub → os-log（真实 os_log 取证，显式 udid 拒绝 booted 隐式目标）；
+#   4) data_dir 独立为 store/ios-local-poc-xcode，执行账本与录制 profile 物理隔离；
+#   5) xcresult 工作/产物根独立目录，全部落在 gitignored store/ 下。
+# 其余适配器（git/docs/检索/模型/队列/归因）与 ios-local-poc 一字不差；
+# 原 ios-local-poc.yaml 的 recorded 离线链路原样保留，本文件不回写不污染。
+# 模拟器不可用时的降级 runbook 见 docs/03 §3.6 与 docs/13 故障排查章。
+profile: ios-local-poc-xcode
+
+project:
+  name: AlarmKitSpike
+  # 真实被测仓在另一个仓库（docs/03），不拷贝进本仓；路径走环境变量覆盖，禁止写死：
+  #   export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
+  repo_path: ../../app-calendar-alarm
+  # 演示时人工在语料仓工作区 checkout demo/agent-generated-tests（docs/12 附录 B）；
+  # map 鲜度以 head_commit 为锚，default_branch 保持主线名供 docs/search 分支标签使用。
+  default_branch: alarmkit-spike
+  tech_stack: ios
+  ios:
+    workspace: AlarmKitSpike/AlarmKitSpike.xcworkspace
+    scheme: AlarmKitSpike
+    simulator_udid: 5411787C-8AFF-4EBF-9000-EB5EFD1457D5
+
+paths:
+  data_dir: store/ios-local-poc-xcode
+  fixtures_dir: tests/fixtures
+
+external_write_enabled: true
+
+# 真实 xcodebuild 冷启动（build-for-testing + 模拟器启动）分钟级，默认 60s 会被
+# wait_for 判超时；演示 profile 放宽到 15 分钟，队列租约同步放宽到 20 分钟。
+limits:
+  request_timeout_s: 900
+  execution_lease_seconds: 1200
+  max_concurrency: 1
+  daily_rerun_quota: 20
+
+adapters:
+  scm:
+    type: git
+    settings:
+      timeout_s: 15
+  docs:
+    type: fs-docs
+    settings:
+      roots:
+        - ${REPO_PATH}            # 事故复盘/PRD/技术方案等 Markdown（配合 excludes）
+      code_roots:
+        - ${REPO_PATH}/AlarmKitSpike/Sources
+        - ${REPO_PATH}/AlarmKitSpike/Shared
+        - ${REPO_PATH}/AlarmKitSpike/WidgetExtension
+      excludes:
+        - "**/node_modules/**"
+        - "**/build/**"
+        - "**/Pods/**"
+        - "**/.git/**"
+        - "**/.agent-handoff/**"
+        - "**/icon-drafts/**"
+        - "**/*.bak"
+        - "**/CLAUDE.md"
+        - "**/AGENT.md"
+        - "**/小红书文案.md"
+        - "docs/功能设计文档.md"
+        - "docs/功能细化设计文档.md"
+        - "docs/技术方案文档.md"
+        - "docs/项目计划文档.md"
+        - "docs/日历闹钟-本地通知版.md"
+        - "docs/日历闹钟-快捷指令版.md"
+        - "PRD.md"
+        - "TECHNICAL-PLAN.md"
+        - "README.md"
+        - "2026-09-15.md"
+        - "Claude code vs 其他Agent的优势.md"
+      authority_overrides:
+        - {glob: "docs/**", level: L1_authoritative}
+        - {glob: "Resources/**", level: L1_authoritative}
+  cases:      {type: stub}
+  tickets:    {type: json}
+  ci_events:  {type: json-replay}
+  # E5 核心切换：真实 xcodebuild（factory 强制 artifact=localfs，见下）。
+  # workspace 相对 repo_path 拼 cwd；result bundle 按 run_id 命名、先删后跑防拒覆盖。
+  runner:
+    type: xcode
+    settings:
+      workspace: AlarmKitSpike/AlarmKitSpike.xcworkspace
+      scheme: AlarmKitSpike
+      xcresult_work_dir: store/ios-local-poc-xcode/xcresult-work
+      result_bundle_dir: store/ios-local-poc-xcode/xcresult
+  # simctl 设备池：空清单在构造期即 AdapterUnavailableError（不让坏 profile 拖到运行期）。
+  # udid 可用环境换机型后改这里；capabilities 决定 EnvironmentPort 能力匹配。
+  environment:
+    type: ios-simulator
+    settings:
+      devices:
+        - udid: 5411787C-8AFF-4EBF-9000-EB5EFD1457D5
+          name: iPhone 17
+          capabilities: [ios.simulator, ui.automation]
+      lease_timeout_s: 300
+  artifact:   {type: localfs}   # runner=xcode 的硬性要求：xcresult 附件内容寻址落盘
+  # 真实 os_log 取证：必须显式 udid，查询条件可复现，不接受 booted 隐式目标。
+  logs:
+    type: os-log
+    settings:
+      udid: 5411787C-8AFF-4EBF-9000-EB5EFD1457D5
+  search:
+    type: hybrid
+    settings:
+      channel_top_k: 20
+      rrf_k: 60
+      quality_power: 1.0
+      half_life_days: null
+  model:
+    type: ollama
+    settings:
+      base_url: http://localhost:11434
+      chat_model: qwen2.5:7b
+      embed_model: shaw/dmeta-embedding-zh
+      timeout: 60
+      keep_alive: 30m
+  vectors:
+    type: chroma
+    settings:
+      base_url: http://localhost:8000
+      collection: alarmkitspike-chunks
+      timeout: 30
+  queue:      {type: sqlite}
+  tracer:     {type: noop}

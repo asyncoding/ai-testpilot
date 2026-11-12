@@ -32,6 +32,7 @@ from testpilot_core.automation_mapping import (
     automation_map_hash,
     build_automation_map,
     scan_swift_tests,
+    target_for_path,
 )
 from testpilot_core.case_export import DEFAULT_TEST_TARGET, DEFAULT_UI_TEST_TARGET
 
@@ -42,7 +43,11 @@ _MAP_FILENAME = "automation-map.json"
 
 
 def _iter_swift_files(repo_root: Path) -> dict[str, str]:
-    """收集测试目录下的 swift 文件（相对路径 → 文本），跳过构建/依赖目录。"""
+    """收集 workspace 工程内测试 target 的 swift 文件（相对路径 → 文本）。
+
+    target 判定唯一走 core.target_for_path：既跳过构建/依赖目录，也挡住
+    仓里根 Tests/ 的作废 SPM 包（不在 AlarmKitSpike.xcworkspace 内）。
+    """
     files: dict[str, str] = {}
     for path in sorted(repo_root.rglob("*.swift")):
         if any(part in _SKIP_DIRS for part in path.parts):
@@ -51,11 +56,7 @@ def _iter_swift_files(repo_root: Path) -> dict[str, str]:
             rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             continue
-        # target_for_path 在 core 内做目录判定，非测试目录在此先读也无妨，
-        # 但为控制 IO，先用路径段粗筛。
-        if not any(part == "Tests" or part.endswith("Tests")
-                   or part == "UITests" or part.endswith("UITests")
-                   for part in path.parts):
+        if target_for_path(rel) is None:
             continue
         files[rel] = path.read_text(encoding="utf-8")
     return files

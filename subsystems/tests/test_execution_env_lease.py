@@ -228,6 +228,44 @@ async def test_all_devices_busy_marks_error_without_submit(tmp_path):
         c.close()
 
 
+async def test_adapter_unavailable_error_carries_runbook_hint(tmp_path):
+    """E5 AC④：环境/适配器不可用时 run 与 job 错误都必须指向排障 runbook。"""
+    env = FakeEnvironment(acquire_exc=AdapterUnavailableError(
+        "没有空闲模拟器（全部被占用），请稍后重试或扩容"))
+    runner = RecordingRunner()
+    c = Shim(tmp_path, runner, env)
+    try:
+        await svc.submit_execution(c, _req())
+        summary = await svc.run_once(c)
+        row = c.get("store").get_test_run_row(summary["run_id"])
+        assert "没有空闲模拟器" in row["error"]
+        assert "docs/03 §3.6" in row["error"]
+        # 队列死信原因同样带指引，巡检 jobs 表就能定位 runbook
+        job = c.get("store").conn.execute(
+            "SELECT error FROM jobs WHERE id=?", (summary["job_id"],)).fetchone()
+        assert "docs/03 §3.6" in job["error"]
+        assert runner.submit_calls == 0
+    finally:
+        c.close()
+
+
+async def test_non_adapter_error_does_not_carry_runbook_hint(tmp_path):
+    """负对照：普通业务异常不挂环境 runbook 指引，防止信号稀释。"""
+    env = FakeEnvironment()
+    runner = RecordingRunner(explode=RuntimeError("boom: 业务逻辑炸了"))
+    c = Shim(tmp_path, runner, env)
+    try:
+        await svc.submit_execution(c, _req())
+        summary = await svc.run_once(c)
+        row = c.get("store").get_test_run_row(summary["run_id"])
+        assert "RuntimeError: boom" in row["error"]
+        assert "docs/03 §3.6" not in row["error"]
+        # 适配器异常路径的租约释放纪律不受影响
+        assert env.released == ["envlease-1"]
+    finally:
+        c.close()
+
+
 async def test_timeout_still_releases_lease_and_cancels_runner(tmp_path):
     env = FakeEnvironment()
     c = Shim(tmp_path, SlowRunner(sleep_s=0.3), env)
