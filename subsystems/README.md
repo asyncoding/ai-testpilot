@@ -851,7 +851,7 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
 | 优先级强制 | 优先级只从 FR 映射（缺省 P2），模型载荷**没有 priority 字段**，P0/P1 指标无法被模型灌水 |
 | 幻觉台账 | 违规逐行拒入 `RejectedPoint`（unknown_fr/unknown_source/empty_text/bad_kind/bad_shape），worker 落 `dead_letters`（source=`tp-gen`），**绝不进 test_points 正式清单**；整包形状错抛异常 → 纯确定性降级；幻觉率 = 拒入 /（有效模型点 + 拒入），重复行去重不进分母 |
 | 影响面检索 | 相似用例走 `search_test_cases`（FR tag json_each 精确 + 标题 LIKE，仅活跃、P0→P3 排序）；事故/符号走现有检索适配器按 kind 分流；检索故障只计 `retrieval_degraded`，不编造证据 URN |
-| 盲标评测 | 专家清单先封存（规范 JSON sha256），空清单/跨文档评测抛 `BlindOrderError`，流程上杜绝「先看 AI 再补专家」；匹配 = fr_id 相同且关键词全命中（无关键词退 CJK-bigram/ASCII 词 Jaccard ≥0.5）；输出覆盖率/精确率/漏点，**P0/P1 漏点与幻觉点单列**（AC2） |
+| 盲标评测 | 专家清单先封存（规范 JSON sha256），空清单/跨文档评测抛 `BlindOrderError`，流程上杜绝「先看 AI 再补专家」；匹配 = fr_id 相同前提下先严格关键词全命中，失败（含近义词改写）或无关键词时退 expert.text 全文 token（CJK bigram+ASCII word）Jaccard ≥0.5 回退（L3-1，阈值不下调）；输出覆盖率/精确率/漏点，**P0/P1 漏点与幻觉点单列**（AC2），真档案例见 [docs/10](../docs/10-QA专家盲评报告-2026-11.md) |
 | 幂等 | 测试点 URN 内容寻址（`point_urn`，TestPoint 无 urn 字段不污染 S0 模型）；meta hash 增量跳过，重灌按 doc_urn 整组替换不留幽灵；schema v10 新表 `test_points`，草稿不进正式用例库（留待 S2.5 HITL） |
 
 ### 运行方式
@@ -1198,12 +1198,15 @@ kind=`bad_case`），修复后关联回归评测 run——pass 才闭环 fixed�
 
 把 docs/06 §3.2 场景② 的五条 POC 门禁收进一条纯 core 确定性探针（A18），用仓内合成夹具
 （`tests/fixtures/s2_gate/`，不含语料仓 V1 原文）验证门禁机制本身；真档 5 真实需求盲标
-走下方手动命令，语料仓只读、路径参数化。
+走下方手动命令，语料仓只读、路径参数化。**2026-11 真档专家盲评（W0–W3）已完成**：1 份
+新鲜需求测试点盲标 + 8 个 AC 派生 oracle 单元 + 11 个真实事故模式重建包归因标定，
+封存/盲序/红证全流程与双列指标见 [docs/10](../docs/10-QA专家盲评报告-2026-11.md)
+（「5 单元」承诺尚欠 4，随新需求文档按同 runbook 增量补评）。
 
 | # | 门禁（docs/06 §3.2） | 阈值 | 实现位置 |
 |---|---|---|---|
 | 1 | 结构合法率 | 100% | S2.1/S2.2 解析器零死信（死信即结构不合法，进 dead_letters 不进正式清单） |
-| 2 | 测试点覆盖率 | ≥.75 | `testpoint_eval.evaluate_blind` 专家盲标，同 fr_id + 关键词全命中 |
+| 2 | 测试点覆盖率 | ≥.75 | `testpoint_eval.evaluate_blind` 专家盲标，同 fr_id + 严格关键词，失败退 Jaccard ≥0.5（L3-1） |
 | 3 | P0/P1 漏点 | =0 | 盲标报告 `p0p1_misses` 单列，优先级由 FR 强制映射、模型不可改 |
 | 4 | 幻觉点率 | ≤.05 | 白名单拒入 `rejected` 台账，纯确定性脊柱下为 0 |
 | 5 | oracle 有效率 | ≥.7 | **新增 `oracle_eval.evaluate_oracles`**：专家判「可执行且正确」，UI/日志/状态/人工四分类盘点 |
@@ -1491,8 +1494,10 @@ workers 只负责证据组包（Provider 接缝依赖注入），**schema 保持
 - 本轮全门禁实测 **20 PASS / 2 FAIL**：A22 首次接入即 PASS；仅 A4/A8 仍因用户终端
   uvicorn（PID 64634，按约束不杀）占用 8765 失败，与 S3.4 无关。
 - **手动验证状态**：真实模拟器/xcresult/os_log/ffmpeg 字段校准**已完成**（2026-11-10，
-  见下节「S3.2/S3.3 真机探针校准」）；QA 节专家评测仍延后，本片 40 例为自造合成盲标，
-  真档归因标定待真实证据链路打通后。
+  见下节「S3.2/S3.3 真机探针校准」）；QA 节真档归因标定**已完成**（2026-11，W3：
+  11 个真实事故模式重建包 11/11 对角、四门禁全过，三条解读限制在案，见
+  [docs/10](../docs/10-QA专家盲评报告-2026-11.md)）；本片 40 例仍是合成回归底座，
+  独立第三方采集的真实 CI run 标定继续挂账（等 PipelineFinished 通道增量）。
 
 ### S3.2/S3.3 真机探针校准（2026-11-10，手动探针不进门禁）
 
