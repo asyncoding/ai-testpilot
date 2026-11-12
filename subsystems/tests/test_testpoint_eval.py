@@ -192,6 +192,90 @@ def test_hallucination_rate_gate_uses_generation_rejected():
     assert report.gate.hallucination_ok is False
 
 
+# ── L3-1 红证：严格关键词失败后的 Jaccard 回退（W1 E4/E8/E9 冻结原句） ───────
+
+_W1_E4 = _expert(
+    expert_id="E4", fr_id="FR-2", priority="P0",
+    text="任务完成瞬间停铃并取消全部补发闹钟",
+    match_keywords=["停铃", "取消", "补发"],
+)
+_W1_E4_AI = (
+    "验证「任务完成前，接管页不得出现「完成 / 关闭」入口；任务未完成时响铃 + 震动 + "
+    "音量锁继续（继承 V1 FR-2 / FR-9a）；任务完成瞬间停铃，并执行 V1 FR-5 的全部取消"
+    "（系统闹钟、backup、ladder、companion 全部立即取消）」主流程可用"
+)
+_W1_E9 = _expert(
+    expert_id="E9", fr_id="FR-6", priority="P0",
+    text="数学答错重答本题不扣已对题，连错 3 次换同难度新题",
+    match_keywords=["答错", "重答", "换题"],
+)
+_W1_E9_AI = (
+    "验证「答题只允许数字键盘输入；答错时标错并可立即重答本题，不扣已答对的题、"
+    "不直接放行；同一题连续答错 3 次，换一道同难度新题」主流程可用"
+)
+
+
+def test_l3_1_near_synonym_paraphrase_rescued_after_strict_keyword_fail():
+    # 两条 AI 点都缺一个字面关键词（补发/换题），旧口径严格全命中判 miss；
+    # L3-1 起严格失败后用专家原句 token Jaccard 兜底（实测 0.688/0.682 ≥ .5）
+    for expert, ai_text in ((_W1_E4, _W1_E4_AI), (_W1_E9, _W1_E9_AI)):
+        assert not all(kw in ai_text for kw in expert.match_keywords)  # 先证明确实严格失败
+        manifest = ExpertBlindList(
+            doc_external_id="doc-x", sealed_at="t", points=[expert])
+        gen = _gen([TestPoint(text=ai_text, priority="P0",
+                              source_refs=["urn:r"], fr_id=expert.fr_id)])
+        report = evaluate_blind(gen, manifest)
+        assert report.expert_covered == 1 and report.missed == []
+
+
+def test_l3_1_e8_paraphrase_remains_miss_because_threshold_not_lowered():
+    # 诚实挂账：E8 三个关键词全被改写（道数→3 道/5 道），专家句又短，
+    # 实测 Jaccard 仅 0.263 < .5，回退也不命中。阈值不许为凑覆盖率下调，
+    # 该缺口保留为已知残留，在 W2 post-L3 附录中双列呈现。
+    e8 = _expert(
+        expert_id="E8", fr_id="FR-5", priority="P0",
+        text="数学简单中等困难三档的题型与道数符合定义",
+        match_keywords=["数学题", "难度", "道数"],
+    )
+    e8_ai = (
+        "验证「数学题支持加减乘，三档难度：简单为一位数加减、3 道；中等为两位数加减 + "
+        "一位数乘法、5 道；困难为两位数乘法 + 混合运算、5 道；每道题在响铃时现场随机"
+        "生成，同一响铃会话内不重复出题」主流程可用"
+    )
+    assert not all(kw in e8_ai for kw in e8.match_keywords)
+    manifest = ExpertBlindList(doc_external_id="doc-x", sealed_at="t", points=[e8])
+    gen = _gen([TestPoint(text=e8_ai, priority="P0",
+                          source_refs=["urn:r"], fr_id="FR-5")])
+    report = evaluate_blind(gen, manifest)
+    assert report.expert_covered == 0
+    assert [m.expert_id for m in report.missed] == ["E8"]
+
+
+# ── L3-2 红证：分类型精确率视图，冻结 precision 口径不变 ────────────────────
+
+def test_l3_2_precision_by_kind_splits_recognition_without_frozen_field_change():
+    manifest = ExpertBlindList(doc_external_id="doc-x", sealed_at="t", points=[
+        _expert(expert_id="E1", fr_id="FR-1", match_keywords=["同步"]),
+        _expert(expert_id="E2", fr_id="FR-2", priority="P0",
+                match_keywords=["落盘"]),
+    ])
+    gen = _gen([
+        TestPoint(text="自动同步队列", priority="P1", source_refs=["urn:r"],
+                  fr_id="FR-1", kind="functional"),            # 命中 E1
+        TestPoint(text="无人认可的 functional 发挥", priority="P2",
+                  source_refs=["urn:r"], fr_id="FR-1", kind="functional"),
+        TestPoint(text="创建后立即落盘", priority="P0", source_refs=["urn:r"],
+                  fr_id="FR-2", kind="acceptance"),            # 命中 E2
+        TestPoint(text="没人认的 AC 发挥", priority="P2",
+                  source_refs=["urn:r"], fr_id="FR-2", kind="acceptance"),
+    ])
+    report = evaluate_blind(gen, manifest)
+    assert report.ai_total_by_kind == {"functional": 2, "acceptance": 2}
+    assert report.precision_by_kind == {"functional": 0.5, "acceptance": 0.5}
+    # 冻结字段：整体 precision 仍是 recognized/ai_total = 2/4，语义不变
+    assert report.precision == 0.5 and report.ai_recognized == 2
+
+
 # ── 录制夹具全链路口径（含投毒行的 fail-closed 证据） ───────────────────────
 
 def test_recorded_fixture_full_chain_metrics():

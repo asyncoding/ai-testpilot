@@ -134,6 +134,37 @@ def test_expectation_marker_with_parenthetical_note_still_collected():
     assert any(o.type is OracleType.MANUAL for o in case.oracles)
 
 
+# ── L3-4 红证：classify_oracle 词表扩词（W2 盲评回流，原句取自冻结 W2 运行） ──
+
+def test_l3_4_w2_ac_sentences_no_longer_fall_back_to_manual():
+    # 三句在 L3-4 之前全部兜底 manual，把 W2-AC-3/AC-6 整个用例单元打成探索性
+    assert classify_oracle(
+        "（FR-1、FR-5）新建起床闹钟默认数学题简单 3 道；扫码任务未注册码时不可选，"
+        "并提示先注册。"
+    ) is OracleType.UI_ASSERTION  # 「提示」是可自动化的界面信号
+    assert classify_oracle(
+        "（FR-5、FR-6）数学中等 5 道：答错可重答本题且不扣已对题，同一题连错 3 次"
+        "换同难度新题；全对即完成。"
+    ) is OracleType.STATE_ASSERTION  # 答错/重答/难度 表达可断言的判题状态
+    assert classify_oracle(
+        "（FR-3、FR-3a）任务中途杀掉 App 再进接管页，数学已对题与摇晃次数恢复；"
+        "中途不能把扫码切成数学题（FR-10 降级除外）。"
+    ) is OracleType.STATE_ASSERTION  # 次数/恢复 是可断言的数据事实
+    # 防退化：原本就能认的状态句不得因扩词改判
+    assert classify_oracle(
+        "（FR-7、NFR-1）数学题目与答案只在本次响铃会话内，完成后不留记录；"
+        "断网也能出题、判题、完成。"
+    ) is OracleType.STATE_ASSERTION
+
+
+def test_l3_4_manual_cues_still_outrank_keyword_expansion():
+    # 保守优先级不变：人工/主观信号必须压过 UI/STATE 关键词，不能因扩词抢走 manual
+    assert classify_oracle("出现提示后由人工亲自确认手感") is OracleType.MANUAL
+    assert classify_oracle("主观判断难度是否合理") is OracleType.MANUAL
+    # 无任何信号的普通预期仍然兜底 manual，不硬判成可自动断言类型
+    assert classify_oracle("一条看不出信号的普通预期") is OracleType.MANUAL
+
+
 def test_indented_numbered_sublist_under_expectation_is_not_a_step():
     # 对齐 V1 TC-A1 真实形态：预期子弹下缩进的 1./2. 平台约束
     text = (

@@ -89,9 +89,18 @@ def classify_oracle(text: str) -> OracleType:
         return OracleType.LOG_ASSERTION
     if re.search(r"主观|手感|听到|听/|人工|亲自", text):
         return OracleType.MANUAL
-    if re.search(r"页面|屏|横幅|弹窗|按钮|展示|显示|可见|出现|UI|入口|菜单|文案", text):
+    # L3-4 扩词（W2 红证）：产品语「提示」是可自动化的界面信号，旧词表漏认
+    # 导致 AC-1 类验收整条兜底 manual。
+    if re.search(r"页面|屏|横幅|弹窗|按钮|展示|显示|可见|出现|UI|入口|菜单|文案|提示", text):
         return OracleType.UI_ASSERTION
-    if re.search(r"状态|账本|快照|字段|数据|记录|排程|取消|落库|UUID|计数|分桶|开关|权限", text):
+    # L3-4 扩词（W2 红证）：恢复/次数/重答/换题/注册/题数/难度 等产品语表达的是
+    # 可断言的状态与数据事实，旧词表只认「计数/记录」等工程语，AC-3/AC-6 因此
+    # 被误判 manual 并把整个用例单元打成探索性。
+    if re.search(
+        r"状态|账本|快照|字段|数据|记录|排程|取消|落库|UUID|计数|分桶|开关|权限"
+        r"|恢复|次数|重答|答错|答对|换题|注册|题数|道数|难度",
+        text,
+    ):
         return OracleType.STATE_ASSERTION
     return OracleType.MANUAL
 

@@ -258,3 +258,22 @@ def test_prompt_and_schema_are_self_contained(parsed):
     assert set(item["required"]) == {"fr_id", "text", "kind", "source_refs"}
     assert item["properties"]["kind"]["enum"] == list(MODEL_POINT_KINDS)
     assert "priority" not in item["properties"]  # 模型不给优先级
+
+
+def test_l3_3_prompt_forbids_nfr_as_fr_id_and_whitelist_rejects_it(parsed):
+    # L3-3 上游：system prompt 显式铁律，NFR 相关补点必须挂具体白名单 FR
+    messages = build_testpoint_messages(parsed, [], deterministic_test_points(parsed))
+    system = messages[0]["content"]
+    assert "NFR-x" in system and "严禁作为 fr_id" in system
+    assert "挂到" in system and "非功能约束" in system
+
+    # L3-3 下游机械护栏：模型若仍输出 NFR-1 作 fr_id，白名单整行拒入
+    # （本地无 ollama，模型相实测挂账；纯函数护栏可 hostless 验证）
+    valid_ref = parsed.features[0].urn
+    payload = {"points": [
+        {"fr_id": "NFR-1", "text": "把非功能约束误挂成规则 ID",
+         "kind": "boundary", "source_refs": [valid_ref]},
+    ]}
+    out = apply_model_points(parsed, deterministic_test_points(parsed), payload, [])
+    assert out.model_points == []
+    assert len(out.rejected) == 1 and out.rejected[0].reason == "unknown_fr"

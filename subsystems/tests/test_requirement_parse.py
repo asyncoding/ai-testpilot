@@ -178,6 +178,82 @@ def test_apply_linking_rejects_out_of_range_ac_index_and_bad_shape():
         apply_linking(result, {"links": [{"ac_index": 0, "fr_ids": "FR-1"}]})
 
 
+# ── L3-5/L3-6 红证：NFR 子串碰撞与 AC 主/次 FR 分级（W1/W2 盲评回流） ────────
+
+def test_l3_5_nfr_id_not_misread_as_fr_substring():
+    from testpilot_core.requirement import _FR_ID_RE
+
+    # 旧正则 FR-\d+[a-z]? 会把 NFR-1 内部的 "FR-1" 抠出来，造成跨层假链接
+    assert _FR_ID_RE.findall("NFR-1") == []
+    assert _FR_ID_RE.findall("NFR-12 与 FR-3a") == ["FR-3a"]
+    assert _FR_ID_RE.findall("FR-1") == ["FR-1"]  # 正常 FR 引用不受影响
+
+    text = (
+        "## 1. 功能需求（FR）\n\n"
+        "| ID | 需求 | 优先级 |\n|---|---|---|\n"
+        "| FR-1 | 功能一 | P0 |\n| FR-2 | 功能二 | P1 |\n\n"
+        "## 2. 非功能需求（NFR）\n\n"
+        "| ID | 需求 |\n|---|---|\n"
+        "| NFR-1 | 写操作串行化 |\n\n"
+        "## 3. 验收标准\n\n"
+        "1. 功能一必须满足 NFR-1 的串行化约束，不得重复落盘。\n"
+    )
+    result = parse_requirement_markdown(text, doc_external_id="d.md")
+    ac = result.acceptance[0]
+    # 整条 AC 只提到 NFR-1：旧逻辑伪造 FR-1 链接，新逻辑一个 FR 链接都不产
+    assert ac.primary_fr_ids == [] and ac.secondary_fr_ids == []
+    assert ac.linked_fr_ids == []
+    # FR-1/FR-2 如实进 ac_missing 对账，而不是被 NFR 子串假覆盖
+    missing = {g.subject for g in result.gaps
+               if g.kind == "ac_missing_for_feature"}
+    assert missing == {"FR-1", "FR-2"}
+
+
+def test_l3_6_split_helper_levels_and_dedup():
+    from testpilot_core.requirement import _split_ac_fr_refs
+
+    primary, secondary = _split_ac_fr_refs(
+        "（FR-3、FR-3a）跨模块联动，正文补 FR-5；FR-3 重复提及不降级"
+    )
+    assert primary == ["FR-3", "FR-3a"]
+    assert secondary == ["FR-5"]  # 标题里已声明的 FR-3 重复出现不算正文提及
+    # 无标题括号的文档：primary 为空，全部走正文级（合成夹具旧口径）
+    assert _split_ac_fr_refs("覆盖 FR-5 的触达保证。") == ([], ["FR-5"])
+    # 标题里的 NFR 不产 FR（L3-5 词边界在分级函数里同样生效）
+    assert _split_ac_fr_refs("（FR-1，NFR-1）串行化验收") == (["FR-1"], [])
+    # 半角括号同等识别
+    assert _split_ac_fr_refs("(FR-2) 半角标题验收")[0] == ["FR-2"]
+
+
+def test_l3_6_ac_header_parenthesis_is_primary_body_mention_secondary():
+    text = (
+        "## 1. 功能需求（FR）\n\n"
+        "| ID | 需求 | 优先级 |\n|---|---|---|\n"
+        "| FR-1 | 功能一 | P0 |\n| FR-2 | 功能二 | P0 |\n"
+        "| FR-3 | 功能三 | P1 |\n\n"
+        "## 2. 验收标准\n\n"
+        "1. （FR-1、FR-2）功能一与功能二联动，正文另见 FR-3 的配套约束。\n"
+    )
+    result = parse_requirement_markdown(text, doc_external_id="d.md")
+    ac = result.acceptance[0]
+    assert ac.primary_fr_ids == ["FR-1", "FR-2"]
+    assert ac.secondary_fr_ids == ["FR-3"]
+    # linked_fr_ids 保持主+次并集旧口径，覆盖率/gap 对账行为不变
+    assert ac.linked_fr_ids == ["FR-1", "FR-2", "FR-3"]
+
+
+def test_l3_6_headerless_fixture_acs_keep_union_fallback():
+    # 合成夹具 AC 无句首括号习惯：primary 必须为空，linked 回退主次并集
+    result = _parse()
+    ac1, ac2 = result.acceptance
+    assert ac1.primary_fr_ids == []
+    assert ac1.secondary_fr_ids == ["FR-1", "FR-2"]
+    assert ac1.linked_fr_ids == ["FR-1", "FR-2"]
+    assert ac2.primary_fr_ids == []
+    assert ac2.secondary_fr_ids == ["FR-5"]
+    assert ac2.linked_fr_ids == ["FR-5"]
+
+
 def test_prompt_and_schema_are_self_contained():
     result = _parse()
     messages = build_linking_messages(result)

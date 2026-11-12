@@ -6,8 +6,9 @@
 - 专家清单以 ``ExpertBlindList`` 落盘并先封存（``seal_expert_manifest`` 哈希），
   评测函数要求清单已存在且非空，否则 ``BlindOrderError``——流程上杜绝「先看 AI
   再补专家」；
-- 匹配在 hostless 纯函数内完成：同 fr_id 且专家关键词全部命中 AI 文本（无关键词
-  时退 token Jaccard ≥.5），可解释、可复现，不依赖嵌入服务；
+- 匹配在 hostless 纯函数内完成：同 fr_id 且专家关键词全部命中 AI 文本；严格命中
+  失败（含有关键词但近义词改写）或无关键词时退 token Jaccard ≥.5（L3-1，W1 红证），
+  可解释、可复现，不依赖嵌入服务；
 - 指标：覆盖率（专家必须测点被 AI 覆盖比例）、精确率（AI 点被专家认可比例）、
   漏点（专家有 AI 无）、幻觉点率（白名单拒入行 / 模型产出），P0/P1 漏点与幻觉
   按 AC2 单列；阈值取 docs/06 POC 门禁（覆盖 ≥.75、精确 ≥.8、P0/P1 漏点=0、
@@ -79,6 +80,11 @@ class BlindEvalReport(BaseModel):
     ai_total: int
     ai_recognized: int
     precision: float
+    # L3-2：分类型精确率视图。冻结字段 precision 的口径（recognized/ai_total）不变；
+    # 新增按 kind 分列，解决 AC 点按链接 FR 文本倍增稀释整体 precision 的读数问题
+    # （W1 红证：整体 0.5294，functional 口径 0.7143 需手工另算）。
+    ai_total_by_kind: dict[str, int] = Field(default_factory=dict)
+    precision_by_kind: dict[str, float] = Field(default_factory=dict)
     missed: list[ExpertPoint] = Field(default_factory=list)
     p0p1_misses: list[ExpertPoint] = Field(default_factory=list)
     hallucinations: list[dict] = Field(default_factory=list)
@@ -104,17 +110,28 @@ def _tokens(text: str) -> set[str]:
     return ascii_words | bigrams
 
 
-def _keyword_match(expert: ExpertPoint, ai_text: str) -> bool:
-    normalized_ai = _normalize_text(ai_text)
-    if expert.match_keywords:
-        return all(
-            _normalize_text(kw) in normalized_ai for kw in expert.match_keywords
-        )
-    expert_tokens = _tokens(expert.text)
+def _jaccard_match(expert_text: str, ai_text: str) -> bool:
+    """token Jaccard 兜底：专家文本 token 集在 AI 文本中的命中比例 ≥ 阈值。"""
+    expert_tokens = _tokens(expert_text)
     if not expert_tokens:
         return False
     overlap = len(expert_tokens & _tokens(ai_text))
     return overlap / len(expert_tokens) >= _JACCARD_GATE
+
+
+def _keyword_match(expert: ExpertPoint, ai_text: str) -> bool:
+    normalized_ai = _normalize_text(ai_text)
+    if expert.match_keywords:
+        # L3-1（W1 红证 E4/E8/E9）：严格全关键词命中失败后，再用专家原句全文
+        # token 做 Jaccard 兜底，吸收「停铃/取消补发」「3 道 5 道/题数难度」
+        # 「换一道新题/答错重答换题」这类近义词改写。严格命中仍是第一口径，
+        # 兜底阈值复用 _JACCARD_GATE，不会放宽无关键词专家点的既有判定。
+        if all(
+            _normalize_text(kw) in normalized_ai for kw in expert.match_keywords
+        ):
+            return True
+        return _jaccard_match(expert.text, ai_text)
+    return _jaccard_match(expert.text, ai_text)
 
 
 def _is_match(expert: ExpertPoint, point: dict) -> bool:
@@ -158,6 +175,21 @@ def evaluate_blind(
     coverage = round(covered / expert_must, 6) if expert_must else 0.0
     precision = round(len(recognized_ai) / ai_total, 6) if ai_total else 0.0
 
+    # L3-2：分类型精确率。冻结字段 precision 口径不变；这里只把同一批
+    # recognized 集合按点 kind 拆开，回答「functional 点本身准不准」，
+    # 避免 AC 点按链接 FR 文本倍增后稀释整体读数。
+    ai_total_by_kind: dict[str, int] = {}
+    recognized_by_kind: dict[str, int] = {}
+    for idx, point in enumerate(ai_dicts):
+        kind = str(point.get("kind", "")) or "unknown"
+        ai_total_by_kind[kind] = ai_total_by_kind.get(kind, 0) + 1
+        if idx in recognized_ai:
+            recognized_by_kind[kind] = recognized_by_kind.get(kind, 0) + 1
+    precision_by_kind = {
+        kind: round(recognized_by_kind.get(kind, 0) / total, 6)
+        for kind, total in sorted(ai_total_by_kind.items())
+    }
+
     gate = GateVerdict(
         coverage_ok=coverage >= COVERAGE_GATE,
         precision_ok=precision >= PRECISION_GATE,
@@ -175,6 +207,8 @@ def evaluate_blind(
         ai_total=ai_total,
         ai_recognized=len(recognized_ai),
         precision=precision,
+        ai_total_by_kind=ai_total_by_kind,
+        precision_by_kind=precision_by_kind,
         missed=missed,
         p0p1_misses=p0p1_misses,
         hallucinations=[r.model_dump() for r in generation.rejected],

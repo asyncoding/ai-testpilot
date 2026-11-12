@@ -402,6 +402,44 @@ def test_suggestion_urn_stable_and_distinct():
     assert a == b and a != c and a != d  # 同用例同类型同文本才幂等
 
 
+# ── L3-6 红证：AC join 只认句首标题 FR，正文提及不跨 AC 拖入（W2 回流） ─────
+
+def test_l3_6_ac_join_prefers_primary_header_fr_over_body_mentions():
+    skeleton = RequirementParseResult(
+        doc_urn=DOC_URN, external_id=REQ_EXT,
+        features=[_feature("FR-1", "功能一"), _feature("FR-2", "功能二")],
+        rules=[],
+        acceptance=[
+            RequirementAcceptance(
+                index=0,
+                text="（FR-1）功能一验收，正文提及 FR-2 的联动细节",
+                linked_fr_ids=["FR-1", "FR-2"],
+                primary_fr_ids=["FR-1"],
+                secondary_fr_ids=["FR-2"],
+            ),
+        ],
+    )
+    # 用例只打正文提及的 FR-2：标题级 join 不命中，AC 源一条都不得产出
+    # （旧口径按 linked 并集会反向 join，W2-AC-4 同型红证）
+    body_only = mine_deterministic(_case(tags=["FR-2"]), skeleton, [])
+    assert body_only.mined == []
+    # 用例打标题声明的 FR-1：join 正常命中
+    primary_hit = mine_deterministic(_case(tags=["FR-1"]), skeleton, [])
+    assert any(o.source_kind == "requirement_ac" for o in primary_hit.mined)
+
+
+def test_l3_6_headerless_ac_falls_back_to_union_links():
+    # primary 为空（无标题括号的历史文档/合成夹具）：join 回退 linked 并集
+    skeleton = RequirementParseResult(
+        doc_urn=DOC_URN, external_id=REQ_EXT,
+        features=[_feature("FR-1", "功能一"), _feature("FR-2", "功能二")],
+        rules=[],
+        acceptance=[_ac(0, "正文提及 FR-2 的无标题 AC", ["FR-2"])],
+    )
+    result = mine_deterministic(_case(tags=["FR-2"]), skeleton, [])
+    assert any(o.source_kind == "requirement_ac" for o in result.mined)
+
+
 # ── 真实解析夹具对接（防纯手工构造自嗨） ───────────────────────────────────
 
 def test_real_parsed_skeleton_feeds_ac_miner():

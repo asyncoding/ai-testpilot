@@ -203,12 +203,16 @@ def mine_deterministic(
             oracle.confidence or _DOC_CONFIDENCE, "existing_assertion")
 
     # 源①：需求验收标准（FR tag ↔ AC 链接的确定性join）
+    # L3-6：优先只 join AC 句首标题声明的主级 FR；无标题习惯的文档 primary 为空，
+    # 回退主+次并集 linked_fr_ids（旧口径）。正文提及的 FR 不再把无关用例拖进
+    # 跨 AC join（W2 红证：FR-10 正文提及导致 W2-AC-4 反向 join 到 AC-6）。
     if skeleton is not None:
         fr_tags = {tag for tag in case.tags if tag.startswith("FR-")}
         if fr_tags:
             by_id = {f.fr_id: f for f in skeleton.active_features}
             for ac in skeleton.acceptance:
-                if not fr_tags.intersection(ac.linked_fr_ids):
+                join_ids = ac.primary_fr_ids or ac.linked_fr_ids
+                if not fr_tags.intersection(join_ids):
                     continue
                 feature = next(
                     (by_id[fid] for fid in ac.linked_fr_ids if fid in fr_tags), None

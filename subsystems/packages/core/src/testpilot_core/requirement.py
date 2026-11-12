@@ -30,7 +30,9 @@ from .urn import make_urn
 
 _REQ_SOURCE_SYSTEM = "fs-reqs"
 
-_FR_ID_RE = re.compile(r"FR-\d+[a-z]?")
+# L3-5：前导负向字母回顾，排除 NFR-1 内的 FR-1 子串碰撞（W2 红证：AC-7 标题
+# （FR-7、NFR-1）被旧正则链出假 FR-1，并经 join 实际扇出到无关用例单元）。
+_FR_ID_RE = re.compile(r"(?<![A-Za-z])FR-\d+[a-z]?")
 _NFR_ID_RE = re.compile(r"NFR-\d+")
 _FR_CELL_RE = re.compile(r"^(?:~~)?(?P<id>FR-\d+[a-z]?)(?:~~)?$")
 _NFR_CELL_RE = re.compile(r"^(?P<id>NFR-\d+)$")
@@ -85,12 +87,24 @@ class RequirementRule(BaseModel):
 
 
 class RequirementAcceptance(BaseModel):
-    """验收标准富结构：序号 0-based 供模型链接引用，linked 只收白名单内 FR ID。"""
+    """验收标准富结构：序号 0-based 供模型链接引用，linked 只收白名单内 FR ID。
+
+    L3-6 起把显式 FR 引用分两级（W2 红证：AC-6 正文「FR-10 降级除外」被当标题
+    ID 入链，导致无关用例反向 join）：
+
+    - ``primary_fr_ids``：AC 句首括号（如「（FR-3、FR-3a）」）声明的 FR，是这条
+      验收口径的法定归属；无句首括号的文档该列表为空。
+    - ``secondary_fr_ids``：正文行内提及的 FR，可追溯但不享有标题级 join 权重。
+    - ``linked_fr_ids`` 保持「主+次并集」旧口径不变，覆盖率/gap 对账/脊柱产点
+      全部沿用，消费侧需要标题级口径时自行读 primary（见 oracle_mining 源①）。
+    """
 
     index: int
     text: str
     source_line: int | None = None
     linked_fr_ids: list[str] = Field(default_factory=list)
+    primary_fr_ids: list[str] = Field(default_factory=list)
+    secondary_fr_ids: list[str] = Field(default_factory=list)
 
 
 class RequirementGap(BaseModel):
@@ -308,6 +322,26 @@ def _parse_acceptance(
     return items
 
 
+# L3-6：AC 句首括号里的 FR 声明（允许全角/半角括号与、，,/ 分隔）
+_AC_HEADER_RE = re.compile(r"^\s*[（(](?P<zone>[^）)]*)[）)]")
+
+
+def _split_ac_fr_refs(text: str) -> tuple[list[str], list[str]]:
+    """把 AC 文本里的 FR 引用拆成「句首标题 ID」与「正文提及 ID」两级。
+
+    句首括号（如 ``（FR-3、FR-3a）``）是该条验收的法定归属；其余位置出现的
+    FR ID 降为正文提及。NFR-x 不经 :data:`_FR_ID_RE` 产出 FR（L3-5 词边界），
+    因此标题里的 NFR 不会污染任一级。
+    """
+    header = _AC_HEADER_RE.match(text)
+    header_ids: list[str] = []
+    if header:
+        header_ids = list(dict.fromkeys(_FR_ID_RE.findall(header.group("zone"))))
+    all_ids = list(dict.fromkeys(_FR_ID_RE.findall(text)))
+    secondary = [fid for fid in all_ids if fid not in header_ids]
+    return header_ids, secondary
+
+
 # ── 入口：确定性解析 ────────────────────────────────────────────────────────
 
 def parse_requirement_markdown(
@@ -394,12 +428,16 @@ def parse_requirement_markdown(
             continue
         i += 1
 
-    # 确定性链接：AC 文本显式提及且文档确实存在的活跃 FR ID
+    # 确定性链接：AC 文本显式提及且文档确实存在的活跃 FR ID；L3-6 起按句首
+    # 标题/正文提及分主、次两级，linked_fr_ids 仍是主+次并集（旧口径不变）
     active_ids = {f.fr_id for f in features if f.lifecycle == "active"}
     for ac in acceptance:
-        linked = [fid for fid in dict.fromkeys(_FR_ID_RE.findall(ac.text))
-                  if fid in active_ids]
-        ac.linked_fr_ids = linked
+        header_ids, body_ids = _split_ac_fr_refs(ac.text)
+        primary = [fid for fid in header_ids if fid in active_ids]
+        secondary = [fid for fid in body_ids if fid in active_ids]
+        ac.primary_fr_ids = primary
+        ac.secondary_fr_ids = secondary
+        ac.linked_fr_ids = [*primary, *secondary]
 
     if not acceptance:
         gaps.append(RequirementGap(
