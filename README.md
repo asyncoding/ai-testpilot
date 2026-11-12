@@ -12,6 +12,10 @@
   
 - [docs/03-语料工程与实测环境（AlarmKitSpike）.md](docs/03-语料工程与实测环境（AlarmKitSpike）.md)
   被测工程事实、语料资产清单、xcodebuild/日志/xcresult 命令、各模块喂料方式
+- [docs/12-用例导出与Xcode执行闭环方案.md](docs/12-用例导出与Xcode执行闭环方案.md)
+  用例 JSON 导出 → 外部 Agent 生成 Xcode 测试 → 映射扫描 → 真实 xcodebuild 执行 → commit 影响面选择重跑的五切片方案与契约
+- [docs/13-系统使用说明书（克隆到演示全流程）.md](docs/13-系统使用说明书（克隆到演示全流程）.md)
+  新克隆仓库后的分步操作手册：环境准备、两个演示场景的完整命令顺序、故障排查表
 - [CLAUDE.md](CLAUDE.md)：Agent 工作纪律与跨会话接力规则（agy/opencode 等经 `AGENTS.md` 软链读取同一份）
 
 ## 目录

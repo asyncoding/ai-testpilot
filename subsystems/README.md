@@ -4,6 +4,10 @@
 `../docs/08-需求说明书.md`；本文件是 S0 骨架的**运行手册**。文中黑话（脊柱/投影/hermetic/
 死信/探针等）先查 [`../docs/09-术语表（人话版）.md`](../docs/09-术语表（人话版）.md)。
 
+**新克隆仓库先看 [`../docs/13-系统使用说明书（克隆到演示全流程）.md`](../docs/13-系统使用说明书（克隆到演示全流程）.md)**：
+从环境准备到两个演示场景（需求→全量用例→真实 Xcode 执行；commit diff→影响面→选择重跑）
+的分步命令手册；其设计依据与契约见 [`../docs/12-用例导出与Xcode执行闭环方案.md`](../docs/12-用例导出与Xcode执行闭环方案.md)。
+
 ## 目录
 
 ```
@@ -13,7 +17,7 @@ subsystems/
 │   ├── adapters/      # testpilot-adapters：文件/JSON/SQLite-FTS/录制型 等适配器
 │   ├── orchestrator/  # testpilot-orchestrator：profile 装配 + FastAPI + qa_graph（S1.4 LangGraph 答案图）
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
-├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml
+├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml / ios-local-poc-xcode.yaml（真实 xcodebuild 链，见 docs/13）
 ├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
 ├── web/               # 对话页/审批页/执行控制台/知识管理页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
