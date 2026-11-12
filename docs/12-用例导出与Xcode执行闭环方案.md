@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.2 实施中**（2026-11-13：E1/E2/E3 已落地，E4–E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
+> 状态：**v1.2 实施中**（2026-11-13：E1/E2/E3/E4 已落地，E5 待实施）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -205,16 +205,19 @@
 | 红证 | 已执行：临时掐断 marker 入对分支（`if False and marker_match`）→ 7 条测试变红（marker 绑定/未知 TC/探索性剔除/投影/CLI 退出码全链路）；还原后 18/18 复绿 |
 | 真仓冒烟 | `ios-local-poc` profile 对真实语料仓 `app-calendar-alarm`（alarmkit-spike @ 7936295a）只读扫描：10 个 Swift 测试文件、110 个测试方法全部正确入册，双 target（AlarmKitSpikeTests / AlarmKitSpikeUITests）分流正确，空用例库下 bindings=0、unmapped=[]、exit 0；语料仓 git 状态前后不变（纯只读） |
 
-### E4 影响面 → 选择执行接线（约 1–1.5 人日）
+### E4 影响面 → 选择执行接线（约 1–1.5 人日）——✅ 已落地（2026-11-13）
 
 | 项 | 内容 |
 |---|---|
-| 新增 | `workers/impact_rerun.py`（CLI `testpilot-impact-rerun`，第 15 个入口）；core 增 `core/impact_execution.py` 纯函数（runnable 集 + 映射 → 选择集/未映射清单/幂等键） |
-| 流程 | `analyze_impact(base, head)` → runnable external_id 集 → 查 automation-map → 译 only_testing ID → 构造 `TestExecutionRequest` 调既有 `execution_service.submit_execution`（队列、配额、状态机零新造） |
-| CLI | `testpilot-impact-rerun --base <sha> --head <sha> [--requirement <urn>...] [--dry-run] [--project ...]`；dry-run 只打印选择集与命令不提交 |
-| 守卫 | ①选择集为空（全未映射）→ exit 2 并打印未映射 TC 清单与补映射提示，绝不退化为全量；②幂等键 = `impact:<head短sha>:<排序后ID集 hash>`，重复提交返回 replayed 不增生；③exploratory/conflict_update 不进自动选择，仅报告 |
-| AC | ①合成夹具下 runnable 3 条其中 2 条有映射：提交 1 个请求含 2 个 only_testing ID，未映射 1 条显式上报；②同参数二次提交 replayed=true 且 jobs 零增生；③dry-run 不写账本；④无映射库执行 exit 2 |
-| 红证 | 临时放开"空选择守卫" → 守卫测试变红；还原变绿（与既有 `validate_only_testing` 空选择拒绝互证） |
+| 新增 | `core/impact_execution.py`（零 IO 纯函数：ImpactAnalysis + map bindings → only_testing 选择集/三桶分流/幂等键/鲜度守卫）；`workers/impact_rerun.py`（CLI `testpilot-impact-rerun`，第 15 个入口） |
+| 流程 | `analyze_impact(base, head)` → runnable external_id 集 → 读 automation-map 并做版本/鲜度守卫 → 译 only_testing ID（再过 `validate_only_testing` 形态校验）→ 构造 `TestExecutionRequest` 调既有 `execution_service.submit_execution`（队列、配额、状态机零新造） |
+| CLI | `testpilot-impact-rerun --base <sha> --head <sha> [--requirement <urn>...] [--dry-run] [--project ...] [--map <路径>]`；dry-run 只打印选择集与拟提交请求，不写账本不入队 |
+| 守卫 | ①选择集为空（runnable 全未映射）→ exit 2 并打印未映射 TC 清单与补映射提示，绝不退化为全量；②幂等键 = `impact:<head短sha12>:<排序后ID集 sha256 前16位>`，重复提交返回 replayed 不增生；③exploratory（no_automation）/conflict_update 不进自动选择，仅报告；④**map 鲜度**：`map.head_commit ≠ --head` 直接拒，禁止拿旧映射跑新代码；⑤git diff 不可达等 `AdapterUnavailableError` 收口 exit 2 不出 traceback |
+| 配额 | 请求带 `daily_budget_key=impact:<head短sha>`，按 head 分桶占每日重跑配额（默认 20）；重放命中幂等账本不双扣 |
+| AC | ①合成夹具 runnable 2 条其中 1 条有映射：提交请求仅含映射 OID，未映射 1 条与 no_automation/conflict 两桶显式上报；②同参数二次提交 replayed=true 且 jobs/账本零增生、配额只扣一次；③dry-run 账本/队列零写入；④无映射库/过期 map/缺 map 均 exit 2；⑤一 TC 多方法 OID 全量带入，多 TC 共享方法去重 |
+| 测试 | hostless 纯函数 10 条 + worker hermetic 9 条 = 19 条全绿；全量 **1244 passed**（1225 基线 + 19），import-lint OK |
+| 红证 | 已执行：放开空选择守卫（`if True or ...` 提前 return）→ 2 条守卫测试精准变红（core + worker 各一）；还原后 19/19 复绿，与既有 `validate_only_testing` 空选择拒绝互证 |
+| 真 profile 冒烟 | `ios-local-poc` 对真实语料仓（alarmkit-spike 真实 sha 区间）：真 git diff 链路打通；缺 map → exit 2 带补映射提示；构造过期 map → "已过期" exit 2；鲜 map 零绑定 → "选择集为空" exit 2（冒烟 map 写 gitignored 的 store/ 工作区，验完即删） |
 
 ### E5 xcode profile 与端到端验证（约 1 人日）
 
