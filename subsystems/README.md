@@ -380,7 +380,9 @@ tmp 容器，TestClient 真实跑 lifespan 但不起端口。
 ## Web 对话页（S1.5）：Next.js 静态导出，单进程演示
 
 `web/` 是独立于 uv workspace（`members=packages/*`）的 Next.js 15 App Router 工程，
-`output: "export"` 纯静态导出到 `web/out/`，由 FastAPI `StaticFiles` 同端口托管——
+`output: "export"` 纯静态导出到 `web/out/`，由 FastAPI `SpaStaticFiles` 同端口托管
+（StaticFiles 子类：扁平产物 `approvals.html` 的干净 URL `/approvals` 自动回退命中，
+2026-11-13 修复；防穿越仍走父类 commonpath 校验）——
 演示时只有一个进程、一个端口（http://127.0.0.1:8765/），无 CORS；node 缺失/未构建时
 后端只打 warning，API 与门禁不受影响。
 
