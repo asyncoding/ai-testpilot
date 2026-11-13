@@ -35,10 +35,15 @@ from testpilot_core.hybrid_plan import (
     advance_checkpoint,
     build_gate_request,
     build_hybrid_plan,
+    cancel_gate,
     canonical_plan_hash,
+    expire_gate_if_due,
     gate_id_for,
+    gate_is_expired,
     next_pending_step,
     plan_filename,
+    record_gate_response,
+    renew_gate,
     resume_from_blocked,
     resume_from_human,
     start_checkpoint,
@@ -596,3 +601,115 @@ def test_optional_text_field_allows_absent_but_rejects_blank():
         decided_by="t1", decided_at="2026-11-14T08:05:00Z")
     with pytest.raises(HybridPlanError, match="非空文本"):
         validate_verdict(form, blank)
+
+
+# ── 6. 闸门生命周期纯函数（过期/响应/续期/取消）──────────────────────────────
+
+
+def _action_gate(deadline_seconds: int = 120) -> GateRequest:
+    return build_gate_request(
+        session_id="sess-1", step=_steps()[2], evidence_urns=[],
+        now=_T0, deadline_seconds=deadline_seconds)
+
+
+def _verdict_gate() -> GateRequest:
+    return build_gate_request(
+        session_id="sess-1", step=_steps()[4],
+        evidence_urns=["urn:testpilot:store:artifact:oslog-ring-chain"],
+        now=_T0, deadline_seconds=120)
+
+
+def test_gate_expiry_is_time_and_status_driven():
+    gate = _action_gate()
+    assert gate_is_expired(gate, _T0 + timedelta(seconds=60)) is False
+    assert gate_is_expired(gate, _T0 + timedelta(seconds=121)) is True
+
+    # 已响应/已取消的闸门不再被时间判过期（终态稳定）
+    responded = gate.model_copy(update={"status": GateStatus.RESPONDED})
+    assert gate_is_expired(responded, _T0 + timedelta(days=1)) is False
+
+    swept = expire_gate_if_due(gate, _T0 + timedelta(seconds=121))
+    assert swept.status is GateStatus.EXPIRED
+    # 未到期返回原对象（无副作用语义，便于服务层判变）
+    assert expire_gate_if_due(gate, _T0) is gate
+
+
+def test_gate_expiry_bad_deadline_string_loud():
+    broken = _action_gate().model_copy(update={"deadline": "not-a-timestamp"})
+    with pytest.raises(HybridPlanError, match="deadline 格式非法"):
+        gate_is_expired(broken, _T0)
+
+
+def test_record_response_happy_and_gate_id_guard():
+    gate = _verdict_gate()
+    verdict = HumanVerdict(
+        gate_id=gate.gate_id,
+        values={"ringtone_heard": True, "vibration_felt": True,
+                "confidence": "high"},
+        evidence_urns=["urn:testpilot:store:artifact:oslog-ring-chain"],
+        decided_by="tester-zhang", decided_at="2026-11-14T08:05:00Z")
+    updated = record_gate_response(gate, verdict, _T1)
+    assert updated.status is GateStatus.RESPONDED
+    assert updated.response == verdict
+
+    mismatched = verdict.model_copy(update={"gate_id": "gate-deadbeef0000"})
+    with pytest.raises(HybridPlanError, match="与闸门.*不一致"):
+        record_gate_response(gate, mismatched, _T1)
+
+
+def test_action_gate_response_needs_witness_only():
+    # human:action 无裁决单：不校验表单，但见证人与时间戳必填
+    gate = _action_gate()
+    ack = HumanVerdict(
+        gate_id=gate.gate_id, values={}, evidence_urns=[],
+        decided_by="tester-li", decided_at="2026-11-14T08:03:00Z")
+    updated = record_gate_response(gate, ack, _T1)
+    assert updated.status is GateStatus.RESPONDED
+
+    ghost = ack.model_copy(update={"decided_by": ""})
+    with pytest.raises(HybridPlanError, match="见证人"):
+        record_gate_response(gate, ghost, _T1)
+
+
+def test_expired_gate_must_renew_before_response():
+    gate = expire_gate_if_due(
+        _verdict_gate(), _T0 + timedelta(seconds=200))
+    verdict = HumanVerdict(
+        gate_id=gate.gate_id,
+        values={"ringtone_heard": True, "vibration_felt": True,
+                "confidence": "high"},
+        evidence_urns=["urn:testpilot:store:artifact:oslog-ring-chain"],
+        decided_by="t1", decided_at="2026-11-14T08:10:00Z")
+    with pytest.raises(HybridPlanError, match="已过期.*先续期"):
+        record_gate_response(gate, verdict, _T0 + timedelta(seconds=201))
+
+    reopened = renew_gate(gate, _T0 + timedelta(seconds=201), 300)
+    assert reopened.status is GateStatus.PENDING
+    assert reopened.renewed_at is not None
+    accepted = record_gate_response(
+        reopened, verdict, _T0 + timedelta(seconds=202))
+    assert accepted.status is GateStatus.RESPONDED
+
+
+def test_renew_rules_and_cancel_terminal_guard():
+    gate = _action_gate()
+    extended = renew_gate(gate, _T0 + timedelta(seconds=30), 300)
+    assert extended.status is GateStatus.PENDING
+    assert extended.deadline == "2026-11-14T08:07:00Z"
+
+    with pytest.raises(HybridPlanError, match="正整数秒"):
+        renew_gate(gate, _T0, 0)
+
+    responded = record_gate_response(
+        gate, HumanVerdict(
+            gate_id=gate.gate_id, values={}, evidence_urns=[],
+            decided_by="t1", decided_at="2026-11-14T08:02:00Z"), _T1)
+    with pytest.raises(HybridPlanError, match="终态不可续期"):
+        renew_gate(responded, _T1, 60)
+    with pytest.raises(HybridPlanError, match="已响应，不能取消"):
+        cancel_gate(responded, _T1)
+
+    canceled = cancel_gate(gate, _T1)
+    assert canceled.status is GateStatus.CANCELED
+    with pytest.raises(HybridPlanError, match="重复取消"):
+        cancel_gate(canceled, _T1)

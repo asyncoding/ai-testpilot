@@ -24,6 +24,7 @@ from .badcase_api import badcase_router
 from .config_loader import load_profile
 from .execution_api import execution_router
 from .factory import Container, build_container
+from .gate_api import gate_router
 from .knowledge_api import knowledge_router
 from .qa_api import api_router, register_exception_handlers
 from .qa_graph.service import build_qa_service
@@ -106,6 +107,7 @@ def create_app(
     app.include_router(assets_router)
     app.include_router(badcase_router)
     app.include_router(execution_router)
+    app.include_router(gate_router)
     app.include_router(knowledge_router)
 
     @app.get("/health")

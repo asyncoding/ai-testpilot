@@ -464,3 +464,65 @@ export interface GovernanceEditResult {
   authority_level: string;
   governance: KnowledgeGovernance;
 }
+
+// ── H2 人工闸门（docs/15 §7，hybrid-plan-v1）────────────────────────────────
+
+export type GateStatus = "pending" | "responded" | "expired" | "canceled";
+export type GateActor = "human:action" | "human:verdict" | string;
+export type VerdictFieldKind = "boolean" | "choice" | "text";
+
+export interface VerdictFieldView {
+  key: string;
+  label: string;
+  kind: VerdictFieldKind;
+  options: string[];
+  required: boolean;
+}
+
+export interface VerdictFormView {
+  fields: VerdictFieldView[];
+  require_evidence: boolean;
+}
+
+export interface HumanVerdictView {
+  gate_id: string;
+  values: Record<string, unknown>;
+  evidence_urns: string[];
+  note: string;
+  decided_by: string;
+  decided_at: string;
+}
+
+export interface GateView {
+  gate_id: string;
+  session_id: string;
+  step_id: string;
+  actor: GateActor;
+  prompt: string;
+  verdict_form: VerdictFormView | null;
+  evidence_urns: string[];
+  deadline: string;
+  status: GateStatus;
+  created_at: string;
+  response: HumanVerdictView | null;
+  renewed_at: string | null;
+}
+
+export interface GateOpenBody {
+  session_id: string;
+  step_id: string;
+  actor: GateActor;
+  action: string;
+  prompt: string;
+  params?: Record<string, unknown>;
+  verdict_form?: VerdictFormView | null;
+  evidence_urns?: string[];
+  deadline_seconds?: number;
+}
+
+export interface GateRespondBody {
+  values: Record<string, unknown>;
+  note?: string;
+  evidence_urns: string[];
+  decided_by: string;
+}

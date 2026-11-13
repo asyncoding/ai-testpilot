@@ -82,6 +82,12 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     container.adapters["store"] = store
     container.adapters["queue"] = SqliteQueue(store.conn)
 
+    # H2（docs/15 §7）：文件态人工闸门，profile 无关、零 DDL，始终装配；
+    # 落 data_dir/gates/<gate_id>.json，不进 sqlite、不需要 schema 迁移。
+    from testpilot_adapters.gate_store import FileGateStore
+
+    container.adapters["gate_store"] = FileGateStore(data_dir)
+
     # ── 被测仓库引用（路径配置化，禁止写死机器绝对路径）──
     repo_path = Path(config.project.repo_path).expanduser()
     if not repo_path.is_absolute():
