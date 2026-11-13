@@ -193,6 +193,76 @@ diff /tmp/simlist-before.txt /tmp/simlist-after.txt   # 期望：无输出（列
 模拟器环境的能力边界（签名/后台音频/真机设备层验不了）在 TestRun `uncovered_layers`
 显式声明，页面与报告均如实展示"哪层已验、哪层只能生产验"。
 
+### 3.7 物理真机 .logarchive 两步取证 runbook（2026-11-13 切片一，**手动步骤永不进 verify_s0.sh**）
+
+真机没有 `simctl spawn` 通道，os_log 链路拆成 collect（设备→本机归档）+ show（本机
+归档→窗口过滤）两步。环境事实：Xcode 27.0、真机 iPhone 16 Pro（iOS 27.2，硬件 UDID
+`00008140-001A39590162801C`）、`/usr/bin/log` 系统自带。**注意双标识陷阱**：
+`devicectl list` 顶层 `identifier` 是 CoreDevice UUID（形如 `9D3A93E6-…`），硬件
+UDID 在 `properties.hardware.udid`；本序列所有命令只认硬件 UDID。
+
+**安全纪律（先于一切命令）**：
+
+1. 真机不属本进程：禁止任何 erase/reset 自动化（平台层 `IosDeviceEnvironment.reset`
+   无条件 PolicyDeniedError）；抹机只能人工经系统设置或 MDM。
+2. `log collect` 在部分机器需要 sudo，而 worker 进程没有 TTY——**默认 manual 模式：
+   平台不代跑 collect，由人工执行下面的命令预采集**；需要提权时人工自行在命令前加
+   `sudo`（交互输入密码），平台侧的 `sudo -n` 仅在凭据已缓存时可用，未缓存立即失败、
+   绝不挂死等密码。**本机已实测（2026-11-13，E-A）：免 sudo collect 直接 rc=77
+   `log: Must be root to collect logs from attached device`，故本机 manual 是唯一
+   可行默认，auto 模式仅在换机器且证实免提权后启用**。
+3. 只对显式 UDID 操作，禁止任何隐式"当前设备"写法；本序列不进自动门禁，
+   `scripts/device_chain_probe.py` 仅人工显式执行。
+4. 真机连接态会实时抖动（实测同一设备两轮探针间 connected→unavailable）：探针/
+   health_check 对 unavailable 必须 fail-closed，重连后重跑即可，禁止把失败改写成
+   缓存结论。
+
+```bash
+set -euo pipefail
+DEVICE_UDID=00008140-001A39590162801C          # properties.hardware.udid，非 CoreDevice UUID
+RUN_ID=run-$(date +%Y%m%d-%H%M%S)              # 生产环境用 run_id_for(idempotency_key)
+ARCHIVE=store/ios-local-poc-device/logarchive-work/${RUN_ID}.logarchive
+mkdir -p "$(dirname "$ARCHIVE")"
+
+# ── 0. 预检：盘点必须表态 physical + connected（JSON 走 stdout，core 纯函数同口径解析）──
+xcrun devicectl list devices --json-output - \
+  | jq '.result.devices[] | {udid:.properties.hardware.udid,
+       reality:.properties.hardware.reality, state:.properties.connection.state}'
+
+# ── 1. collect：设备日志 → 本机 .logarchive（注意：collect 没有 --end，
+#      采集从 --start 到当前时刻，窗口收口在第 2 步 show）。需要提权就人工加 sudo ──
+/usr/bin/log collect --device-udid "$DEVICE_UDID" \
+  --start "$(date -v-5M '+%Y-%m-%d %H:%M:%S')" \
+  --output "$ARCHIVE"
+# 平台 auto 模式等价 argv（use_sudo=true 时前置 sudo -n，非交互失败语义）：
+#   sudo -n /usr/bin/log collect --device-udid <UDID> --start "<空格格式>" --output <ARCHIVE>
+
+# ── 2. show：对本机归档做窗口/谓词过滤，ndjson 一行一条（json style 是美化数组不可逐行解析）──
+/usr/bin/log show "$ARCHIVE" \
+  --style ndjson \
+  --start "$(date -v-5M '+%Y-%m-%d %H:%M:%S')" --end "$(date '+%Y-%m-%d %H:%M:%S')" \
+  --predicate 'subsystem == "com.thames.alarmkitspike"' \
+  > /tmp/${RUN_ID}-device.ndjson
+#    流尾信封行 {"count":N,"finished":1} 与模拟器同构，parse_ndjson 识别后跳过；
+#    服务端窗外条目再经 filter_window 二次剔除（闭区间，与 log show 语义一致）。
+```
+
+manual 模式的人机衔接：平台查询时若归档不在位，`DeviceOsLogQueryAdapter` 以
+AdapterUnavailableError 收口，报错原文携带**可照跑的完整 collect 命令与目标归档路径**；
+人工采集到同一 `<run_id>.logarchive` 后重跑查询即接上 show，证据链里保留"本应执行的
+命令"。一键探针：`.venv/bin/python scripts/device_chain_probe.py`（首跑 exit 2 打印
+人工命令，同 `--run-id` 重跑接上 show；`--collect-mode auto` 仅在确认本机免提权时用），
+报告落 `out/eval/device-chain-probe.{json,md}`。
+
+与生产代码的对应：argv 全部由 core 纯函数拼装——`devicectl_commands.py`（盘点 argv/
+JSON 解析/UDID 白名单）、`oslog_commands.py` 的 `build_device_log_collect_argv` /
+`build_archive_log_show_argv`（两步 argv、auto/manual 模式、时间窗与谓词校验）；
+进程 IO 在 `adapters/ios_device_env.py`（租约/health_check/reset 守卫）与
+`adapters/device_os_log.py`（两步采集、陈旧归档先删后采、NDJSON 复用模拟器同构解析器）；
+装配见 `config/profiles/ios-local-poc-device.yaml`（默认 `collect_mode: manual`）。
+真机 run 的 TestRun `provider=ios-device`、`uncovered_layers=[]`（三层设备独占能力物理
+可验），与模拟器 run 的三层未覆盖声明互不为默认值。
+
 ## 4. 对 Demo 各模块的喂料方式
 
 | 模块 | 怎么用这个工程 |
