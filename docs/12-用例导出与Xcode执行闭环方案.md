@@ -396,16 +396,55 @@ TestPilot 导出的结构化用例集（case-export-v1 JSON，随消息附上或
    领域模型；setUpWithError 中 continueAfterFailure = false；启动参数固定
    app.launchArguments = ["--ak-clear-all", "--ak-purge-dates", "--ak-accept-privacy"]
    （隐私门专项改用 --ak-reset-privacy；参数语义见 CLAUDE.md 避坑指南），每用例冷启零累积；
-3. 等待一律 waitForExistence(timeout:) 轮询，禁止 sleep 死等；断言「旧页面消失」
-   而不仅是「新标题存在」，防同名节点假绿；关键步骤截图存为 xcresult attachment；
+3. 等待一律 waitForExistence(timeout:) 轮询，**禁止 `sleep(`/`usleep(`/`Thread.sleep`
+   死等**——静态红线 GS-001 会直接扫红（门禁命令见下方【静态红线门禁】），注释与字符串
+   遮罩后判定，写在注释里的说明文字不误伤；断言「旧页面消失」而不仅是「新标题存在」，
+   防同名节点假绿；关键步骤截图存为 xcresult attachment；
 4. 系统级授权弹窗由测试自己点掉（UI 测试是模拟器上唯一可靠的点屏通道），
-   不假设 simctl 能 tap。
+   不假设 simctl 能 tap；
+5. **接力（relay）段附着规则（H5 新增，红线 GS-002/GS-003）**：混合执行中段 B 用例
+   附着的是系统接力场景里**已存活的进程**，只能 `app.activate()` 附着，禁止
+   `app.launch()` 冷启动——冷启动销毁系统接力场景且让状态跨用例累积。同一 test 方法内
+   activate 与 launch 并存即 GS-002 红；一个 test 方法出现两次以上 `.launch(` 即 GS-003 红。
+   每个用例至多一次冷启动，且只允许出现在 setUp/首段；
+6. **六类前置条件的承接模板（与 hybrid-plan-v1 前置 kind 一一对应，生成代码不得越界
+   自行实现）**：
+
+   | 前置 kind | 生成代码/运行期承接方式 |
+   |---|---|
+   | `device_unlocked` | 无代码承接：锁屏/侧键永久是 human:action 闸门（无密码测试机策略不立），生成代码不得尝试解锁 |
+   | `session_window_materialized` | 无代码承接：DH-AX 运行期探针负责，不满足走 repair/人工闸门 |
+   | `portrait_orientation` | 无代码承接：runner 侧 rotate repair（截一张判一张，像素判方向），生成代码禁止自行旋转设备 |
+   | `app_not_running` | devicectl 无进程列表动词、恒 unknown：需要干净态时走 `--terminate-existing` 冷启动 + 启动参数钩子，不假设进程死活 |
+   | `no_active_alarms` | 固定 launchArguments 带 `--ak-purge-dates`（清活钟），由 xcodebuild 段兜底；生成代码不自行删库 |
+   | `notification_permission` | 恒 unknown、只能人工闸门确认；隐私门专项用 `--ak-reset-privacy`，授权弹窗由 UI 测试自己点（见规则 4） |
 
 【编译门禁】（必须自行跑通后才算交付，在 AlarmKitSpike/ 子目录执行）
 xcodegen generate   # 两个 target 的 sources 都是 folder group，新文件必须重新生成工程
 xcodebuild build-for-testing -workspace AlarmKitSpike.xcworkspace \
   -scheme AlarmKitSpike -destination 'platform=iOS Simulator,id=<本机 udid>'
 失败必须修到通过，不允许留无法编译的交付物。
+
+【静态红线门禁】（H5 落地，编译门禁之前先过；仅管辖 AgentGenerated/ 内生成文件）
+testpilot 对语料仓所有路径含 `AgentGenerated` 段的 `.swift` 文件做静态扫描
+（core 纯函数 `generated_swift_lint`，零 IO 可单测；先做注释/字符串遮罩再匹配，
+文档说明里的 `sleep(` 字样不误伤；圈外人工存量代码一律不扫、直接拒绝越界请求）：
+
+| 规则 | 判定 | 修复方向 |
+|---|---|---|
+| GS-001 | 出现 `sleep(` / `usleep(` / `Thread.sleep` | 改 `waitForExistence(timeout:)` 轮询 |
+| GS-002 | 同一 test 方法内 `app.activate()` 与 `app.launch()` 并存 | 接力段删掉 launch，只保留 activate 附着 |
+| GS-003 | 同一 test 方法内两次以上 `.launch(` | 每用例至多一次冷启动，重入改用 activate |
+
+```bash
+# subsystems/ 目录下；--repo 指向语料仓根，缺省走容器 repo 坐标
+uv run testpilot-scan-generated-swift --repo <语料仓根目录>
+# 退出码：0 零违规；2 硬错误（仓不可达/IO 失败）；3 存在违规（JSON 报告照常输出，
+# 含文件/行号/代码片段，逐条可定位）
+```
+
+红证纪律：扫描器自带 hostless 红证测试（临时植入 `sleep(2)` 必红、回退轮询写法转绿、
+注释/多行字符串里的关键词不误伤、圈外路径 fail-closed），红线规则任何变更必须同步红证。
 
 【交付物】
 1. Swift 文件：单元分支在 AlarmKitSpike/Tests/AgentGenerated/，

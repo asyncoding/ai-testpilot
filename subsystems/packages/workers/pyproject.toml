@@ -26,6 +26,7 @@ testpilot-badcase = "testpilot_workers.badcase_cli:main"
 testpilot-impact = "testpilot_workers.impact_cli:main"
 testpilot-export-cases = "testpilot_workers.export_cases:main"
 testpilot-scan-automation = "testpilot_workers.scan_automation:main"
+testpilot-scan-generated-swift = "testpilot_workers.scan_generated_swift:main"
 testpilot-impact-rerun = "testpilot_workers.impact_rerun:main"
 
 [build-system]
