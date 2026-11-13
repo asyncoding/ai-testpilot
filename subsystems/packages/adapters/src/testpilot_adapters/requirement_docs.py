@@ -1,7 +1,9 @@
 """需求 Markdown 文档连接器（docs/08 FR-TD-001，S2.2）。
 
 只读扫描配置目录下的需求 Markdown，调用 core 零依赖抽取器产出结构化
-``RequirementParseResult``；与 ``case_docs`` 同构的根别名/排除/隔离语义：
+``RequirementParseResult``；root 既可是目录（递归 glob）也可是单个文件
+（精确收录，alias 取父目录名，external_id 与目录形态同形）；与 ``case_docs``
+同构的根别名/排除/隔离语义：
 
 - URN 基于「根别名/相对路径」，不随内容变化，内容变化体现在 content_hash；
 - 单文件读取失败隔离为 error，不阻断整批；解析级单条死信在结果的
@@ -66,10 +68,11 @@ class RequirementDocumentAdapter:
         used: dict[str, int] = {}
         for raw in roots:
             path = Path(raw).expanduser().resolve()
-            alias = path.name or "root"
-            used[alias] = used.get(alias, 0) + 1
-            if used[alias] > 1:
-                alias = f"{alias}-{used[alias]}"
+            # 单文件 root：alias 取父目录名，使 external_id 与目录 root 扫到
+            # 同一文件时完全同形（docs/x.md），两种配法 URN 稳定可互换
+            alias_base = path.parent.name if path.is_file() else (path.name or "root")
+            used[alias_base] = used.get(alias_base, 0) + 1
+            alias = alias_base if used[alias_base] == 1 else f"{alias_base}-{used[alias_base]}"
             specs.append(RequirementRoot(path=path, alias=alias))
         return specs
 
@@ -85,6 +88,11 @@ class RequirementDocumentAdapter:
         for root in self.roots:
             if not root.path.exists():
                 raise AdapterUnavailableError(f"需求文档根目录不存在: {root.path}")
+            if root.path.is_file():
+                # 单文件 root：精确收录该文件，不 glob、不应用 excludes
+                # （显式点名即最高优先级，同目录其他文档不扫入）
+                found.append((root, root.path))
+                continue
             for path in sorted(root.path.glob(_GLOB)):
                 if not path.is_file():
                     continue
@@ -99,7 +107,8 @@ class RequirementDocumentAdapter:
         docs: list[ParsedRequirementDoc] = []
         errors: list[dict] = []
         for root, path in self._iter_files():
-            rel = path.relative_to(root.path).as_posix()
+            rel = root.path.name if root.path.is_file() \
+                else path.relative_to(root.path).as_posix()
             external_id = f"{root.alias}/{rel}"
             urn = make_urn(self.source_system, "requirement_doc", external_id)
             try:

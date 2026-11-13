@@ -428,6 +428,15 @@ def test_xcode_profile_wires_real_execution_stack_and_keeps_recorded_profile_int
     assert config.adapters.environment.type == "ios-simulator"
     assert config.adapters.logs.type == "os-log"
     assert config.adapters.artifact.type == "localfs"
+    # S2 链在真实 profile 上可跑：fs-reqs/fs-cases 直指语料仓 V1 文档（单文件 root），
+    # case_repo 写根落 store 内（docs/13 §5.3 全链回归守卫，2026-11-13 缺口修复）
+    assert config.adapters.requirements.type == "fs-reqs"
+    assert config.adapters.cases.type == "fs-cases"
+    assert config.adapters.case_repo.type == "markdown-fs"
+    req_roots = config.adapters.requirements.settings["roots"]
+    case_roots = config.adapters.cases.settings["roots"]
+    assert any("V1需求文档" in r for r in req_roots)
+    assert any("V1测试用例文档" in r for r in case_roots)
     # 执行账本与录制 profile 物理隔离
     assert config.paths["data_dir"] == "store/ios-local-poc-xcode"
     assert config.paths["data_dir"] != recorded.paths["data_dir"]
@@ -440,10 +449,17 @@ def test_xcode_profile_wires_real_execution_stack_and_keeps_recorded_profile_int
     config.paths["data_dir"] = str(tmp_path / "data")
     container = build_container(config, SUBSYSTEMS)
     try:
+        from testpilot_adapters.case_docs import CaseDocumentAdapter
+        from testpilot_adapters.case_repo import MarkdownCaseRepository
+        from testpilot_adapters.requirement_docs import RequirementDocumentAdapter
+
         assert isinstance(container.get("runner"), XcodeTestRunner)
         assert isinstance(container.get("environment"), SimctlEnvironment)
         assert isinstance(container.get("logs"), OsLogQueryAdapter)
         assert isinstance(container.get("artifact"), LocalFsArtifactAdapter)
+        assert isinstance(container.get("requirements"), RequirementDocumentAdapter)
+        assert isinstance(container.get("cases"), CaseDocumentAdapter)
+        assert isinstance(container.get("case_repo"), MarkdownCaseRepository)
         # runner 与环境池共享同一显式 udid
         assert container.get("logs").udid == devices[0]["udid"]
         assert container.get("runner").scheme == "AlarmKitSpike"

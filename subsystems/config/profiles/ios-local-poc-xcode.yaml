@@ -1,10 +1,12 @@
 # ios-local-poc-xcode：Xcode 真实执行链路专用 profile（docs/12 E5，2026-11-13）
-# 与 ios-local-poc 的唯一差异组：
+# 与 ios-local-poc 的差异组：
 #   1) runner: recorded → xcode（真实 xcodebuild，经 SubprocessExecutor 永不 shell）；
 #   2) environment: stub → ios-simulator（simctl 设备池，先租后跑，udid 透传 labels）；
 #   3) logs: stub → os-log（真实 os_log 取证，显式 udid 拒绝 booted 隐式目标）；
 #   4) data_dir 独立为 store/ios-local-poc-xcode，执行账本与录制 profile 物理隔离；
-#   5) xcresult 工作/产物根独立目录，全部落在 gitignored store/ 下。
+#   5) xcresult 工作/产物根独立目录，全部落在 gitignored store/ 下；
+#   6) 2026-11-13 补：cases/requirements 由 stub 换真实文档连接器（单文件 root 直指
+#      语料仓 V1 文档），case_repo 装配 markdown-fs 写根，S2 全链（docs/13 §5.3）可跑。
 # 其余适配器（git/docs/检索/模型/队列/归因）与 ios-local-poc 一字不差；
 # 原 ios-local-poc.yaml 的 recorded 离线链路原样保留，本文件不回写不污染。
 # 模拟器不可用时的降级 runbook 见 docs/03 §3.6 与 docs/13 故障排查章。
@@ -77,7 +79,23 @@ adapters:
       authority_overrides:
         - {glob: "docs/**", level: L1_authoritative}
         - {glob: "Resources/**", level: L1_authoritative}
-  cases:      {type: stub}
+  # S2 链真实连接器（2026-11-13 缺口修复）：单文件 root 直指语料仓 V1 文档，
+  # 不扫 docs/ 全目录（市场调研等同级 md 不进抽取批次）；${REPO_PATH} 由 factory
+  # _resolve 替换，缺失路径在 worker load() 期 AdapterUnavailableError 响亮失败。
+  cases:
+    type: fs-cases
+    settings:
+      roots:
+        - ${REPO_PATH}/docs/V1测试用例文档.md
+  requirements:
+    type: fs-reqs
+    settings:
+      roots:
+        - ${REPO_PATH}/docs/V1需求文档-强提醒闹钟.md
+  # 人审回写写根：默认 data_dir/case-writeback（store 内、gitignored、可移植），
+  # 绝不写语料仓；stub 时 dispatch-outbox 只记 adapter_not_configured、pending 永不落地。
+  case_repo:
+    type: markdown-fs
   tickets:    {type: json}
   ci_events:  {type: json-replay}
   # E5 核心切换：真实 xcodebuild（factory 强制 artifact=localfs，见下）。
