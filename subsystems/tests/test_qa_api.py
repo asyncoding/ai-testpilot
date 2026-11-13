@@ -368,3 +368,29 @@ async def test_existing_web_dist_serves_index_without_shadowing_api(
         # 路由注册顺序保证 /api 不被根挂载吞掉
         assert client.get("/api/config").status_code == 200
         assert client.get("/health").status_code == 200
+
+
+async def test_flat_export_clean_urls_map_to_dot_html(container, tmp_path):
+    """Next output:"export" 扁平产物（approvals.html 而非 approvals/index.html）：
+    干净 URL /approvals 必须回退命中同名 .html；2026-11-13 线上 404 回归红证。"""
+    dist = tmp_path / "out"
+    (dist / "runs").mkdir(parents=True)
+    (dist / "index.html").write_text("ROOT", encoding="utf-8")
+    (dist / "approvals.html").write_text("APPROVALS-PAGE", encoding="utf-8")
+    (dist / "runs" / "detail.html").write_text("RUN-DETAIL", encoding="utf-8")
+    (dist / "404.html").write_text("NEXT-NOT-FOUND", encoding="utf-8")
+    with _client(container, web_dist=dist) as client:
+        # 红证核心：无扩展名干净 URL
+        resp = client.get("/approvals", follow_redirects=False)
+        assert resp.status_code == 200 and "APPROVALS-PAGE" in resp.text
+        nested = client.get("/runs/detail", follow_redirects=False)
+        assert nested.status_code == 200 and "RUN-DETAIL" in nested.text
+        # 显式 .html 与根路径行为不变
+        assert client.get("/approvals.html").status_code == 200
+        assert client.get("/").status_code == 200
+        # 未知路由仍走 Next 404.html（404 状态不被回退吞掉）
+        missing = client.get("/no-such-route")
+        assert missing.status_code == 404 and "NEXT-NOT-FOUND" in missing.text
+        # 防穿越：lookup_path 的 commonpath 守卫仍在，绝不逃出 dist
+        traversal = client.get("/../../etc/passwd")
+        assert traversal.status_code == 404

@@ -15,7 +15,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+
+from .static_spa import SpaStaticFiles
 
 from .approval_api import approval_router
 from .assets_api import assets_router
@@ -122,9 +123,10 @@ def create_app(
             "adapters": adapters,
         }
 
-    # 静态前端最后挂载：路由按注册顺序匹配，/health 与 /api/* 优先于根路径兜底
+    # 静态前端最后挂载：路由按注册顺序匹配，/health 与 /api/* 优先于根路径兜底。
+    # SpaStaticFiles 兼容 Next 扁平导出（/approvals → approvals.html，2026-11-13 修复）
     if web_dist.is_dir():
-        app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="web")
+        app.mount("/", SpaStaticFiles(directory=str(web_dist), html=True), name="web")
     else:
         # 不阻断启动：无前端构建产物时仍是完整 API 服务（verify_s0 A8 依赖此行为）
         logger.warning(
