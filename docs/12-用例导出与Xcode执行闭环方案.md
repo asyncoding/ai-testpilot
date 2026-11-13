@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.3 五切片全部落地**（2026-11-13：E1/E2/E3/E4/E5 已落地并完成真实 xcodebuild 端到端验证；全量 1248 测试、verify_s0 24/24）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`
+> 状态：**v1.4 五切片全部落地 + 契约二 UI 测试双 target 化**（2026-11-13：E1–E5 已落地并完成真实 xcodebuild 端到端验证；v1.4 修订契约二/附录 A/B，XCUITest 生成从「人工另行开口」升级为契约内一等分支，并修正外部 Agent 阅读清单为语料仓 CLAUDE.md + V1 三文档；全量 1248 测试、verify_s0 24/24）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md` 与 `.agent-handoff/2026-11-13-ui-test-contract-and-prompt-fix.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -73,6 +73,7 @@
     "marker_comment": "// testpilot-case: <TC-ID>",
     "naming": "func test_<TC-ID 去横线转驼峰>_<短描述>()",
     "target_target": "AlarmKitSpikeTests",
+    "ui_test_target": "AlarmKitSpikeUITests",
     "detail_doc": "docs/12 §3.2"
   },
   "requirements": [
@@ -95,8 +96,8 @@
       "preconditions": ["..."],
       "steps": ["..."],
       "oracles": [
-        {"type": "ui_state|assertion|log|...", "expectation": "...",
-         "source_refs": [], "confidence": 0.8}
+        {"type": "ui_assertion|log_assertion|state_assertion|manual",
+         "expectation": "...", "source_refs": [], "confidence": 0.8}
       ],
       "mined_oracle_suggestions": [
         {"type": "log_assertion", "expectation": "...", "source_refs": [],
@@ -123,16 +124,25 @@
 - 文件内容寻址 hash 同时写入载荷顶层 `content_hash` 与文件名（`<hash8>`），不新建表、不动 schema v15；导出账本暂不引入，需要对账时以文件 hash 为准（E1 落地决策，避免过度设计）；
 - 同一库重复导出生成不同时间戳文件，但同内容 hash 可对账（已实测：两次导出 hash 完全一致）。
 
-### 3.2 契约二：外部生成约定与 TC 标记规范（E2，文档+人工流程）
+### 3.2 契约二：外部生成约定与 TC 标记规范（E2，文档+人工流程；v1.4 起双 target）
 
-对外部 Agent 的硬性约定（写进 runbook 的 prompt 模板）：
+对外部 Agent 的硬性约定（写进 runbook 的 prompt 模板）：单元测试与 UI 测试是契约内的
+两个对等分支，共用标记/命名/溯源规范，仅落点与代码形态不同。
 
-1. **标记注释**：每个生成的测试方法上方一行 `// testpilot-case: <TC-ID>`；一个方法可覆盖多个 TC 时写多行标记；
+1. **标记注释**：每个生成的测试方法上方一行 `// testpilot-case: <TC-ID>`；一个方法可覆盖多个 TC 时写多行标记；单元/UI 两类测试的标记语法完全一致，扫描器按目录自动分流 target；
 2. **命名**：`func test_<TC-ID 去横线转驼峰>_<英文短描述>()`，例：`TC-C1 → test_TCC1_countdownSnapshots()`；
-3. **落点**：仅允许写入演示分支 `demo/agent-generated-tests` 的 `AlarmKitSpikeTests` target（UI 测试默认不生成，需人工显式要求才进 `AlarmKitSpikeUITests`）；
-4. **编译门禁**：生成后必须 `xcodebuild build-for-testing` 通过，人审确认断言与 oracle 期望一致才可合入；
-5. **禁止事项**：不改生产代码、不删存量测试、不引入第三方依赖；
-6. 每个方法的断言必须能回溯到导出 JSON 中该 TC 的 `oracles[].expectation`，生成记录（对话/补丁）作为附件存 testpilot 写根 `external-generation/<TC-ID>/`。
+3. **target 分流规则（依据导出 JSON 既有字段，不引入新字段）**：
+   - 该 TC 任一 `oracles[].type == "ui_assertion"` → **UI 分支**：写入 `AlarmKitSpike/UITests/AgentGenerated/`（新目录，按模块命名文件，类名 `Agent<Module>UITests`），归属 `AlarmKitSpikeUITests` target（XCUITest，驱动真实产品 UI）；
+   - 其余 → **单元分支**：写入 `AlarmKitSpike/Tests/AgentGenerated/`（新文件，类名 `Agent<Module>Tests`），归属 `AlarmKitSpikeTests` target（hostless 纯 Foundation 测试）；
+   - 人工可在交付指令中显式覆盖分流（如把 state_assertion 用例改成 UI 走查），但必须在 `generation-report.md` 逐条记录覆盖原因；系统侧不强制分流，扫描映射只认最终落点目录；
+   - `exploratory=true`、或 `oracle_missing=true` 且无任何 oracle 的用例两个分支都不生成，进报告 skipped 清单；
+4. **UI 分支额外硬约定**（对齐存量 `UITests/ProductFlowUITests.swift`，外部 Agent 必须先读它再写）：
+   - 形态为 XCUITest：`XCUIApplication` 驱动真实 UI，不直接 init 领域模型；`setUpWithError` 中 `continueAfterFailure = false`，每用例冷启动零累积，启动参数固定带 `--ak-clear-all --ak-purge-dates --ak-accept-privacy`（隐私门专项用 `--ak-reset-privacy` 强制重弹，参数语义以语料仓 `CLAUDE.md` 避坑指南为准）；
+   - 等待一律 `waitForExistence(timeout:)` 轮询，禁止死等；断言旧页面消失而非仅断言新标题存在（防同名假绿）；关键步截图作为 xcresult attachment；
+   - V1 测试用例文档中标 📱（硬件键/全屏闹钟画面/音频/震动/锁屏视觉）的用例模拟器不可验，**不得生成模拟器 UI 测试**，进 skipped 并注明「仅真机可验」；🤖 标记才可生成；
+5. **编译门禁**：两类产物都必须在 `AlarmKitSpike/` 子目录先 `xcodegen generate`（两个 target 的 sources 都是 folder group，新文件必须重新生成工程才进编译）再 `xcodebuild build-for-testing` 通过，人审确认断言与 oracle 期望一致才可合入；
+6. **禁止事项**：不改 `Sources/` 生产代码、不修改/删除 `Tests/` 与 `UITests/` 存量测试、不引入第三方依赖与新 Pod；
+7. 每个方法的断言必须能回溯到导出 JSON 中该 TC 的 `oracles[].expectation`（`mined_oracle_suggestions` 仅 `status=approved` 可作补充断言来源），生成记录（对话/补丁）作为附件存 testpilot 写根 `external-generation/<export hash8>/`。
 
 ### 3.3 契约三：自动化映射文件（`automation-map-v1`，E3 产出）
 
@@ -150,8 +160,17 @@
     {
       "case_external_id": "TC-C1",
       "only_testing_id": "AlarmKitSpikeTests/RoutineAlarmTests/test_TCC1_countdownSnapshots",
-      "source_file": "AlarmKitSpike/Tests/RoutineAlarmTests+Agent.swift",
+      "source_file": "AlarmKitSpike/Tests/AgentGenerated/RoutineAlarmAgentTests.swift",
       "line": 42,
+      "origin": "marker",
+      "reviewed_by": "",
+      "reviewed_at": null
+    },
+    {
+      "case_external_id": "TC-U1",
+      "only_testing_id": "AlarmKitSpikeUITests/AgentQuickAlarmUITests/test_TCU1_quickCountdownFlow",
+      "source_file": "AlarmKitSpike/UITests/AgentGenerated/QuickAlarmAgentUITests.swift",
+      "line": 31,
       "origin": "marker",
       "reviewed_by": "",
       "reviewed_at": null
@@ -185,9 +204,9 @@
 | AC | ①导出 JSON 通过 schema 自校验（`test_case_export_core.py` 11 例）；②cancelled 不进 cases 只进 excluded；③同库两次导出同内容 hash 一致（实测 `7e546181…` 两次相同）；④空库导出响亮失败 exit 2，不产空壳文件（ios-local-poc 空库实测 exit=2） |
 | 红证 | 已执行：临时把 active 过滤改为全量 → `test_cancelled_case_never_enters_cases_but_is_listed_in_excluded` 等 2 测试变红；还原变绿（19/19 通过，全量 1207 通过） |
 
-### E2 外部 Agent 协作约定与演示分支 runbook（约 0.5 人日，纯文档）——✅ 已落地（2026-11-13，附录 A/B）
+### E2 外部 Agent 协作约定与演示分支 runbook（约 0.5 人日，纯文档）——✅ 已落地（2026-11-13，附录 A/B；v1.4 双 target 修订）
 
-- 产出：docs/12 附录 A（prompt 模板全文）、docs/13 说明书对应章；演示分支创建/合入/只读对接的完整 git 命令；
+- 产出：docs/12 附录 A（prompt 模板全文，v1.4 起含单元/UI 双生成分支与语料仓 CLAUDE.md/V1 三文档阅读清单）、docs/13 说明书对应章；演示分支创建/合入/只读对接的完整 git 命令；
 - 演示分支约定名 `demo/agent-generated-tests`，从 `alarmkit-spike` 切出，README 顶部加"演示分支不合主线"声明（人工操作步骤写入说明书）；
 - AC：第三方按 runbook 从零操作可独立完成分支创建与一次示例生成；命令全部可复制执行，无机密/绝对路径。
 
@@ -261,7 +280,7 @@
 
 1. 不做系统内 Swift/任何语言代码生成、不做编译器封装（`xcodebuild build-for-testing` 只在 runbook 由人工执行）；
 2. 不做 web 页面（docs/11 搁置）；本方案全部入口为 CLI + 既有 API，说明书以终端操作为主线；
-3. 不做 XCUITest 自动生成约定（仅保留人工显式要求的口子）；不做自动分支创建/自动合入；
+3. 不在系统内生成任何 Swift 代码（单元与 XCUITest 一律由系统外 Agent 按 §3.2 双分支约定生成、人审合入；v1.4 起 XCUITest 已是契约内一等分支，但系统本身仍零代码生成）；不做自动分支创建/自动合入；
 4. 不做 schema v16（映射走 raw_json + 独立 map 文件）；不改动 S2/S3/S4 既有语义与探针封存值；
 5. 不把外部 Agent 生成的代码拷入本仓，不把演示分支合入语料仓主线。
 
@@ -276,43 +295,75 @@
 ```text
 你是 AlarmKitSpike（iOS Swift 6 / XCTest）项目的测试工程师。本次任务是把一份
 TestPilot 导出的结构化用例集（case-export-v1 JSON，随消息附上或给出文件路径）
-实现为可编译、可执行的 XCTest 单元测试。
+实现为可编译、可执行的 XCTest 测试：按用例的 oracle 类型分流为 hostless 单元测试
+（AlarmKitSpikeTests）与 XCUITest UI 测试（AlarmKitSpikeUITests）两个分支。
 
-【开工前必读】
-1. 先读本仓 AGENTS.md 与 docs/requirements.md、docs/architecture.md、docs/agent_pitfalls.md；
-2. 读 JSON 的 generation_convention 段：marker_comment / naming / target_target
-   是本次生成的硬性约定，逐字遵守；
-3. 只读 cases[] 中 lifecycle=active 且 exploratory=false 的用例；
-   exploratory=true 与 oracle_missing=true 且无任何 oracle 的用例不生成代码，
-   写入报告的 skipped 清单并逐条说明原因。
+【开工前必读】（以下路径均相对本仓根目录，按顺序读，不要凭文件名猜测）
+1. CLAUDE.md——工程纪律与避坑指南（隐私总门、AlarmKit/通知授权、UIKit/SwiftUI
+   混用、iOS-only API 条件编译等实测坑，生成代码必须遵守）；
+2. docs/V1需求文档-强提醒闹钟.md——需求口径与验收标准；
+3. docs/V1技术设计文档.md——架构与模块边界；
+4. docs/V1测试用例文档.md——存量用例与环境标记（🤖=模拟器可跑，📱=必须真机）；
+5. 可选补充：docs/agent_pitfalls.md（历史避坑日志，与 CLAUDE.md 冲突时以 CLAUDE.md 为准）；
+6. 若本次包含 UI 分支，再读 AlarmKitSpike/UITests/ProductFlowUITests.swift——
+   存量 XCUITest 的唯一参照写法（启动参数、轮询、截图、用例隔离都照它）；
+7. 读 JSON 的 generation_convention 段：marker_comment / naming / target_target /
+   ui_test_target 是本次生成的硬性约定，逐字遵守。
 
-【代码规则】
+【用例资格与分流】
+1. 只读 cases[] 中 lifecycle=active 且 exploratory=false 的用例；exploratory=true
+   与 oracle_missing=true 且无任何 oracle 的用例不生成代码，写入报告 skipped 并逐条说明；
+2. 分流规则（依据 JSON 既有字段，不要自造标记）：
+   - 任一 oracles[].type == "ui_assertion" → UI 分支（AlarmKitSpikeUITests）；
+   - 其余 → 单元分支（AlarmKitSpikeTests）；
+   - 人工交付指令显式指定分流时以指令为准，但必须在 generation-report.md 标注覆盖原因；
+3. V1 测试用例文档标 📱 的用例（硬件键/全屏闹钟画面/音频/震动/锁屏视觉）模拟器
+   不可验，一律不生成 UI 测试，进 skipped 注明「仅真机可验」。
+
+【通用代码规则】（两个分支都适用）
 1. 每个测试方法上方独占一行写标记：// testpilot-case: <TC-ID>
    一个方法覆盖多个 TC 时，连续写多行标记，每行一个 TC-ID；
 2. 方法命名：func test_<TC-ID 去横线转驼峰>_<英文蛇形短描述>()，
    例 TC-C1 → func test_TCC1_countdownSnapshots()；转换规则与 TestPilot
    tc_id_to_swift_token 同源（去 "-"，各段首字母大写）；
-3. 新代码只允许落在 AlarmKitSpike/Tests/AgentGenerated/ 目录（新文件，按模块命名，
-   如 RoutineAlarmAgentTests.swift），类名用 Agent<Module>Tests，不与存量类重名；
-4. 断言必须能回溯到该 TC 的 oracles[].expectation；mined_oracle_suggestions 中
+3. 断言必须能回溯到该 TC 的 oracles[].expectation；mined_oracle_suggestions 中
    status=approved 的条目可作为补充断言来源，pending/rejected 不得作为断言依据，
    每条断言在方法内注释标注来源（oracle 序号或 suggestion）；
-5. 禁止事项：不改 Sources/ 下任何生产代码；不修改/删除 Tests 与 UITests 下存量
-   测试；不引入第三方依赖与新 Pod；不写 UITests（XCUITest 需人工显式另行要求）；
-   不做网络/UI 跳转，只构造纯 Foundation 输入调被测类型（参考存量 RoutineAlarmTests
-   的 hostless 风格：Calendar.shanghai、直接 init 领域模型）；
-6. 前置条件（preconditions）用私有 helper 或 setUp 表达；步骤（steps）翻译成
+4. 前置条件（preconditions）用私有 helper 或 setUp 表达；步骤（steps）翻译成
    方法内分段注释 // Step 1 ...，保持与 JSON 文本可对照；
-7. 编译门禁（必须自行跑通后才算交付）：
-   xcodegen generate（在 AlarmKitSpike/ 目录，让新文件进入 Tests group）
-   xcodebuild build-for-testing -workspace AlarmKitSpike.xcworkspace \
-     -scheme AlarmKitSpike -destination 'platform=iOS Simulator,id=<本机 udid>'
-   失败必须修到通过，不允许留无法编译的交付物。
+5. 禁止事项：不改 Sources/ 下任何生产代码；不修改/删除 Tests 与 UITests 下存量
+   测试；不引入第三方依赖与新 Pod；新类不得与存量类重名。
+
+【单元分支规则】
+1. 落点：AlarmKitSpike/Tests/AgentGenerated/（新文件，按模块命名，
+   如 RoutineAlarmAgentTests.swift），类名 Agent<Module>Tests；
+2. hostless 风格：只构造纯 Foundation 输入调被测类型，不做网络/UI 跳转，
+   参考存量 RoutineAlarmTests（Calendar.shanghai、直接 init 领域模型）。
+
+【UI 分支规则】
+1. 落点：AlarmKitSpike/UITests/AgentGenerated/（新文件，按模块命名，
+   如 QuickAlarmAgentUITests.swift），类名 Agent<Module>UITests，XCUITest 形态；
+2. 照抄 ProductFlowUITests 的基建：XCUIApplication 驱动真实 UI，不直接 init
+   领域模型；setUpWithError 中 continueAfterFailure = false；启动参数固定
+   app.launchArguments = ["--ak-clear-all", "--ak-purge-dates", "--ak-accept-privacy"]
+   （隐私门专项改用 --ak-reset-privacy；参数语义见 CLAUDE.md 避坑指南），每用例冷启零累积；
+3. 等待一律 waitForExistence(timeout:) 轮询，禁止 sleep 死等；断言「旧页面消失」
+   而不仅是「新标题存在」，防同名节点假绿；关键步骤截图存为 xcresult attachment；
+4. 系统级授权弹窗由测试自己点掉（UI 测试是模拟器上唯一可靠的点屏通道），
+   不假设 simctl 能 tap。
+
+【编译门禁】（必须自行跑通后才算交付，在 AlarmKitSpike/ 子目录执行）
+xcodegen generate   # 两个 target 的 sources 都是 folder group，新文件必须重新生成工程
+xcodebuild build-for-testing -workspace AlarmKitSpike.xcworkspace \
+  -scheme AlarmKitSpike -destination 'platform=iOS Simulator,id=<本机 udid>'
+失败必须修到通过，不允许留无法编译的交付物。
 
 【交付物】
-1. AlarmKitSpike/Tests/AgentGenerated/ 下的 Swift 文件；
-2. generation-report.md：一张「TC-ID → Swift 类/方法 → 所用 oracle 序号」映射表、
-   skipped 清单（含原因）、build-for-testing 的结论与时间；
+1. Swift 文件：单元分支在 AlarmKitSpike/Tests/AgentGenerated/，
+   UI 分支在 AlarmKitSpike/UITests/AgentGenerated/；
+2. generation-report.md：一张「TC-ID → 分支(unit/ui) → Swift 类/方法 → 所用 oracle
+   序号」映射表、人工分流覆盖记录（如有）、skipped 清单（含原因，真机-only 单独标注）、
+   build-for-testing 的结论与时间；
 3. 全部改动以 git diff / 补丁形式给出，等待人工评审，禁止自行 commit 到受保护分支。
 ```
 
@@ -320,7 +371,7 @@ TestPilot 导出的结构化用例集（case-export-v1 JSON，随消息附上或
 
 - prompt 本身、输入 JSON 快照、Agent 产出的补丁与 `generation-report.md` 由人工归档到
   testpilot 写根 `external-generation/<export hash8>/`（生成物 gitignore，不入库），
-  满足 §3.2 第 6 条的逐 TC 可溯源（报告内映射表逐 TC 列条）；
+  满足 §3.2 第 7 条的逐 TC 可溯源（报告内映射表逐 TC 列条）；
 - 演示话术中外部生成环节必须如实表述为「系统外 Agent + 人审」，不得演示成系统内自动生成。
 
 ## 附录 B：演示分支 git runbook（E2 产出，命令可整段复制）
@@ -362,9 +413,11 @@ git checkout demo/agent-generated-tests
 git pull --ff-only
 git checkout -b gen/<export-hash8>          # 一轮导出一条工作分支，hash 取自 E1 文件名
 
-# ① 人工把 case-set-*.json 交给外部 Agent（附录 A 模板），产物落
-#    AlarmKitSpike/Tests/AgentGenerated/，并取得 generation-report.md
-# ② 工程再生成 + 编译门禁（在子目录执行）
+# ① 人工把 case-set-*.json 交给外部 Agent（附录 A 模板），按 §3.2 分流规则产物落
+#    单元分支 AlarmKitSpike/Tests/AgentGenerated/ 和/或
+#    UI 分支  AlarmKitSpike/UITests/AgentGenerated/，并取得 generation-report.md
+# ② 工程再生成 + 编译门禁（在子目录执行；两个 target 的 sources 都是 folder group，
+#    任一目录有新文件都必须重新 xcodegen generate）
 cd AlarmKitSpike
 xcodegen generate
 xcodebuild build-for-testing \
@@ -373,13 +426,14 @@ xcodebuild build-for-testing \
   -destination 'platform=iOS Simulator,id=<本机模拟器 udid>'
 cd ..
 
-# ③ 人审：逐条核对标记/命名/断言溯源（generation-report.md 映射表），
-#    确认无生产代码改动、无第三方依赖
+# ③ 人审：逐条核对标记/命名/断言溯源/分流正确性（generation-report.md 映射表的
+#    分支列），确认无生产代码改动、无第三方依赖、📱 真机用例未被误生成模拟器 UI 测试
 git diff --stat
 git diff -- AlarmKitSpike/Sources/      # 必须为空：禁止改生产代码
 
 # ④ 合入长期演示分支（人工，fast-forward 或 --no-ff 均可，保留一轮一分支轨迹）
-git add AlarmKitSpike/Tests/AgentGenerated/ AlarmKitSpike/AlarmKitSpike.xcodeproj
+git add AlarmKitSpike/Tests/AgentGenerated/ AlarmKitSpike/UITests/AgentGenerated/ \
+        AlarmKitSpike/AlarmKitSpike.xcodeproj
 git commit -m "test(agent): generated tests for <export-hash8> (human reviewed)"
 git checkout demo/agent-generated-tests
 git merge --no-ff gen/<export-hash8> -m "merge: agent-generated tests <export-hash8>"
