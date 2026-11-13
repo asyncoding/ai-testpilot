@@ -31,6 +31,14 @@ CAPABILITY_OK = "ok"
 CAPABILITY_DEVICE_ONLY = "device_only_capability"
 CAPABILITY_NOT_OFFERED = "capability_not_offered"
 
+# xcodebuild -destination platform 白名单：模拟器与真机两条目的地形态，
+# 防 profile 拼出任意 platform 字符串进 argv（真机切片一，2026-11-13）。
+DESTINATION_PLATFORM_SIMULATOR = "iOS Simulator"
+DESTINATION_PLATFORM_DEVICE = "iOS"
+DESTINATION_PLATFORMS = frozenset(
+    {DESTINATION_PLATFORM_SIMULATOR, DESTINATION_PLATFORM_DEVICE}
+)
+
 # Suite / Suite/Class / Suite/Class/method 三段以内，字母数字下划线开头。
 # 既覆盖 AlarmKitSpikeTests 套件级，也覆盖单条 XCUITest 全限定名。
 _ONLY_TESTING_RE = re.compile(
@@ -61,18 +69,28 @@ def build_xcodebuild_argv(
     udid: str,
     only_testing: list[str],
     result_bundle_path: str,
+    destination_platform: str = DESTINATION_PLATFORM_SIMULATOR,
 ) -> list[str]:
     """拼 xcodebuild test argv（docs/03 §3.1/3.2）。
 
     始终带显式 ``-only-testing``：POC 纪律是"选择执行"，空选择直接拒，
     杜绝标识符写错时静默退化为全量跑（单条 UI 测试可达十余分钟）。
+
+    ``destination_platform`` 白名单二选一（真机切片一）：默认
+    ``iOS Simulator`` 走模拟器池；真机 profile 传 ``iOS``，目的地变为
+    ``platform=iOS,id=<硬件UDID>``，udid 均为硬件/模拟器标识，同一套注入校验。
     """
     _require_nonempty("workspace", workspace)
     _require_nonempty("scheme", scheme)
     _require_nonempty("result_bundle_path", result_bundle_path)
     _require_nonempty("udid", udid)
     if not _UDID_RE.match(udid):
-        raise ValueError(f"非法模拟器 udid（只允许字母数字与连字符）: {udid!r}")
+        raise ValueError(f"非法设备 udid（只允许字母数字与连字符）: {udid!r}")
+    if destination_platform not in DESTINATION_PLATFORMS:
+        raise ValueError(
+            f"非法 destination_platform（白名单 {sorted(DESTINATION_PLATFORMS)}）: "
+            f"{destination_platform!r}"
+        )
     if not only_testing:
         raise ValueError("only_testing 不能为空：本系统只做选择执行，不跑无范围全量")
 
@@ -84,7 +102,7 @@ def build_xcodebuild_argv(
         "-scheme",
         scheme,
         "-destination",
-        f"platform=iOS Simulator,id={udid}",
+        f"platform={destination_platform},id={udid}",
     ]
     for identifier in only_testing:
         argv.extend(("-only-testing", validate_only_testing(identifier)))
@@ -130,11 +148,17 @@ def evaluate_capabilities(
     offered: list[str],
     *,
     provider: str = "ios-simulator",
+    device_capable: bool = False,
 ) -> CapabilityDecision:
     """判定环境能否满足能力要求（纯函数，FR-EX-004 AC1）。
 
     两类拒绝要分清：真机独占能力（模拟器物理层不具备，需说明未覆盖层）与
     设备清单未提供的能力。真机独占优先报，因为它换一台模拟器也解决不了。
+
+    真机切片一（2026-11-13）：``device_capable=True`` 表示 provider 本身就是真机
+    环境（ios-device），此时"真机独占能力"不再天然拒绝，而是与普通能力一样要求
+    清单**显式声明**——profile 没给某台真机贴 ``background_audio`` 标签就不能租它
+    跑后台音频用例，防止能力假设静默成立。默认 False 保持模拟器历史行为不变。
     """
     if not required:
         return CapabilityDecision(supported=True)
@@ -146,17 +170,24 @@ def evaluate_capabilities(
         for c in required
         if c not in DEVICE_ONLY_CAPABILITIES and c not in offered_set
     )
-    unsupported = sorted(set(device_only) | set(not_offered))
+    if device_capable:
+        # 真机环境：独占能力也要清单显式提供，未提供的并入普通缺口统一报
+        unresolved_device_only = [c for c in device_only if c not in offered_set]
+        not_offered = sorted(set(not_offered) | set(unresolved_device_only))
+        device_only_blocked = []
+    else:
+        device_only_blocked = device_only
+    unsupported = sorted(set(device_only_blocked) | set(not_offered))
     if not unsupported:
         return CapabilityDecision(supported=True)
 
-    if device_only:
+    if device_only_blocked:
         return CapabilityDecision(
             supported=False,
             unsupported=unsupported,
             reason=CAPABILITY_DEVICE_ONLY,
             message=(
-                f"unsupported_capability：{device_only} 属真机独占能力，"
+                f"unsupported_capability：{device_only_blocked} 属真机独占能力，"
                 f"{provider} 环境未覆盖（未覆盖层：真机后台音频/推送/签名校验等"
                 "物理设备行为，模拟器无法验证）；其余缺口："
                 f"{not_offered or '无'}"

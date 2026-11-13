@@ -11,6 +11,8 @@ from testpilot_core.xcode_commands import (
     CAPABILITY_DEVICE_ONLY,
     CAPABILITY_NOT_OFFERED,
     CAPABILITY_OK,
+    DESTINATION_PLATFORM_DEVICE,
+    DESTINATION_PLATFORM_SIMULATOR,
     EnvLease,
     build_simctl_erase_argv,
     build_simctl_shutdown_argv,
@@ -98,6 +100,72 @@ def test_udid_injection_chars_rejected(bad_udid):
     kwargs = dict(_KWARGS, udid=bad_udid)
     with pytest.raises(ValueError):
         build_xcodebuild_argv(only_testing=["AlarmKitSpikeTests"], **kwargs)
+
+
+# ── 真机目的地（切片一，2026-11-13）──────────────────────────────────────────
+
+
+_PHYSICAL_UDID = "00008140-001A39590162801C"
+
+
+def test_device_destination_argv_uses_ios_platform_and_hardware_udid():
+    argv = build_xcodebuild_argv(
+        only_testing=["AlarmKitSpikeUITests/AgentStimulusUITests/test_xxx"],
+        destination_platform=DESTINATION_PLATFORM_DEVICE,
+        **{**_KWARGS, "udid": _PHYSICAL_UDID},
+    )
+    assert argv[6:8] == ["-destination", f"platform=iOS,id={_PHYSICAL_UDID}"]
+
+
+def test_default_destination_remains_simulator_for_legacy_callers():
+    argv = build_xcodebuild_argv(only_testing=["AlarmKitSpikeTests"], **_KWARGS)
+    assert argv[7] == f"platform=iOS Simulator,id={_UDID}"
+
+
+def test_unknown_destination_platform_rejected():
+    with pytest.raises(ValueError, match="destination_platform"):
+        build_xcodebuild_argv(
+            only_testing=["AlarmKitSpikeTests"],
+            destination_platform="macOS,id=evil",
+            **_KWARGS,
+        )
+
+
+def test_device_capable_provider_accepts_device_only_caps_when_explicitly_offered():
+    decision = evaluate_capabilities(
+        ["ios.device", "background_audio", "codesigning"],
+        offered=["ios.device", "background_audio", "codesigning", "ui.automation"],
+        provider="ios-device",
+        device_capable=True,
+    )
+    assert decision.supported and decision.reason == CAPABILITY_OK
+
+
+def test_device_capable_provider_still_rejects_caps_not_on_inventory():
+    # 真机环境也不能假设能力：profile 没贴标签就是不提供，走普通缺口拒绝
+    decision = evaluate_capabilities(
+        ["background_audio"],
+        offered=["ios.device", "ui.automation"],
+        provider="ios-device",
+        device_capable=True,
+    )
+    assert not decision.supported
+    assert decision.reason == CAPABILITY_NOT_OFFERED
+    assert decision.unsupported == ["background_audio"]
+    assert "未覆盖层" not in decision.message
+
+
+def test_device_capable_false_keeps_simulator_device_only_veto():
+    # 默认参数历史行为不变：模拟器环境对真机独占能力一票否决
+    decision = evaluate_capabilities(
+        ["background_audio"], offered=["background_audio"],
+    )
+    assert not decision.supported and decision.reason == CAPABILITY_DEVICE_ONLY
+
+
+def test_simulator_platform_constant_unchanged():
+    assert DESTINATION_PLATFORM_SIMULATOR == "iOS Simulator"
+    assert DESTINATION_PLATFORM_DEVICE == "iOS"
 
 
 # ── simctl 重置计划 ──────────────────────────────────────────────────────────

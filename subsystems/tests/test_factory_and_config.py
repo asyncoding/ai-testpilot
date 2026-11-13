@@ -25,6 +25,7 @@ SUBSYSTEMS = Path(__file__).resolve().parents[1]
 PROFILE = SUBSYSTEMS / "config" / "profiles" / "offline-demo.yaml"
 IOS_PROFILE = SUBSYSTEMS / "config" / "profiles" / "ios-local-poc.yaml"
 XCODE_IOS_PROFILE = SUBSYSTEMS / "config" / "profiles" / "ios-local-poc-xcode.yaml"
+DEVICE_IOS_PROFILE = SUBSYSTEMS / "config" / "profiles" / "ios-local-poc-device.yaml"
 
 
 def test_load_profile_and_validate():
@@ -515,5 +516,118 @@ def test_tree_sitter_setting_registers_optional_chunker(tmp_path):
     container = build_container(config, SUBSYSTEMS)
     try:
         assert isinstance(container.get("swift_chunker"), TreeSwiftChunker)
+    finally:
+        container.get("store").close()
+
+
+# ── 切片一（docs/14，2026-11-13）：真机 profile 装配回归（无新基建，schema v15 零变更）──
+
+def test_device_profile_wires_real_device_stack(tmp_path):
+    """ios-local-poc-device 三切换落位：runner target=device / ios-device / os-log-device。"""
+    from testpilot_adapters.device_os_log import DeviceOsLogQueryAdapter
+    from testpilot_adapters.ios_device_env import IosDeviceEnvironment
+    from testpilot_adapters.xcode_runner import XcodeTestRunner
+    from testpilot_adapters.xcresult_tool import XcresultToolResultParser
+
+    # 配置层：profile 身份与四组差异（含独立 data_dir 物理隔离）
+    config = load_profile(DEVICE_IOS_PROFILE)
+    assert config.profile == "ios-local-poc-device"
+    assert config.adapters.runner.type == "xcode"
+    assert config.adapters.runner.settings["target"] == "device"
+    assert config.adapters.environment.type == "ios-device"
+    assert config.adapters.logs.type == "os-log-device"
+    assert config.paths["data_dir"] == "store/ios-local-poc-device"
+    # 人工采集是默认姿态：worker 无 TTY，不代跑提权 collect
+    log_settings = config.adapters.logs.settings
+    assert log_settings["collect_mode"] == "manual"
+    assert log_settings["use_sudo"] is False
+    devices = config.adapters.environment.settings["devices"]
+    assert devices and devices[0]["udid"] == log_settings["udid"]  # 日志绑定同一硬件 UDID
+
+    # 装配层：不起任何 xcodebuild/devicectl/log 进程，work_dir 重定向 tmp 保持 hermetic
+    config.paths["data_dir"] = str(tmp_path / "data")
+    config.adapters.logs.settings["archive_work_dir"] = str(tmp_path / "archive-work")
+    config.adapters.runner.settings["xcresult_work_dir"] = str(tmp_path / "xc-work")
+    config.adapters.runner.settings["result_bundle_dir"] = str(tmp_path / "bundles")
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        runner = container.get("runner")
+        env = container.get("environment")
+        logs = container.get("logs")
+        assert isinstance(runner, XcodeTestRunner)
+        assert isinstance(env, IosDeviceEnvironment)
+        assert isinstance(logs, DeviceOsLogQueryAdapter)
+        # 真机目的地 platform=iOS（非 iOS Simulator），provider 全套切 ios-device
+        assert runner.destination_platform == "iOS"
+        assert runner.provider == "ios-device"
+        assert isinstance(runner._parser, XcresultToolResultParser)  # noqa: SLF001
+        assert runner._parser._provider == "ios-device"  # noqa: SLF001
+        # 真机物理可验三类设备独占能力：不再声明未覆盖层
+        assert runner._parser._uncovered_layers == []  # noqa: SLF001
+        # 真机池 udid 与租约参数按 profile 落位
+        assert [d.udid for d in env._devices] == [devices[0]["udid"]]  # noqa: SLF001
+        assert env._lease_timeout_s == 900  # noqa: SLF001
+        # 日志适配器：manual 模式 + 硬件 UDID，work_dir 已在 tmp 建好
+        assert logs.udid == devices[0]["udid"]
+        assert logs.collect_mode == "manual"
+        assert logs.use_sudo is False
+        assert logs.work_dir == tmp_path / "archive-work"
+        assert logs.work_dir.is_dir()
+    finally:
+        container.get("store").close()
+
+
+def test_device_runner_unknown_target_rejected(tmp_path):
+    config = _offline_config(tmp_path)
+    config.adapters.runner = AdapterRef(type="xcode", settings={
+        "workspace": "AlarmKitSpike/AlarmKitSpike.xcworkspace",
+        "scheme": "AlarmKitSpike",
+        "target": "cloud",
+    })
+    with pytest.raises(ValueError, match="runner.xcode.target"):
+        build_container(config, SUBSYSTEMS)
+
+
+def test_ios_device_empty_inventory_fails_at_assembly(tmp_path):
+    config = _offline_config(tmp_path)
+    config.adapters.environment = AdapterRef(
+        type="ios-device", settings={"devices": []})
+    with pytest.raises(AdapterUnavailableError, match="真机设备清单为空"):
+        build_container(config, SUBSYSTEMS)
+
+
+def test_os_log_device_requires_udid_and_validates_collect_mode(tmp_path):
+    # 缺 udid：拒绝隐式设备目标
+    config = _offline_config(tmp_path)
+    config.adapters.logs = AdapterRef(type="os-log-device", settings={})
+    with pytest.raises(ValueError, match="udid"):
+        build_container(config, SUBSYSTEMS)
+
+    # 非法 collect_mode：装配期白名单拦截，不拖到首次查询
+    config = _offline_config(tmp_path)
+    config.adapters.logs = AdapterRef(type="os-log-device", settings={
+        "udid": "00008140-001A39590162801C",
+        "collect_mode": "telepathic",
+        "archive_work_dir": str(tmp_path / "aw"),
+    })
+    with pytest.raises(ValueError, match="collect_mode"):
+        build_container(config, SUBSYSTEMS)
+
+    # auto + sudo 开关按值落位
+    config = _offline_config(tmp_path)
+    config.adapters.logs = AdapterRef(type="os-log-device", settings={
+        "udid": "00008140-001A39590162801C",
+        "collect_mode": "auto",
+        "use_sudo": True,
+        "archive_work_dir": str(tmp_path / "aw2"),
+    })
+    container = build_container(config, SUBSYSTEMS)
+    try:
+        from testpilot_adapters.device_os_log import DeviceOsLogQueryAdapter
+
+        logs = container.get("logs")
+        assert isinstance(logs, DeviceOsLogQueryAdapter)
+        assert logs.collect_mode == "auto"
+        assert logs.use_sudo is True
     finally:
         container.get("store").close()

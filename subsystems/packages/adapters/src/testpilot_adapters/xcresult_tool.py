@@ -55,12 +55,20 @@ class XcresultToolResultParser:
         work_dir: str | Path,
         executor=None,
         xcrun: str = "xcrun",
+        provider: str = "ios-simulator",
+        uncovered_layers: list[str] | None = None,
     ) -> None:
         self._store = artifact_store
         self._work_dir = Path(work_dir)
         self._work_dir.mkdir(parents=True, exist_ok=True)
         self._executor = executor or SubprocessExecutor()
         self._xcrun = xcrun
+        # 真机切片一：真机 run 的 provider=ios-device 且三类设备独占能力物理可验，
+        # 不再声明未覆盖；默认 None 保持模拟器 run 的历史标注不变。
+        self._provider = provider
+        self._uncovered_layers = (
+            list(_SIMULATOR_UNCOVERED) if uncovered_layers is None else list(uncovered_layers)
+        )
 
     def _tests_argv(self, bundle: str) -> list[str]:
         return [
@@ -161,10 +169,11 @@ class XcresultToolResultParser:
             cases,
             request,
             env_id=env_id,
+            provider=self._provider,
             capabilities=list(request.environment.capabilities),
             artifacts=artifact_refs,
             raw_report_ref=raw_urn,
-            uncovered_layers=_SIMULATOR_UNCOVERED,
+            uncovered_layers=list(self._uncovered_layers),
         )
         if urns_by_case:
             linked = link_attachment_urns(run.case_results, urns_by_case)

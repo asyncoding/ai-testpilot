@@ -43,6 +43,52 @@ def _is_envelope_trailer(entry: dict[str, Any]) -> bool:
     return "timestamp" not in entry and "count" in entry and "finished" in entry
 
 
+def parse_ndjson(
+    stdout: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """拆行解析 NDJSON；坏行计数留片（样片上限 3），不中断整窗查询。
+
+    模拟器 ``simctl spawn log show`` 与真机 ``log show <archive>`` 的 ndjson
+    形态同构（2026-11-13 两步法复用），故提为模块函数供两个适配器共用。
+    """
+    entries: list[dict[str, Any]] = []
+    samples: list[dict[str, Any]] = []
+    total_bad = 0
+    for line_no, raw in enumerate(stdout.splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        reason = ""
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            reason = "JSON 解析失败"
+        else:
+            if not isinstance(entry, dict):
+                reason = "行顶层不是对象"
+            elif _is_envelope_trailer(entry):
+                continue
+            else:
+                ts = entry.get("timestamp")
+                if not isinstance(ts, str):
+                    reason = "缺少 timestamp 字符串"
+                else:
+                    try:
+                        datetime.fromisoformat(ts.strip())
+                    except ValueError:
+                        reason = f"非法时间戳: {ts!r}"
+        if reason:
+            total_bad += 1
+            if len(samples) < _BAD_LINE_SAMPLE_LIMIT:
+                samples.append(
+                    {"line_no": line_no, "reason": reason,
+                     "snippet": line[:_SNIPPET_LEN]}
+                )
+            continue
+        entries.append(entry)
+    return entries, samples, total_bad
+
+
 class OsLogQueryAdapter:
     provider = "ios-simulator-oslog"
 
@@ -58,43 +104,8 @@ class OsLogQueryAdapter:
     def _parse_ndjson(
         stdout: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-        """拆行解析 NDJSON；坏行计数留片（样片上限 3），不中断整窗查询。"""
-        entries: list[dict[str, Any]] = []
-        samples: list[dict[str, Any]] = []
-        total_bad = 0
-        for line_no, raw in enumerate(stdout.splitlines(), start=1):
-            line = raw.strip()
-            if not line:
-                continue
-            reason = ""
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                reason = "JSON 解析失败"
-            else:
-                if not isinstance(entry, dict):
-                    reason = "行顶层不是对象"
-                elif _is_envelope_trailer(entry):
-                    continue
-                else:
-                    ts = entry.get("timestamp")
-                    if not isinstance(ts, str):
-                        reason = "缺少 timestamp 字符串"
-                    else:
-                        try:
-                            datetime.fromisoformat(ts.strip())
-                        except ValueError:
-                            reason = f"非法时间戳: {ts!r}"
-            if reason:
-                total_bad += 1
-                if len(samples) < _BAD_LINE_SAMPLE_LIMIT:
-                    samples.append(
-                        {"line_no": line_no, "reason": reason,
-                         "snippet": line[:_SNIPPET_LEN]}
-                    )
-                continue
-            entries.append(entry)
-        return entries, samples, total_bad
+        # 保留静态方法入口（既有测试/调用方在用），实现统一走模块函数
+        return parse_ndjson(stdout)
 
     async def query(
         self,
