@@ -16,8 +16,10 @@ export default function Banner({ config }: { config: ConfigResponse | null }) {
       )}
       <div className="banner banner-readonly">
         external_write_enabled = {String(config.external_write_enabled)}
-        ：演示环境默认 dry-run，所有外部写操作只进 outbox，不真实外发。
-        检索适配器：{config.search_adapter}；tracer：{config.tracer}
+        ：{config.external_write_enabled
+          ? "外部写操作已启用（R2/R3 经审批后可真实外发；本对话页只有内部反馈写入，不触发外部写）"
+          : "演示环境 dry-run，所有外部写操作只进 outbox，不真实外发"}
+        。检索适配器：{config.search_adapter}；tracer：{config.tracer}
         （noop 时 trace 抽屉不提供 Langfuse 深链）。
       </div>
     </div>
