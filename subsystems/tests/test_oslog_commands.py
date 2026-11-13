@@ -182,3 +182,111 @@ def test_predicate_is_stripped_but_preserved_verbatim_in_argv():
     assert query.udid == _UDID and query.predicate == _PREDICATE
     assert query.argv[11] == _PREDICATE
     assert all(not piece.startswith("  ") for piece in query.argv)
+
+# ── 真机两步法（切片一，2026-11-13）──────────────────────────────────────────
+
+_PHYSICAL_UDID = "00008140-001A39590162801C"
+_ARCHIVE = "/tmp/tp/run-x.logarchive"
+
+
+def test_device_collect_argv_exact_shape_without_sudo():
+    from testpilot_core.oslog_commands import build_device_log_collect_argv
+
+    start, _ = parse_window(_START, _END)
+    argv = build_device_log_collect_argv(
+        udid=_PHYSICAL_UDID, start=start, output_path=_ARCHIVE
+    )
+    assert argv == [
+        "/usr/bin/log", "collect",
+        "--device-udid", _PHYSICAL_UDID,
+        "--start", "2026-11-10 10:00:00",
+        "--output", _ARCHIVE,
+    ]
+    # collect 没有 --end：窗口收口只在 show 侧，防止误以为双端裁剪
+    assert "--end" not in argv and "--last" not in argv
+
+
+def test_device_collect_argv_sudo_non_interactive_prefix():
+    from testpilot_core.oslog_commands import build_device_log_collect_argv
+
+    start, _ = parse_window(_START, _END)
+    argv = build_device_log_collect_argv(
+        udid=_PHYSICAL_UDID, start=start, output_path=_ARCHIVE, use_sudo=True
+    )
+    # sudo -n：无 TTY 凭据未缓存时立即失败，绝不挂死等密码；只包住 collect
+    assert argv[:3] == ["sudo", "-n", "/usr/bin/log"]
+    assert argv[3] == "collect"
+
+
+def test_archive_show_argv_exact_shape():
+    from testpilot_core.oslog_commands import build_archive_log_show_argv
+
+    start, end = parse_window(_START, _END)
+    argv = build_archive_log_show_argv(
+        archive_path=_ARCHIVE, predicate=_PREDICATE, start=start, end=end
+    )
+    assert argv == [
+        "/usr/bin/log", "show", _ARCHIVE,
+        "--start", "2026-11-10 10:00:00",
+        "--end", "2026-11-10 10:20:00",
+        "--predicate", _PREDICATE,
+        "--style", "ndjson",
+    ]
+
+
+def test_device_query_echo_carries_both_argv_and_mode():
+    from testpilot_core.oslog_commands import build_device_os_log_query
+
+    query = build_device_os_log_query(
+        udid=_PHYSICAL_UDID, predicate=_PREDICATE,
+        start_time=_START, end_time=_END, archive_path=_ARCHIVE,
+    )
+    echo = query.echo()
+    assert echo["collect_argv"][1] == "collect"
+    assert echo["show_argv"][2] == _ARCHIVE
+    # 兼容模拟器 query 回显的 argv 键：归因/探针代码可统一读 argv
+    assert echo["argv"] == echo["show_argv"]
+    assert echo["collect_mode"] == "auto" and echo["use_sudo"] is False
+    assert echo["udid"] == _PHYSICAL_UDID
+
+
+def test_manual_mode_still_emits_collect_command_for_evidence():
+    from testpilot_core.oslog_commands import (
+        COLLECT_MODE_MANUAL,
+        build_device_os_log_query,
+    )
+
+    query = build_device_os_log_query(
+        udid=_PHYSICAL_UDID, predicate=_PREDICATE,
+        start_time=_START, end_time=_END, archive_path=_ARCHIVE,
+        collect_mode=COLLECT_MODE_MANUAL, use_sudo=True,
+    )
+    # manual 不自动采集，但等效命令必须留在回显里供人工照跑/复盘
+    assert query.collect_argv[:2] == ["sudo", "-n"]
+    assert query.collect_mode == "manual"
+
+
+def test_device_query_rejects_bad_mode_blank_udid_and_inverted_window():
+    from testpilot_core.oslog_commands import build_device_os_log_query
+
+    with pytest.raises(SchemaValidationError, match="collect_mode"):
+        build_device_os_log_query(
+            udid=_PHYSICAL_UDID, predicate=_PREDICATE,
+            start_time=_START, end_time=_END, archive_path=_ARCHIVE,
+            collect_mode="telepathic",
+        )
+    with pytest.raises(SchemaValidationError, match="udid 为空"):
+        build_device_os_log_query(
+            udid="  ", predicate=_PREDICATE,
+            start_time=_START, end_time=_END, archive_path=_ARCHIVE,
+        )
+    with pytest.raises(SchemaValidationError, match="archive_path 为空"):
+        build_device_os_log_query(
+            udid=_PHYSICAL_UDID, predicate=_PREDICATE,
+            start_time=_START, end_time=_END, archive_path=" ",
+        )
+    with pytest.raises(SchemaValidationError, match="倒挂"):
+        build_device_os_log_query(
+            udid=_PHYSICAL_UDID, predicate=_PREDICATE,
+            start_time=_END, end_time=_START, archive_path=_ARCHIVE,
+        )

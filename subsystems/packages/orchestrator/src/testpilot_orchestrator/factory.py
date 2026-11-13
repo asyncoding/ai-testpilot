@@ -4,7 +4,8 @@
 支持的 type：stub / fs-docs / json / json-replay / recorded / junit-xml / xcode（S3.2，
 S3.3 起接 xcresulttool 真实 parser）/ localfs / sqlite-fts / hybrid / sqlite / noop /
 langfuse / ollama（model）/ chroma（vectors）/ git 与 recorded（scm，S1.3）/
-ios-simulator（environment，S3.2）/ os-log（logs，S3.3）。
+ios-simulator / ios-device（environment，S3.2 / 真机切片一）、
+os-log / os-log-device（logs，S3.3 / 真机切片一）。
 
 降级是运行期行为（向量通道故障→FTS-only），不是装配期选项：hybrid 必须配齐
 model+vectors，否则 build_container 直接 ValueError（防止静默退化为单路而不自知）。
@@ -235,10 +236,27 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
                 "必须经制品端口内容寻址落盘，不允许裸跑无制品根的 xcode 链路"
             )
         rs = a.runner.settings
+        # 真机切片一：target=device 切真机目的地（platform=iOS,id=<硬件UDID>），
+        # 默认 simulator 保持 E5 模拟器链路一字不变。
+        target = rs.get("target", "simulator")
+        if target == "device":
+            destination_platform = "iOS"
+            runner_provider = "ios-device"
+            parser_uncovered: list[str] | None = []  # 真机物理可验，不标设备独占未覆盖
+        elif target == "simulator":
+            destination_platform = "iOS Simulator"
+            runner_provider = "ios-simulator"
+            parser_uncovered = None  # 解析器默认填三类设备独占未覆盖
+        else:
+            raise ValueError(
+                f"未知 runner.xcode.target（白名单 simulator/device）: {target!r}"
+            )
         result_parser = XcresultToolResultParser(
             artifact_store,
             work_dir=_p(
                 base_dir, rs.get("xcresult_work_dir", "store/xcresult-work")),
+            provider=runner_provider,
+            uncovered_layers=parser_uncovered,
         )
         container.adapters["runner"] = XcodeTestRunner(
             workspace=rs["workspace"],
@@ -247,6 +265,8 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             result_bundle_dir=_p(
                 base_dir, rs.get("result_bundle_dir", "store/xcresult")),
             result_parser=result_parser,
+            destination_platform=destination_platform,
+            provider=runner_provider,
         )
     elif a.runner.type != "stub":
         raise ValueError(f"未知 runner 适配器类型: {a.runner.type}")
@@ -369,8 +389,8 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     elif a.search.type != "stub":
         raise ValueError(f"未知 search 适配器类型: {a.search.type}")
 
-    # ── 环境（S3.2 FR-EX-004：ios-simulator 模拟器池；stub=不装配，
-    #    执行服务见不到 environment 时走旧路径，行为与 S3.1 完全一致）──
+    # ── 环境（S3.2 FR-EX-004：ios-simulator 模拟器池；切片一增 ios-device 真机池；
+    #    stub=不装配，执行服务见不到 environment 时走旧路径，行为与 S3.1 完全一致）──
     if a.environment.type == "ios-simulator":
         from testpilot_adapters.ios_simulator_env import (
             SimctlEnvironment,
@@ -384,10 +404,23 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             devices,
             lease_timeout_s=int(es.get("lease_timeout_s", 300)),
         )
+    elif a.environment.type == "ios-device":
+        from testpilot_adapters.ios_device_env import (
+            IosDeviceEnvironment,
+            PhysicalDevice,
+        )
+
+        es = a.environment.settings
+        devices = [PhysicalDevice.model_validate(d) for d in es.get("devices", [])]
+        container.adapters["environment"] = IosDeviceEnvironment(
+            devices,
+            lease_timeout_s=int(es.get("lease_timeout_s", 900)),
+        )
     elif a.environment.type != "stub":
         raise ValueError(f"未知 environment 适配器类型: {a.environment.type}")
 
-    # ── 日志查询（S3.3 FR-EX-006：os_log 模拟器实现；必须显式 udid，拒绝 booted）──
+    # ── 日志查询（S3.3 FR-EX-006：os_log 模拟器实现；切片一增 os-log-device
+    #    真机两步采集；必须显式 udid，拒绝 booted/隐式目标）──
     if a.logs.type == "os-log":
         from testpilot_adapters.os_log import OsLogQueryAdapter
 
@@ -399,6 +432,31 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
                 "不接受 booted 隐式目标"
             )
         container.adapters["logs"] = OsLogQueryAdapter(str(udid))
+    elif a.logs.type == "os-log-device":
+        from testpilot_core.oslog_commands import COLLECT_MODES
+        from testpilot_adapters.device_os_log import DeviceOsLogQueryAdapter
+
+        ls = a.logs.settings
+        udid = ls.get("udid", "")
+        if not udid:
+            raise ValueError(
+                "logs=os-log-device 要求 settings.udid：真机采集须绑定硬件 UDID"
+            )
+        collect_mode = ls.get("collect_mode", "auto")
+        if collect_mode not in COLLECT_MODES:
+            raise ValueError(
+                f"未知 logs.collect_mode（白名单 {sorted(COLLECT_MODES)}）: {collect_mode!r}"
+            )
+        archive_work_dir = _p(
+            base_dir,
+            ls.get("archive_work_dir", "store/device-logarchive-work"),
+        )
+        container.adapters["logs"] = DeviceOsLogQueryAdapter(
+            str(udid),
+            archive_work_dir,
+            collect_mode=collect_mode,
+            use_sudo=bool(ls.get("use_sudo", False)),
+        )
     elif a.logs.type != "stub":
         raise ValueError(f"未知 logs 适配器类型: {a.logs.type}")
 

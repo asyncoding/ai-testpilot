@@ -39,6 +39,15 @@ TIMESTAMP_KEY = "timestamp"
 _TOOL_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # 进程 argv 固定 ndjson：json style 是美化数组，无法逐行解析
 _TOOL_STYLE = "ndjson"
+# 真机日志走系统自带 /usr/bin/log（非 simctl 子命令）；路径是 macOS 稳定系统位置。
+# 注意：部分机器上对真机做 log collect 需要提权——见 build_device_log_collect_argv
+# 的 use_sudo 与 adapters/device_os_log.py 的 manual 人工采集模式。
+DEVICE_LOG_BIN = "/usr/bin/log"
+# 采集模式：auto=平台直接起 collect（可能配 sudo -n）；manual=人工按 runbook 预采集，
+# 平台只消费 .logarchive，不发起 collect（无 TTY/无提权环境的唯一可行路径）。
+COLLECT_MODE_AUTO = "auto"
+COLLECT_MODE_MANUAL = "manual"
+COLLECT_MODES = frozenset({COLLECT_MODE_AUTO, COLLECT_MODE_MANUAL})
 
 
 class OsLogQuery(BaseModel):
@@ -185,3 +194,136 @@ def filter_window(
         if in_window(_entry_timestamp(entry), start, end):
             kept.append(entry)
     return kept
+
+
+# ── 真机两步法（切片一，2026-11-13）──────────────────────────────────────────
+# 取证（/usr/bin/log collect --help，Xcode 27 机器）：
+#   log collect -u/--device-udid <UDID> -S/--start <time> -o/--output <path>
+# 注意 collect **没有 --end**：采集从 start 到当前时刻的全量设备日志落
+# .logarchive，再用 log show <archive> 带 --start/--end/--predicate 做窗口过滤。
+# 提权：部分环境对真机 collect 需要 sudo；无 TTY 的 worker 只能走 ``sudo -n``
+# （凭据未缓存立即失败而不是挂死等密码），或切 manual 模式由人工预采集。
+
+
+class DeviceOsLogQuery(BaseModel):
+    """一次真机日志查询的可复现描述：collect + show 两条 argv 都进回显。"""
+
+    udid: str
+    predicate: str
+    start_time: datetime
+    end_time: datetime
+    archive_path: str
+    collect_mode: str = COLLECT_MODE_AUTO
+    use_sudo: bool = False
+    collect_argv: list[str] = Field(default_factory=list)
+    show_argv: list[str] = Field(default_factory=list)
+
+    def echo(self) -> dict[str, Any]:
+        return {
+            "udid": self.udid,
+            "predicate": self.predicate,
+            "start_time": self.start_time.isoformat(),
+            "end_time": self.end_time.isoformat(),
+            "archive_path": self.archive_path,
+            "collect_mode": self.collect_mode,
+            "use_sudo": self.use_sudo,
+            "collect_argv": list(self.collect_argv),
+            "show_argv": list(self.show_argv),
+            "argv": list(self.show_argv),  # 与模拟器 query 回显的 argv 键同形
+        }
+
+
+def _validate_archive_path(archive_path: str) -> str:
+    if not isinstance(archive_path, str) or not archive_path.strip():
+        raise SchemaValidationError("archive_path 为空：真机采集必须指定 .logarchive 输出路径")
+    return archive_path.strip()
+
+
+def build_device_log_collect_argv(
+    *,
+    udid: str,
+    start: datetime,
+    output_path: str,
+    use_sudo: bool = False,
+) -> list[str]:
+    """拼 ``log collect --device-udid`` argv（无 --end，窗口过滤留给 show）。
+
+    use_sudo=True 时前置 ``sudo -n``：非交互失败语义，杜绝 worker 无 TTY 时
+    挂在密码提示上；sudo 只包住 collect，show 读的是本机用户拥有的归档，不提权。
+    """
+    if not isinstance(udid, str) or not udid.strip():
+        raise SchemaValidationError("udid 为空：拒绝隐式设备目标，采集必须可复现")
+    if not isinstance(start, datetime):
+        raise SchemaValidationError("start 必须是 datetime（先走 parse_window）")
+    output_path = _validate_archive_path(output_path)
+    argv: list[str] = []
+    if use_sudo:
+        argv.extend(["sudo", "-n"])
+    argv.extend([
+        DEVICE_LOG_BIN, "collect",
+        "--device-udid", udid.strip(),
+        "--start", start.strftime(_TOOL_TIME_FORMAT),
+        "--output", output_path,
+    ])
+    return argv
+
+
+def build_archive_log_show_argv(
+    *,
+    archive_path: str,
+    predicate: str,
+    start: datetime,
+    end: datetime,
+) -> list[str]:
+    """拼 ``log show <archive>`` argv：对本地归档做与模拟器同口径的窗口/谓词过滤。"""
+    archive_path = _validate_archive_path(archive_path)
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise SchemaValidationError("start/end 必须是 datetime（先走 parse_window）")
+    if start > end:
+        raise SchemaValidationError("时间窗倒挂: start 晚于 end")
+    predicate = _validate_predicate(predicate)
+    return [
+        DEVICE_LOG_BIN, "show", archive_path,
+        "--start", start.strftime(_TOOL_TIME_FORMAT),
+        "--end", end.strftime(_TOOL_TIME_FORMAT),
+        "--predicate", predicate,
+        "--style", _TOOL_STYLE,
+    ]
+
+
+def build_device_os_log_query(
+    *,
+    udid: str,
+    predicate: str,
+    start_time: str,
+    end_time: str,
+    archive_path: str,
+    collect_mode: str = COLLECT_MODE_AUTO,
+    use_sudo: bool = False,
+) -> DeviceOsLogQuery:
+    """真机端口的一站式纯函数：校验入参/时间窗 → collect+show 双 argv + 回显模型。"""
+    if collect_mode not in COLLECT_MODES:
+        raise SchemaValidationError(
+            f"非法 collect_mode（白名单 {sorted(COLLECT_MODES)}）: {collect_mode!r}"
+        )
+    start, end = parse_window(start_time, end_time)
+    archive_path = _validate_archive_path(archive_path)
+    # manual 模式不发起 collect，但仍把等效 argv 算进回显：人工照这条命令预采集，
+    # 证据链里保留"本应执行的命令"，复盘不丢因果。
+    collect_argv = build_device_log_collect_argv(
+        udid=udid, start=start, output_path=archive_path, use_sudo=use_sudo,
+    )
+    show_argv = build_archive_log_show_argv(
+        archive_path=archive_path, predicate=predicate, start=start, end=end,
+    )
+    return DeviceOsLogQuery(
+        udid=udid.strip(),
+        predicate=predicate.strip(),
+        start_time=start,
+        end_time=end,
+        archive_path=archive_path,
+        collect_mode=collect_mode,
+        use_sudo=use_sudo,
+        collect_argv=collect_argv,
+        show_argv=show_argv,
+    )

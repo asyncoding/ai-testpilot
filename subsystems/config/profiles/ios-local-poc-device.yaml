@@ -1,0 +1,153 @@
+# ios-local-poc-device：真机执行链路专用 profile（真机切片一，2026-11-13）
+# 与 ios-local-poc-xcode（模拟器真机链）的差异组：
+#   1) runner.xcode 增 target: device——目的地 platform=iOS,id=<硬件UDID>，
+#      TestRun provider=ios-device，不再标注三类设备独占能力为未覆盖；
+#   2) environment: ios-simulator → ios-device（devicectl list 盘点，先租后跑；
+#      真机无自动 reset，平台不自动化任何抹除操作）；
+#   3) logs: os-log → os-log-device（log collect --device-udid 两步法，落
+#      .logarchive 后 log show 窗口过滤）；collect_mode 默认 manual——本机已实测
+#      免 sudo collect 直接 rc=77「Must be root to collect logs from attached device」
+#      （2026-11-13，docs/03 §3.7 E13），worker 无 TTY 故人工按 runbook 预采集；
+#      换机证实免提权后才可改 auto（use_sudo 可选，走 sudo -n 非交互失败语义）；
+#   4) data_dir 独立为 store/ios-local-poc-device，账本/制品/归档与模拟器 profile 物理隔离；
+#   5) 租约/超时按真机分钟级冷启动放宽。
+# 其余适配器（git/docs/cases/requirements/检索/模型/队列/归因）与 xcode profile 一字不差。
+# 前置：真机已配对且 devicectl list devices 表态 connected；演示分支 demo/agent-generated-tests
+# 已在语料仓工作区 checkout（docs/12 附录 B）；签名在 Xcode 工程内预先配置好。
+profile: ios-local-poc-device
+
+project:
+  name: AlarmKitSpike
+  # 真实被测仓在另一个仓库（docs/03），不拷贝进本仓；路径走环境变量覆盖，禁止写死：
+  #   export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
+  repo_path: ../../app-calendar-alarm
+  default_branch: alarmkit-spike
+  tech_stack: ios
+  ios:
+    workspace: AlarmKitSpike/AlarmKitSpike.xcworkspace
+    scheme: AlarmKitSpike
+    # 硬件 UDID（devicectl JSON 的 properties.hardware.udid，非 CoreDevice UUID）
+    device_udid: 00008140-001A39590162801C
+
+paths:
+  data_dir: store/ios-local-poc-device
+  fixtures_dir: tests/fixtures
+
+external_write_enabled: true
+
+# 真机 xcodebuild（签名 + build-for-testing + 安装启动）比模拟器更慢，放宽到 20 分钟，
+# 队列租约同步放宽到 25 分钟；单机单设备并发仍为 1。
+limits:
+  request_timeout_s: 1200
+  execution_lease_seconds: 1500
+  max_concurrency: 1
+  daily_rerun_quota: 20
+
+adapters:
+  scm:
+    type: git
+    settings:
+      timeout_s: 15
+  docs:
+    type: fs-docs
+    settings:
+      roots:
+        - ${REPO_PATH}
+      code_roots:
+        - ${REPO_PATH}/AlarmKitSpike/Sources
+        - ${REPO_PATH}/AlarmKitSpike/Shared
+        - ${REPO_PATH}/AlarmKitSpike/WidgetExtension
+      excludes:
+        - "**/node_modules/**"
+        - "**/build/**"
+        - "**/Pods/**"
+        - "**/.git/**"
+        - "**/.agent-handoff/**"
+        - "**/icon-drafts/**"
+        - "**/*.bak"
+        - "**/CLAUDE.md"
+        - "**/AGENT.md"
+        - "**/小红书文案.md"
+        - "docs/功能设计文档.md"
+        - "docs/功能细化设计文档.md"
+        - "docs/技术方案文档.md"
+        - "docs/项目计划文档.md"
+        - "docs/日历闹钟-本地通知版.md"
+        - "docs/日历闹钟-快捷指令版.md"
+        - "PRD.md"
+        - "TECHNICAL-PLAN.md"
+        - "README.md"
+        - "2026-09-15.md"
+        - "Claude code vs 其他Agent的优势.md"
+      authority_overrides:
+        - {glob: "docs/**", level: L1_authoritative}
+        - {glob: "Resources/**", level: L1_authoritative}
+  cases:
+    type: fs-cases
+    settings:
+      roots:
+        - ${REPO_PATH}/docs/V1测试用例文档.md
+  requirements:
+    type: fs-reqs
+    settings:
+      roots:
+        - ${REPO_PATH}/docs/V1需求文档-强提醒闹钟.md
+  case_repo:
+    type: markdown-fs
+  tickets:    {type: json}
+  ci_events:  {type: json-replay}
+  runner:
+    type: xcode
+    settings:
+      # 切片一关键开关：device → platform=iOS,id=<udid>；缺省 simulator 行为不变
+      target: device
+      workspace: AlarmKitSpike/AlarmKitSpike.xcworkspace
+      scheme: AlarmKitSpike
+      xcresult_work_dir: store/ios-local-poc-device/xcresult-work
+      result_bundle_dir: store/ios-local-poc-device/xcresult
+  # 真机池：udid 必须是硬件 UDID；能力标签决定 EnvironmentPort 匹配，缺失即拒绝，
+  # 不允许运行期假设某台真机具备 background_audio/codesigning。
+  environment:
+    type: ios-device
+    settings:
+      devices:
+        - udid: 00008140-001A39590162801C
+          name: iPhone 16 Pro
+          capabilities: [ios.device, ui.automation, background_audio, codesigning]
+      lease_timeout_s: 900
+  artifact:   {type: localfs}
+  # 真机日志两步法：collect 落 .logarchive → show 窗口过滤。
+  # manual（默认）：平台不发起 collect，人工按报错回显/runbook 的命令预采集到
+  #   archive_work_dir/<run_id>.logarchive 后重跑查询；
+  # auto：平台直接 collect；若本机需要提权则配 use_sudo: true（sudo -n 非交互，
+  #   凭据未缓存立即报错，绝不挂死等密码）。
+  logs:
+    type: os-log-device
+    settings:
+      udid: 00008140-001A39590162801C
+      collect_mode: manual
+      use_sudo: false
+      archive_work_dir: store/ios-local-poc-device/logarchive-work
+  search:
+    type: hybrid
+    settings:
+      channel_top_k: 20
+      rrf_k: 60
+      quality_power: 1.0
+      half_life_days: null
+  model:
+    type: ollama
+    settings:
+      base_url: http://localhost:11434
+      chat_model: qwen2.5:7b
+      embed_model: shaw/dmeta-embedding-zh
+      timeout: 60
+      keep_alive: 30m
+  vectors:
+    type: chroma
+    settings:
+      base_url: http://localhost:8000
+      collection: alarmkitspike-chunks
+      timeout: 30
+  queue:      {type: sqlite}
+  tracer:     {type: noop}

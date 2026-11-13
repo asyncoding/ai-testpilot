@@ -18,7 +18,11 @@ from typing import Awaitable, Callable
 from testpilot_core.errors import AdapterUnavailableError
 from testpilot_core.execution import run_id_for
 from testpilot_core.models import TestExecutionRequest, TestRun
-from testpilot_core.xcode_commands import build_xcodebuild_argv
+from testpilot_core.xcode_commands import (
+    DESTINATION_PLATFORM_DEVICE,
+    DESTINATION_PLATFORM_SIMULATOR,
+    build_xcodebuild_argv,
+)
 
 from .process_executor import SubprocessExecutor
 
@@ -39,7 +43,12 @@ async def unavailable_xcresult_parser(**_kwargs) -> TestRun:
 
 
 class XcodeTestRunner:
-    provider = "ios-simulator"
+    """xcodebuild 执行器；模拟器与真机共用，目的地由 destination_platform 切换。
+
+    真机切片一（2026-11-13）：profile runner.target=device 时传
+    ``destination_platform="iOS"``、provider="ios-device"，udid 由真机租约透传；
+    默认参数保持模拟器历史行为一字不变。
+    """
 
     def __init__(
         self,
@@ -50,14 +59,26 @@ class XcodeTestRunner:
         result_bundle_dir: str | Path,
         result_parser: ResultParser,
         executor=None,
+        destination_platform: str = DESTINATION_PLATFORM_SIMULATOR,
+        provider: str = "ios-simulator",
     ) -> None:
+        if destination_platform not in (
+            DESTINATION_PLATFORM_SIMULATOR,
+            DESTINATION_PLATFORM_DEVICE,
+        ):
+            raise ValueError(
+                f"非法 destination_platform: {destination_platform!r}"
+            )
         self.workspace = workspace
         self.scheme = scheme
         self.repo_path = str(repo_path)
         self.result_bundle_dir = Path(result_bundle_dir)
         self.result_bundle_dir.mkdir(parents=True, exist_ok=True)
+        self.result_parser = result_parser
         self._parser = result_parser
         self._executor = executor or SubprocessExecutor()
+        self.destination_platform = destination_platform
+        self.provider = provider
         # run_id -> 作业句柄（进程/请求/产物路径）
         self._jobs: dict[str, dict] = {}
 
@@ -66,7 +87,7 @@ class XcodeTestRunner:
         if not udid:
             # worker 应先经 EnvironmentPort.acquire 并把 udid 透传到 labels
             raise AdapterUnavailableError(
-                "request.environment.labels 缺少 udid：未获取模拟器租约，拒绝裸跑 xcodebuild"
+                "request.environment.labels 缺少 udid：未获取环境租约，拒绝裸跑 xcodebuild"
             )
         run_id = run_id_for(request.idempotency_key)
         bundle_path = self.result_bundle_dir / f"{run_id}.xcresult"
@@ -81,6 +102,7 @@ class XcodeTestRunner:
             udid=udid,
             only_testing=list(request.selector.test_ids),
             result_bundle_path=str(bundle_path),
+            destination_platform=self.destination_platform,
         )
         process = await self._executor.spawn(argv, cwd=self.repo_path)
         self._jobs[run_id] = {
