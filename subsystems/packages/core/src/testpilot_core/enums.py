@@ -92,6 +92,57 @@ class FeedbackReason(StrEnum):
     OTHER = "other"
 
 
+# ── 混合执行与人工闸门（docs/15，hybrid-plan-v1，schema v15 零 DDL）──────────
+
+
+class StepActor(StrEnum):
+    """混合计划步骤的执行方；闭集，未知 actor 计划校验期响亮失败。"""
+
+    AUTO_XCODEBUILD = "auto:xcodebuild"
+    AUTO_DH_AX = "auto:dh-ax"
+    AUTO_DEVICECTL = "auto:devicectl"
+    HUMAN_ACTION = "human:action"
+    HUMAN_VERDICT = "human:verdict"
+
+
+class StepStatus(StrEnum):
+    """单步状态（存会话 JSON 制品，不进数据库表）。"""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class SessionStatus(StrEnum):
+    """混合会话状态：在 run 五终态之外补 awaiting_human/blocked 两个挂起态。
+
+    子 run 仍走既有 RunStatus 状态机；本状态只描述会话层游标，存 raw_json
+    制品，因此不改 schema、不碰 RunStatus 迁移闭集。
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    AWAITING_HUMAN = "awaiting_human"
+    BLOCKED = "blocked"
+    PASSED = "passed"
+    FAILED = "failed"
+    ERROR = "error"
+    CANCELED = "canceled"
+
+
+class GateStatus(StrEnum):
+    """人工闸门单条记录的状态（文件态 gate store）。"""
+
+    PENDING = "pending"
+    RESPONDED = "responded"
+    EXPIRED = "expired"
+    CANCELED = "canceled"
+
+
+
 class ArtifactType(StrEnum):
     XCRESULT = "xcresult"
     JUNIT_XML = "junit_xml"
