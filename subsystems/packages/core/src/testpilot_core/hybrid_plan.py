@@ -209,6 +209,20 @@ class SessionCheckpoint(BaseModel):
     updated_at: str
 
 
+class HybridSessionRecord(BaseModel):
+    """会话持久化信封：计划载荷 + 游标 + 账本同文件原子写。
+
+    崩溃恢复不依赖外部引用：ledger 追加记录每一步的探针审计、子 run 引用、
+    闸门 id 与适配器返回摘要，既是排障证据链，也是人工前置闸门续跑时
+    识别"已人工确认"的依据（JSON 制品加字段带默认值，schema v15 零 DDL）。
+    """
+
+    session_id: str
+    plan: dict[str, Any]
+    checkpoint: SessionCheckpoint
+    ledger: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # ── 校验 ─────────────────────────────────────────────────────────────────────
 
 
@@ -505,6 +519,13 @@ def next_pending_step(
                 step.step_id not in checkpoint.step_statuses:
             return step
     return None
+
+
+def session_id_for(case_external_id: str, plan_hash: str) -> str:
+    """会话 id 确定性派生：同用例同计划版本重放得到同 id，崩溃重建可寻址。"""
+    digest = hashlib.sha1(
+        f"{case_external_id}|{plan_hash}".encode("utf-8")).hexdigest()[:12]
+    return f"hsess-{digest}"
 
 
 # ── 闸门载荷与裁决校验 ───────────────────────────────────────────────────────

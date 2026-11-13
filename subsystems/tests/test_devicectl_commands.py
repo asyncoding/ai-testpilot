@@ -7,8 +7,13 @@ import pytest
 from testpilot_core.devicectl_commands import (
     DeviceInventoryEntry,
     build_devicectl_list_argv,
+    build_process_launch_argv,
+    build_process_terminate_argv,
+    build_screenshot_argv,
     find_device,
     parse_devicectl_devices,
+    validate_bundle_id,
+    validate_pid,
     validate_udid,
 )
 from testpilot_core.errors import SchemaValidationError
@@ -135,3 +140,57 @@ def test_parse_rejects_malformed_payload_loudly():
 def test_empty_device_list_is_valid_parse():
     # 空清单不报错：装配期空 inventory 由适配器构造守卫负责，解析层只忠实反映
     assert parse_devicectl_devices(_payload()) == []
+
+
+# ── H3：screenshot / process launch / terminate argv 契约（零真机纯函数）──────
+
+
+def test_screenshot_argv_is_fully_explicit():
+    argv = build_screenshot_argv(_PHYSICAL_UDID, "/tmp/shot.png")
+    assert argv == [
+        "xcrun", "devicectl", "device", "capture", "screenshot",
+        "--device", _PHYSICAL_UDID, "--destination", "/tmp/shot.png",
+    ]
+    with pytest.raises(SchemaValidationError, match="destination 为空"):
+        build_screenshot_argv(_PHYSICAL_UDID, "  ")
+    with pytest.raises(SchemaValidationError):
+        build_screenshot_argv("bad udid!", "/tmp/x.png")
+
+
+def test_launch_argv_flags_bundle_and_positional_args():
+    argv = build_process_launch_argv(
+        _PHYSICAL_UDID, "com.example.AlarmKitSpike",
+        arguments=["--ak-purge-dates", "2026-11-14"])
+    assert argv == [
+        "xcrun", "devicectl", "device", "process", "launch",
+        "--device", _PHYSICAL_UDID, "com.example.AlarmKitSpike",
+        "--ak-purge-dates", "2026-11-14",
+    ]
+    terminated = build_process_launch_argv(
+        _PHYSICAL_UDID, "com.example.App", terminate_existing=True)
+    assert terminated[5] == "--terminate-existing"
+    # 默认不带 --terminate-existing（冷启动语义必须显式声明，防误杀现场）
+    assert "--terminate-existing" not in argv
+
+
+def test_launch_argv_rejects_injection():
+    with pytest.raises(SchemaValidationError, match="bundle_id"):
+        build_process_launch_argv(_PHYSICAL_UDID, "com.bad; rm -rf /")
+    with pytest.raises(SchemaValidationError, match="非法启动参数"):
+        build_process_launch_argv(
+            _PHYSICAL_UDID, "com.example.App", arguments=["--x\n"])
+    with pytest.raises(SchemaValidationError):
+        validate_bundle_id("")
+
+
+def test_terminate_argv_requires_pid_and_supports_kill():
+    argv = build_process_terminate_argv(_PHYSICAL_UDID, 4321)
+    assert argv == [
+        "xcrun", "devicectl", "device", "process", "terminate",
+        "--device", _PHYSICAL_UDID, "--pid", "4321",
+    ]
+    killed = build_process_terminate_argv(_PHYSICAL_UDID, 4321, kill=True)
+    assert killed[-1] == "--kill"
+    for bad in (0, -1, "4321", True):
+        with pytest.raises(SchemaValidationError, match="pid"):
+            validate_pid(bad)  # type: ignore[arg-type]

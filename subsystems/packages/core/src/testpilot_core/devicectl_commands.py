@@ -130,3 +130,82 @@ def find_device(entries: list[DeviceInventoryEntry], udid: str) -> DeviceInvento
         if entry.udid == udid:
             return entry
     return None
+
+
+# ── H3 混合执行：process/capture 控制面 argv 纯函数（docs/15 §3/§4）──────────
+#
+# 本机取证（Xcode 27.0，2026-11-13/14，真机 iPhone 16 Pro）：
+# - 截图：``devicectl device capture screenshot --device <udid> --destination <path>``，
+#   --destination 是必填文件路径，产物为 PNG，竖屏判定交给 core.png_probe；
+# - 启动：``devicectl device process launch [--terminate-existing] --device <udid>
+#   <bundle-id> [args...]``，位置参数透传给 App（对应段内 purge 启动参数）；
+# - 终止：``devicectl device process terminate --device <udid> --pid <pid> [--kill]``，
+#   注意按 **PID** 终止而非 bundle id；devicectl 词汇表无进程清单动词，
+#   app_not_running 探针主机侧只能判 unknown（docs/15 §4），pid 由计划参数显式带入。
+
+_BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{1,}$")
+
+
+def validate_bundle_id(bundle_id: str) -> str:
+    """bundle id 白名单：字母数字/点/连字符，拒绝空白与 shell 元字符。"""
+    if not isinstance(bundle_id, str) or not bundle_id.strip():
+        raise SchemaValidationError("bundle_id 为空：拒绝隐式 App 目标")
+    bundle_id = bundle_id.strip()
+    if not _BUNDLE_ID_RE.match(bundle_id):
+        raise SchemaValidationError(
+            f"非法 bundle_id（只允许字母数字、点、连字符）: {bundle_id!r}")
+    return bundle_id
+
+
+def validate_pid(pid: int) -> int:
+    """PID 必须是正整数；拒绝透传负数/字符串，argv 注入的最后防线。"""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise SchemaValidationError(f"非法 pid（必须为正整数）: {pid!r}")
+    return pid
+
+
+def build_screenshot_argv(udid: str, destination: str) -> list[str]:
+    """截图 argv：设备与落盘路径全部显式，无隐式目标、无 shell。"""
+    udid = validate_udid(udid)
+    if not isinstance(destination, str) or not destination.strip():
+        raise SchemaValidationError("截图 destination 为空：拒绝隐式落盘路径")
+    return [
+        "xcrun", "devicectl", "device", "capture", "screenshot",
+        "--device", udid, "--destination", destination,
+    ]
+
+
+def build_process_launch_argv(
+    udid: str,
+    bundle_id: str,
+    *,
+    arguments: list[str] | None = None,
+    terminate_existing: bool = False,
+) -> list[str]:
+    """App 启动 argv；arguments 作为位置参数透传，逐元素做 argv 注入校验。"""
+    udid = validate_udid(udid)
+    bundle_id = validate_bundle_id(bundle_id)
+    argv = ["xcrun", "devicectl", "device", "process", "launch"]
+    if terminate_existing:
+        argv.append("--terminate-existing")
+    argv.extend(["--device", udid, bundle_id])
+    for arg in arguments or []:
+        if not isinstance(arg, str) or not arg or any(ch in arg for ch in "\0\n"):
+            raise SchemaValidationError(f"非法启动参数（拒绝空串/换行/NUL）: {arg!r}")
+        argv.append(arg)
+    return argv
+
+
+def build_process_terminate_argv(
+    udid: str, pid: int, *, kill: bool = False
+) -> list[str]:
+    """进程终止 argv：PID 显式必填（devicectl 不支持按 bundle 终止）。"""
+    udid = validate_udid(udid)
+    pid = validate_pid(pid)
+    argv = [
+        "xcrun", "devicectl", "device", "process", "terminate",
+        "--device", udid, "--pid", str(pid),
+    ]
+    if kill:
+        argv.append("--kill")
+    return argv
