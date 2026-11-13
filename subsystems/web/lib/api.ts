@@ -8,6 +8,9 @@ import type {
   CaseDecisionPlan,
   ConfigResponse,
   DispatchReport,
+  GateOpenBody,
+  GateRespondBody,
+  GateView,
   ExecutionRunDetail,
   ExecutionRunListItem,
   FeedbackKind,
@@ -206,3 +209,43 @@ export function editGovernance(
 // 盘点导出走浏览器原生下载（JSON 附件），不经过 JSON 错误封装
 export const knowledgeInventoryExportUrl =
   "/api/knowledge/inventory-export";
+
+// ── H2 人工闸门（docs/15 §7）────────────────────────────────────────────────
+
+export function listGates(status?: string): Promise<{ gates: GateView[] }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request(`/api/gates${qs}`);
+}
+
+export function openGate(body: GateOpenBody): Promise<GateView> {
+  return request("/api/gates", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function respondGate(
+  gateId: string,
+  body: GateRespondBody,
+): Promise<GateView> {
+  return request(`/api/gates/${encodeURIComponent(gateId)}/respond`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function renewGate(
+  gateId: string,
+  extraSeconds: number,
+): Promise<GateView> {
+  return request(`/api/gates/${encodeURIComponent(gateId)}/renew`, {
+    method: "POST",
+    body: JSON.stringify({ extra_seconds: extraSeconds }),
+  });
+}
+
+export function abandonGate(gateId: string): Promise<GateView> {
+  return request(`/api/gates/${encodeURIComponent(gateId)}/abandon`, {
+    method: "POST",
+  });
+}

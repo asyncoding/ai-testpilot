@@ -163,7 +163,10 @@ class HybridPlan(BaseModel):
 
 
 class GateRequest(BaseModel):
-    """人工闸门的挂起载荷（H2 落 store/gates/<gate_id>.json，零 DDL）。"""
+    """人工闸门的挂起载荷（H2 落 store/gates/<gate_id>.json，零 DDL）。
+
+    单文件承载完整生命周期：响应后 verdict 挂到 response 字段，不另建表。
+    """
 
     gate_id: str
     session_id: str
@@ -175,6 +178,8 @@ class GateRequest(BaseModel):
     deadline: str
     status: GateStatus = GateStatus.PENDING
     created_at: str
+    response: HumanVerdict | None = None
+    renewed_at: str | None = None
 
 
 class HumanVerdict(BaseModel):
@@ -572,3 +577,91 @@ def validate_verdict(form: VerdictForm, verdict: HumanVerdict) -> None:
         raise HybridPlanError("裁决必须记录 decided_by 见证人")
     if not verdict.decided_at:
         raise HybridPlanError("裁决必须带 decided_at 时间戳")
+
+
+# ── 闸门生命周期纯函数（H2；文件态 store 只负责持久化，状态规则全在这里）──────
+
+
+def _parse_deadline(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise HybridPlanError(f"闸门 deadline 格式非法: {value!r}") from exc
+
+
+def gate_is_expired(gate: GateRequest, now: datetime) -> bool:
+    """只认 pending + 过 deadline；responded/canceled 永不回头判过期。"""
+    if gate.status is not GateStatus.PENDING:
+        return False
+    return now.astimezone(timezone.utc) > _parse_deadline(gate.deadline)
+
+
+def expire_gate_if_due(
+    gate: GateRequest, now: datetime
+) -> GateRequest:
+    """读时清扫：pending 且超时 → expired（拷贝，不就地改）；其余原样返回。"""
+    if not gate_is_expired(gate, now):
+        return gate
+    return gate.model_copy(update={
+        "status": GateStatus.EXPIRED,
+        "renewed_at": gate.renewed_at,
+    })
+
+
+def record_gate_response(
+    gate: GateRequest, verdict: HumanVerdict, now: datetime
+) -> GateRequest:
+    """挂裁决：仅 pending 可响应；expired 须先续期，终态拒绝任何写入。"""
+    if verdict.gate_id != gate.gate_id:
+        raise HybridPlanError(
+            f"裁决 gate_id={verdict.gate_id} 与闸门 {gate.gate_id} 不一致")
+    if gate.status is GateStatus.EXPIRED:
+        raise HybridPlanError(
+            f"闸门 {gate.gate_id} 已过期：请先续期（renew）再响应，"
+            "禁止对过期单补录裁决")
+    if gate.status is not GateStatus.PENDING:
+        raise HybridPlanError(
+            f"闸门 {gate.gate_id} 状态为 {gate.status.value}，"
+            "只有 pending 闸门可响应")
+    if gate.verdict_form is not None:
+        validate_verdict(gate.verdict_form, verdict)
+    elif not verdict.decided_by.strip() or not verdict.decided_at:
+        raise HybridPlanError("人工动作回执必须记录见证人与时间戳")
+    return gate.model_copy(update={
+        "status": GateStatus.RESPONDED, "response": verdict})
+
+
+def renew_gate(
+    gate: GateRequest, now: datetime, extra_seconds: int
+) -> GateRequest:
+    """续期：pending 正常延 deadline；expired 显式重开回 pending。
+
+    responded/canceled 是终态，续期拒绝；重开的闸门保留原 gate_id，
+    崩溃重建/前端轮询拿到的仍是同一条记录。
+    """
+    if extra_seconds <= 0:
+        raise HybridPlanError("续期时长必须为正整数秒")
+    if gate.status not in (GateStatus.PENDING, GateStatus.EXPIRED):
+        raise HybridPlanError(
+            f"闸门 {gate.gate_id} 状态为 {gate.status.value}，终态不可续期")
+    stamp = _utc_stamp(now)
+    new_deadline = (_parse_deadline(gate.deadline)
+                    if gate.status is GateStatus.PENDING
+                    else now.astimezone(timezone.utc)) + timedelta(
+        seconds=extra_seconds)
+    return gate.model_copy(update={
+        "status": GateStatus.PENDING,
+        "deadline": new_deadline.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "renewed_at": stamp,
+    })
+
+
+def cancel_gate(gate: GateRequest, now: datetime) -> GateRequest:
+    """放弃闸门：pending/expired → canceled；终态重复取消幂等报错防误写。"""
+    if gate.status is GateStatus.CANCELED:
+        raise HybridPlanError(f"闸门 {gate.gate_id} 已取消，重复取消被拒绝")
+    if gate.status is GateStatus.RESPONDED:
+        raise HybridPlanError(
+            f"闸门 {gate.gate_id} 已响应，不能取消（裁决留痕不可抹）")
+    return gate.model_copy(update={"status": GateStatus.CANCELED})

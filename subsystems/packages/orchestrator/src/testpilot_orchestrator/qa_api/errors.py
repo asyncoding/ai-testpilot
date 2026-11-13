@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from testpilot_core.approval import ApprovalValidationError
 from testpilot_core.badcase import BadCaseError
 from testpilot_core.case_relations import CaseRelationError
+from testpilot_core.hybrid_plan import HybridPlanError
 from testpilot_core.rule_assets import AssetValidationError
 from testpilot_core.errors import (
 
@@ -91,3 +92,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=422, content=_error_body(exc))
 
     app.add_exception_handler(BadCaseError, bad_case_handler)
+
+    # H2（docs/15）：混合计划/人工闸门语义错误（闭集外动作、过期响应、
+    # 空证据裁决、非法状态迁移）同为 ValueError 子类，映射 422。
+    async def hybrid_plan_handler(
+        _request: Request, exc: HybridPlanError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content=_error_body(exc))
+
+    app.add_exception_handler(HybridPlanError, hybrid_plan_handler)
+
+    # 文件态闸门 store 的非法 gate_id（防路径穿越）按资源不存在处理
+    from testpilot_adapters.gate_store import GateIdUnsafeError
+
+    async def gate_id_unsafe_handler(
+        _request: Request, exc: GateIdUnsafeError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=404, content=_error_body(exc))
+
+    app.add_exception_handler(GateIdUnsafeError, gate_id_unsafe_handler)
