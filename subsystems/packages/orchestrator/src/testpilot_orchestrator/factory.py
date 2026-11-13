@@ -88,6 +88,28 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
 
     container.adapters["gate_store"] = FileGateStore(data_dir)
 
+    # H3（docs/15 §3）：DH AX 语义刺激适配器，构造期不起进程；真机/Device Hub
+    # 缺席时调用才报 AdapterUnavailableError。CLI 随仓入库 scripts/。
+    from testpilot_adapters.dh_ax import DhAxAdapter
+    from testpilot_adapters.process_executor import SubprocessExecutor
+
+    dh_cli = base_dir / "scripts" / "device_hub_ax_cli.swift"
+    container.adapters["dh_ax"] = DhAxAdapter(SubprocessExecutor(), dh_cli)
+
+    # H3（docs/15 §3/§4）：devicectl 控制面（截图/启动/按 PID 终止），截图落
+    # data_dir/devicectl-work；同样构造期不起进程，rc!=0 由适配器响亮失败。
+    from testpilot_adapters.devicectl_control import DevicectlControlAdapter
+
+    container.adapters["devicectl"] = DevicectlControlAdapter(
+        SubprocessExecutor(), data_dir / "devicectl-work")
+
+    # H3（docs/15 §6）：混合会话文件态存储，零 DDL；游标+计划+账本同文件原子写。
+    # xcodebuild 子 run 端口（hybrid_child_run）H4 接 execution_service，
+    # 未装配时编排器对 xcodebuild 段 fail-loud，拒绝裸跑。
+    from testpilot_adapters.hybrid_session_store import FileHybridSessionStore
+
+    container.adapters["hybrid_session_store"] = FileHybridSessionStore(data_dir)
+
     # ── 被测仓库引用（路径配置化，禁止写死机器绝对路径）──
     repo_path = Path(config.project.repo_path).expanduser()
     if not repo_path.is_absolute():
