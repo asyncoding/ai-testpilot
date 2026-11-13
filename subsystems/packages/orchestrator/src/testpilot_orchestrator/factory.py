@@ -93,6 +93,13 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     )
     container.adapters["repo"] = repo_ref
 
+    # 三类文档连接器（docs/cases/requirements）共用的 root 解析：
+    # ${REPO_PATH} 占位替换 + 相对 base_dir 解析。提升到分支外，避免
+    # docs=stub 时 cases/requirements 引用未定义名（2026-11-13 缺口修复）。
+    def _resolve(root: str) -> Path:
+        root = root.replace("${REPO_PATH}", str(repo_path))
+        return _p(base_dir, root)
+
     # ── 文档知识源 ──
     docs_settings = a.docs.settings
     docs_roots = docs_settings.get("roots", [])
@@ -105,11 +112,6 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
             for r in docs_settings.get("authority_overrides", [])
         ]
         # repo 内代码根支持 ${REPO_PATH} 占位（路径配置化，不写死机器路径）
-
-        def _resolve(root: str) -> Path:
-            root = root.replace("${REPO_PATH}", str(repo_path))
-            return _p(base_dir, root)
-
         container.adapters["docs"] = FileSystemDocsAdapter(
             [_resolve(r) for r in docs_roots] or [fixtures_dir / "docs"],
             code_roots=[_resolve(r) for r in docs_settings.get("code_roots", [])],

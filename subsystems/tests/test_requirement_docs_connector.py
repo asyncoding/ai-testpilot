@@ -103,6 +103,21 @@ def test_adapter_excludes_glob_and_missing_root_fails_loud(tmp_path):
         RequirementDocumentAdapter([tmp_path / "no-such-root"]).load()
 
 
+def test_adapter_accepts_single_file_root_with_parent_alias(tmp_path):
+    """单文件 root（xcode profile 直指语料仓 V1 文档）：只收该文件，
+    alias 取父目录名，external_id 与「目录 root 扫到同文件」形态完全一致。"""
+    target = _write(tmp_path, "docs/V1需求文档.md", _GOOD_DOC)
+    _write(tmp_path, "docs/other.md", _GOOD_DOC)  # 同目录噪声不得被扫入
+    adapter = RequirementDocumentAdapter([target])
+    docs, errors = adapter.load()
+    assert errors == [] and len(docs) == 1
+    assert docs[0].external_id == "docs/V1需求文档.md"
+    assert [f.fr_id for f in docs[0].result.features] == ["FR-1"]
+
+    with pytest.raises(AdapterUnavailableError):
+        RequirementDocumentAdapter([tmp_path / "docs" / "missing.md"]).load()
+
+
 def test_unreadable_file_is_isolated_as_io_error(tmp_path):
     target = _write(tmp_path, "v1.md", _GOOD_DOC)
     os.chmod(target, 0o000)
