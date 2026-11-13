@@ -17,11 +17,11 @@ subsystems/
 │   ├── adapters/      # testpilot-adapters：文件/JSON/SQLite-FTS/录制型 等适配器
 │   ├── orchestrator/  # testpilot-orchestrator：profile 装配 + FastAPI + qa_graph（S1.4 LangGraph 答案图）
 │   └── workers/       # testpilot-workers：ingest / runner / eval 独立进程入口
-├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml / ios-local-poc-xcode.yaml（真实 xcodebuild 链，见 docs/13）
+├── config/profiles/   # offline-demo.yaml（默认，零外部依赖）/ ios-local-poc.yaml / ios-local-poc-xcode.yaml（真实 xcodebuild 链，见 docs/13）/ ios-local-poc-device.yaml（真机链，manual 日志采集）
 ├── tests/fixtures/    # 工单/运行结果/模型应答/文档/事件/git 录制仓 夹具（语言中立契约的证据）
 ├── web/               # 对话页/审批页/执行控制台/知识管理页（Next.js 15 静态导出，产物 web/out 由 FastAPI 同端口托管）
 ├── deploy/            # docker-compose（redis/chroma + observability profile 的 Langfuse）
-└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、各期 *_probe 与 s2/s3/s4_gate_probe 总验探针、build_web
+└── scripts/           # import_lint 防腐门禁、smoke_trace（S0）、各期 *_probe 与 s2/s3/s4_gate_probe 总验探针、device_chain_probe（真机手动探针，非门禁）、build_web
 ```
 
 ## 环境准备（venv 强制隔离，禁止污染系统 Python）
@@ -1685,3 +1685,40 @@ curl -s "http://127.0.0.1:8765/api/runs?status=failed&project=AlarmKitSpike-demo
   `npx tsc --noEmit` 通过，`npm run build` 6 路由全静态（新增 /knowledge）。
 - **schema 全程 v15 零变更**：事件/死信复用 events/dead_letters，CI run/草稿复用
   test_runs/approvals/outbox，治理进 raw_json，延迟进既有时间列与 report_json。
+
+## 真机切片一（2026-11-13，docs/14/details/12 §3.4）：真机 EnvironmentPort + os_log 两步采集，无新基建
+
+把模拟器执行链同构延伸到物理真机，**不引入任何新运行时/服务，schema v15 零 DDL**；
+刺激动作本切片只落契约（docs/12 §3.4 `stimulus-channel1-v0` 草案），不实现 DeviceControlPort。
+
+| 层 | 模块 | 职责与红线 |
+|---|---|---|
+| core | `devicectl_commands.py`（新，零 IO） | `devicectl list devices --json-output -` argv 拼装 + 新形态 `properties.*` JSON 解析；只认硬件 UDID（`properties.hardware.udid`），CoreDevice UUID 查询返回 None；未知连接态保守 false；UDID 白名单正则 |
+| core | `xcode_commands.py`（改） | `build_xcodebuild_argv` 增 `destination_platform`（白名单 `iOS Simulator`/`iOS`，默认模拟器行为不变）；`evaluate_capabilities(device_capable=True)` 下设备独占能力按清单显式判定，模拟器否决语义保持 |
+| core | `oslog_commands.py`（改） | 真机两步法纯函数：`log collect --device-udid`（**无 --end**、可选 `sudo -n` 前置）+ `log show <archive>` 窗口/谓词过滤；`auto/manual` 采集模式，manual 仍回显等效 collect argv 保证据链 |
+| adapters | `ios_device_env.py`（新） | `IosDeviceEnvironment`：devicectl 盘点 + 租约簿记；`health_check` 要求 physical+connected；**`reset` 无条件 PolicyDeniedError（真机永不自动抹除）**；reclaim 只摘登记不 shutdown |
+| adapters | `device_os_log.py`（新） | 两步采集适配器：manual 缺归档即响错并携带**人工照跑的 collect 命令**（worker 无 TTY，sudo 必须人工介入）；auto 先删后采防陈旧归档；NDJSON 解析与模拟器共用 `parse_ndjson` |
+| adapters | `xcode_runner.py` / `xcresult_tool.py`（改） | destination/provider 参数化；真机 run `provider=ios-device`、`uncovered_layers=[]`（三层设备独占能力物理可验），默认值保模拟器旧行为 |
+| orchestrator | `factory.py`（改） | 三新分支：environment `ios-device`、logs `os-log-device`（udid/collect_mode 装配期校验）、runner `xcode.target: device`；未知 type/模式装配期拒绝 |
+| profile | `ios-local-poc-device.yaml`（新） | 独立 data_dir `store/ios-local-poc-device`；硬件 UDID 显式绑定；logs 默认 `collect_mode: manual, use_sudo: false`；超时按真机冷启动放宽 |
+
+```bash
+# 真机链路手动探针（永不进 verify_s0；需真机配对且 connected）
+.venv/bin/python scripts/device_chain_probe.py
+# 首跑：10 项检查（devicectl 真盘点/health/租约/reset 守卫/argv 对账/manual fail-closed/假 UDID 负向）
+#       归档缺失时 exit 2 并打印人工 collect 命令；同 --run-id 重跑接上 log show
+.venv/bin/python scripts/device_chain_probe.py --collect-mode auto   # 仅确认本机免提权时使用
+# 报告：out/eval/device-chain-probe.{json,md}（gitignore）
+```
+
+### 验收证据（2026-11-13）
+
+- hostless 净增 **49 测试**（devicectl 8 / xcode 7 / oslog 6 / 真机环境 14 / 真机日志 10 /
+  工厂装配 4），全量 **1300 passed**（基线 1251 零回归），import-lint OK。
+- 真探针实跑（iPhone 16 Pro，iOS 27.2，硬件 UDID `00008140-…801C`）：8 设备盘点解析
+  成功、目标 physical+connected、health_check 真跑 True、reset 守卫命中、manual 模式
+  exit 2 人工待办路径完整；verify_s0 仅 A4/A8 因本机 8765 被用户自有 uvicorn 占用而
+  FAIL，同 app 换端口手起 `/health`、`/api/config` 均 200，证明与本切片无关。
+- 验证边界（如实声明）：真机 xcodebuild 执行未跑（依赖演示分支签名就绪，runbook 在
+  docs/03 §3.7）；刺激 spike S-1～S-6 未开始；go-ios 仅 Web 资料级调研（docs/14 附录 A，
+  本机未安装）。

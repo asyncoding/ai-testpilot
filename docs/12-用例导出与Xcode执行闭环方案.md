@@ -49,7 +49,7 @@
 3. 系统只信任两类事实：人审批准的用例规格、演示分支上**真实存在且编译通过**的 Swift 测试；
 4. 映射缺失时响亮失败/显式报告，绝不静默全量执行或假绿。
 
-## 3. 数据契约（三个版本化契约，评审重点）
+## 3. 数据契约（四个版本化契约，评审重点）
 
 ### 3.1 契约一：结构化用例集导出（`case-export-v1`，E1 产出）
 
@@ -192,6 +192,54 @@
 - 映射同时投影到 `test_cases.raw_json.automation`（只追加、reindex 存活口径同知识治理），**schema 保持 v15 不动**；
 - 三档退出码：**exit 2 硬错误**（TC 不存在/非活跃、畸形标记、非法 OID、悬空 manual、旧 map 损坏）→ 不写 map、不覆盖旧 map；**exit 3 警告**（一 TC 多方法、探索性标记被剔除）→ map 照写催人审；**exit 0** 干净。重扫幂等：同 HEAD 同内容 map_hash 稳定，人审记录跨重扫保留。
 
+### 3.4 契约四：通道一刺激能力圈（`stimulus-channel1-v0`，草案；spike S-2/S-3 通过后转正）
+
+切片一（2026-11-13）只落**契约**不引新基建：真机刺激的第一个自动化通道就是现有
+xcodebuild 管线内的**包内 XCUITest**（docs/14 方案④），编号"通道一"。通道二
+（Appium+WDA）、通道三（go-ios/CoreDevice 私有面）留待 docs/14 P1 spike 后另立契约，
+本契约不提前承诺它们的能力。
+
+**通道一能力圈（硬边界，证据 = docs/14 E7：Xcode 27 SDK `XCUIDeviceButton.h` 头文件）**
+
+| 刺激（DeviceStimulus 拟议名） | 通道一判定 | 依据与守卫 |
+|---|---|---|
+| `volume_up` / `volume_down` | **在圈（官方 API）** | `XCUIDeviceButton.volumeUp/volumeDown`，枚举标 `XCUI_SIMULATOR_UNAVAILABLE`，仅真机可用；模拟器 run 不得声明覆盖 |
+| `home` | **在圈（官方 API）** | 同枚举 `.home`，真机限定 |
+| `unlock` | **条件在圈（社区技法，非 API 承诺）** | 仅允许 `XCUIApplication(bundleIdentifier:"com.apple.springboard")` 滑屏 + 密码盘路径；守卫见下"解锁技法四守卫"；spike S-3 通过前不得进自动执行 |
+| `lock` | **圈外** | 枚举无 lock case（E7）；官方特性面无锁屏动作（devicectl 全量子命令亦无，docs/14 E6）；通道一遇到 lock 必须 fail-loud 或挂起人工，禁止伪装成功 |
+| `side_button`（真实 HID 侧键） | **圈外** | 枚举无对应 case（`.action`/`.camera` 不等同侧键 HID 语义）；不得用软件事件冒充硬件侧键，两类事件的 os_log 因果链不同（docs/14 S-5） |
+
+解锁技法四守卫（缺一不可，spike S-3 判据）：① pin 住 iOS 大版本，密码盘布局漂移即
+失效；② 断言"锁屏页面消失"而非仅"新标题存在"，防同名假绿（工程纪律同 UI 自动化章）；
+③ 设备密码只经 profile/环境变量注入测试 bundle，**密码明文绝不入仓、不入日志、不进
+query 回显**；④ 连续 10 次运行零假绿方可转正在圈，证据录屏随 spike 报告封存。
+
+**接合规则（与 docs/14 §7.2 DeviceControlPort 设计稿对齐，本切片不实现 Port）**
+
+- 刺激只允许作用于**已租约的 env_id**：无 EnvironmentPort 租约不裸操作设备，租约口径
+  复用既有 acquire → env_id_for_lease → release；真机环境 `reset` 永远 PolicyDenied，
+  抹除只能人工经系统设置或 MDM；
+- 未来 `DeviceControlPort.capabilities()` 的通道一实现必须逐字按上表声明，不支持的
+  DeviceStimulus 不进能力集；worker 预检遇圈外刺激 → 响亮失败或挂起人工混合流，
+  **绝不静默跳过**（用户红线，docs/14 方案⑨）；
+- 通道一适配器与 xcodebuild 同进程出口（唯一 SubprocessExecutor，argv 数组永不 shell），
+  不引入 Node/WDA/Go 任何新运行时；schema 保持 **v15 零 DDL**，刺激记录走既有执行事件
+  契约 + ArtifactStorePort 制品 URN。
+
+**A 层（日志归因层）os_log 因果链硬约定**
+
+1. 每个刺激用例必须带可回放时间窗（start/end ISO8601）与 NSPredicate 原文，随 query
+   回显落执行记录（FR-EX-006 AC1 同口径）；真机走 `.logarchive` 两步法（docs/03 §3.7），
+   manual 模式下人工 collect 命令原文必须随档留存，证据链不断；
+2. 刺激生效的断言必须以 os_log 条目（subsystem/process/message + 时间戳）为因果证据，
+   不允许仅凭 UI 状态截图判定"刺激已生效"；UI 录屏只作旁证；
+3. 时间窗闭区间 `[start, end]`，窗外条目经服务端 `filter_window` 二次剔除，不得入证据
+   集（AC2）；NDJSON 坏行计数留片、fail-closed，不用残缺数据凑因果；
+4. 模拟器 run 的 `uncovered_layers` 继续显式声明 ios.device 等三层未覆盖；真机 run
+   （profile `target: device`）三层物理可验， uncovered_layers 为空，两种口径不得互串；
+5. 红证要求：通道一刺激测试必须能抓住"刺激未真实发出"的回归（临时回退 press 调用，
+   断言须变红），警惕全程全绿中的假阳性；spike S-2 即该红证的首次真机执行。
+
 ## 4. 切片设计（E1–E5）
 
 ### E1 结构化用例集导出（约 1 人日）——✅ 已落地（2026-11-13）
@@ -258,6 +306,7 @@
 |---|---|
 | 单测 | 三个新 core 纯函数模块 hostless 测试 + 三个 CLI 的夹具测试，进 pytest 全量 |
 | 契约 | case-export-v1 / automation-map-v1 各一份封存样例 + schema 自校验测试 |
+| 刺激契约（草案） | `stimulus-channel1-v0`（§3.4）：通道一能力圈以 docs/14 E7 头文件取证为界，转正门槛 = 真机 spike S-2（音量键红证）/S-3（解锁四守卫、连续 10 次无假绿）通过并回填 docs/14；未转正前 lock/side_button 一律 fail-loud 或挂起人工 |
 | 红证（四条） | cancelled 混入、标记正则删除、空选择守卫放开、manual 绑定悬空——每条必须实测红→绿并留记录 |
 | 回归 | import-lint、verify_s0 全 PASS（E5 两轮 24/24）、A19–A24 既有探针零退化、schema 定格 **v15 零 DDL**（PRAGMA 实测 34 表 = 27 业务表 + 6 张 chunks_fts FTS5 影子表 + sqlite_sequence） |
 | 端到端 | 场景 A/B 各一次真实跑通并留证：A=`run-f9e66995606b`（制品 URN `fc6596af4f37…`），B=`run-aadf932176c1`（map_hash `d7a0c2e5…`、制品 URN `82fab885eeb5…`），均为真实 xcodebuild + 真实 .xcresult bundle；证据落 gitignored `store/ios-local-poc-xcode/`，复现命令与路径见 docs/13 |
