@@ -1487,25 +1487,39 @@ class Store:
     def search_test_cases(
         self, fr_ids: Sequence[str], like_terms: Sequence[str] = (), *, limit: int = 10
     ) -> list[dict[str, Any]]:
-        """影响面检索的相似用例一路（FR-TD-002）：FR 标签精确命中为主、标题
-        短词 LIKE 兜底。只返活跃用例；优先级 P0→P3 确定性排序，同名按 URN。"""
+        """影响面检索的相似用例一路（FR-TD-002）：FR 同族命中为主、标题短词
+        LIKE 兜底。只返活跃用例；优先级 P0→P3 确定性排序，同名按 URN。
+
+        2026-11-14 串案修复（红证见 test_search_test_cases_*）：
+        - FR 命中从「精确相等」扩为「同族」：查 FR-2 同时命中 FR-2a/FR-2b 等
+          小写字母后缀的子特性（FR-1 不命中 FR-10，数字后缀不属同族）；
+        - LIKE 兜底从「任一词命中（OR）」改为「所有词都命中（AND）」并丢弃
+          单字词。旧 OR 语义下 ``FR``/``日志`` 这类通用短词命中几乎所有标题，
+          相似集对每条查询都饱和成同样的 P0 用例，oracle 平移因此大面积串案。
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if fr_ids:
-            placeholders = ",".join("?" for _ in fr_ids)
+            tag_clauses = []
+            for fr_id in fr_ids:
+                # value 等于 FR id；或 value = FR id + 纯小写字母后缀（同族子特性）
+                tag_clauses.append(
+                    "(value = ? OR (substr(value, length(?) + 1) GLOB '[a-z]*' "
+                    "AND value LIKE ? || '_%'))"
+                )
+                params.extend([fr_id, fr_id, fr_id])
             clauses.append(
-                f"EXISTS (SELECT 1 FROM json_each(json_extract(raw_json,'$.tags')) "
-                f"WHERE value IN ({placeholders}))"
+                "EXISTS (SELECT 1 FROM json_each(json_extract(raw_json,'$.tags')) "
+                "WHERE (" + " OR ".join(tag_clauses) + "))"
             )
-            params.extend(fr_ids)
         like_clauses = []
         for term in like_terms:
-            if not term:
+            if not term or len(term) < 2:
                 continue
             like_clauses.append("title LIKE ?")
             params.append(f"%{term}%")
         if like_clauses:
-            clauses.append("(" + " OR ".join(like_clauses) + ")")
+            clauses.append("(" + " AND ".join(like_clauses) + ")")
         if not clauses:
             return []
         sql = (

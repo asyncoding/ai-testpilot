@@ -323,3 +323,90 @@ def test_search_test_cases_tag_like_order_and_active_filter(tmp_path):
         assert store.search_test_cases([], []) == []
     finally:
         store.close()
+
+
+def test_search_test_cases_fr_family_prefix_matches_child_tags(tmp_path):
+    """R1 红证：FR 父特性查询命中小写字母后缀的子特性，但数字后缀不属同族；
+    子特性反查不带回父特性或兄弟特性。"""
+    store = bootstrap_store(tmp_path / "data")
+    doc_urn = "urn:testpilot:fs-cases:document:cases/x.md"
+    try:
+        for cid, tag in [
+            ("TC-P", "FR-2"), ("TC-A", "FR-2a"), ("TC-E", "FR-2e"),
+            ("TC-N", "FR-10"), ("TC-O", "FR-1"),
+        ]:
+            store.upsert_test_case(
+                doc_urn, _case(cid, title=f"用例{cid}", tags=[tag]), content_hash="h",
+            )
+
+        rows = store.search_test_cases(["FR-2"])
+        assert sorted(r["external_id"] for r in rows) == ["TC-A", "TC-E", "TC-P"]
+
+        # FR-1 不得命中 FR-10（数字后缀不是子特性）
+        rows = store.search_test_cases(["FR-1"])
+        assert [r["external_id"] for r in rows] == ["TC-O"]
+
+        # 子特性精确反查：只回自身，不扩散到父/兄弟
+        rows = store.search_test_cases(["FR-2a"])
+        assert [r["external_id"] for r in rows] == ["TC-A"]
+    finally:
+        store.close()
+
+
+def test_search_test_cases_like_terms_are_and_connected_and_single_chars_dropped(tmp_path):
+    """R1 红证：LIKE 兜底从 OR 改 AND——旧 OR 语义下通用短词把无关用例全部捞回，
+    是 V1 语料 related 集饱和的直接成因；单字词丢弃，纯单字查询不扫全表。"""
+    store = bootstrap_store(tmp_path / "data")
+    doc_urn = "urn:testpilot:fs-cases:document:cases/x.md"
+    try:
+        store.upsert_test_case(
+            doc_urn, _case("TC-1", title="冷启响铃 FR 兜底路径"), content_hash="h",
+        )
+        store.upsert_test_case(
+            doc_urn, _case("TC-2", title="全屏接管 日志核对 FR 分支"), content_hash="h",
+        )
+
+        # 两词 AND：只有 TC-2 同时含「日志」与「FR」；旧 OR 会同时返回两条
+        rows = store.search_test_cases([], ["FR", "日志"])
+        assert [r["external_id"] for r in rows] == ["TC-2"]
+
+        # 单字词一律丢弃；只剩单字时等同空条件，禁止扫全表
+        assert store.search_test_cases([], ["秒"]) == []
+        rows = store.search_test_cases([], ["秒", "响铃"])
+        assert [r["external_id"] for r in rows] == ["TC-1"]
+    finally:
+        store.close()
+
+
+def test_search_test_cases_generic_short_terms_no_longer_saturate(tmp_path):
+    """R1 红证（V1 同形夹具）：多条 P0 用例标题都含 FR/日志/T0 这类通用短词时，
+    旧 OR+LIKE 让每条查询都拿回同样的饱和集合；新语义下无 FR 同族命中即返空，
+    有 FR 标签时只回同族，串案通道被切断。"""
+    store = bootstrap_store(tmp_path / "data")
+    doc_urn = "urn:testpilot:fs-cases:document:cases/x.md"
+    try:
+        store.upsert_test_case(
+            doc_urn, _case("TC-A1", title="冷启 FR 路径 T0 核对", tags=["FR-7"],
+                           priority="P0"),
+            content_hash="h",
+        )
+        store.upsert_test_case(
+            doc_urn, _case("TC-A5", title="补发机制 FR 日志核对", tags=["FR-6"],
+                           priority="P0"),
+            content_hash="h",
+        )
+        store.upsert_test_case(
+            doc_urn, _case("TC-A7", title="恢复兜底 FR 日志核对", tags=["FR-6"],
+                           priority="P0"),
+            content_hash="h",
+        )
+
+        # 通用短词的 LIKE-only 查询：T0 与 日志 分别命中不同子集，旧 OR 三条全返
+        # （饱和），新 AND 无一条同时含两词 → 零命中
+        assert store.search_test_cases([], ["T0", "日志"]) == []
+
+        # 带 FR 标签时只回同族，通用词不再把异族 P0 用例灌进来
+        rows = store.search_test_cases(["FR-6"], ["T0", "日志"])
+        assert sorted(r["external_id"] for r in rows) == ["TC-A5", "TC-A7"]
+    finally:
+        store.close()

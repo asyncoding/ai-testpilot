@@ -160,6 +160,56 @@ def test_related_case_oracles_transferred_at_05_and_self_skipped():
     assert not result.exploratory  # 状态断言可执行，摘掉探索性标记
 
 
+def test_related_transfer_gated_on_oracle_missing():
+    """R2 红证：相似用例断言平移只服务 oracle_missing 用例。
+
+    V1 语料串案的核心机制——带自身断言的用例被整组灌入相似断言（276 行中
+    257 行错挂）。旧实现无门禁，此用例在回退修复后必红。
+    """
+    related = TestCase(
+        urn="urn:testpilot:fs-cases:test_case:cases/x.md#TC-A7",
+        external_id="TC-A7", title="相似用例", steps=["s1"],
+        oracles=[Oracle(type=OracleType.STATE_ASSERTION,
+                        expectation="VM init 后 HEADLESS 恢复", confidence=0.5)],
+    )
+    # 非 missing（带自身断言）：拒绝平移，只留自己的一条
+    equipped = _case(cid="TC-A1", tags=["FR-7"], oracles=[Oracle(
+        type=OracleType.LOG_ASSERTION, expectation="T0 到侧边键之间不重复弹横幅",
+        confidence=0.5)])
+    result = mine_deterministic(equipped, None, [], related_cases=[related])
+    expectations = [o.expectation for o in result.mined]
+    assert "VM init 后 HEADLESS 恢复" not in expectations
+    assert expectations == ["T0 到侧边键之间不重复弹横幅"]
+
+    # 同夹具下 oracle_missing 用例：平移保留（真正的目标受众）
+    missing = _case(cid="TC-A1b", tags=["FR-2e"], oracle_missing=True)
+    result_missing = mine_deterministic(missing, None, [], related_cases=[related])
+    transferred = [o for o in result_missing.mined
+                   if o.source_kind == "existing_assertion"]
+    assert [o.expectation for o in transferred] == ["VM init 后 HEADLESS 恢复"]
+
+
+def test_transferred_oracle_refs_append_source_case_urn_with_doc_ref():
+    """R3 红证：生产路径里相关用例 oracle 带文档级 source_refs（S2.1 解析器
+    盖章），平移后必须同时保留文档 URN 并追加来源用例 URN，审批页才能区分
+    「平移自 TC-Ax」与用例自有断言。"""
+    doc_ref = "urn:testpilot:fs-cases:document:cases/x.md"
+    related = TestCase(
+        urn="urn:testpilot:fs-cases:test_case:cases/x.md#TC-A5",
+        external_id="TC-A5", title="相似用例", steps=["s1"],
+        oracles=[Oracle(type=OracleType.LOG_ASSERTION,
+                        expectation="各补发按时响，MISSION stale state 被回收",
+                        source_refs=[doc_ref], confidence=0.5)],
+    )
+    case = _case(cid="TC-A1b", oracle_missing=True)
+    result = mine_deterministic(case, None, [], related_cases=[related])
+    transferred = [o for o in result.mined
+                   if o.source_kind == "existing_assertion"]
+    assert len(transferred) == 1
+    # 文档出处不丢，来源用例 URN 追加在后，去重保序
+    assert transferred[0].source_refs == [doc_ref, related.urn]
+
+
 def test_duplicate_expectation_deduped_across_sources():
     text = "接管后账本写入一条接管记录，状态为 stopped"  # 与 AC-1 同文本
     case = _case(tags=["FR-2"], oracles=[

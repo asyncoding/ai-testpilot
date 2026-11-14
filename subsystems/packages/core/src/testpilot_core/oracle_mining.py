@@ -7,8 +7,10 @@ S2.1~S2.3 一致——**确定性脊柱先挖，模型只在白名单内补 orac
 - 确定性三源（无模型也能跑）：
   1. 需求验收标准（requirement_ac）：用例 FR tag 命中骨架 AC 的 linked_fr_ids，
      分类复用 S2.1 ``classify_oracle``，需求是权威源，置信度 0.7；
-  2. 现有断言（existing_assertion）：用例自身 S2.1 oracle 原样保留 + 相似活跃
-     用例的 oracle 平移，置信度 0.5；
+  2. 现有断言（existing_assertion）：用例自身 S2.1 oracle 原样保留；相似活跃
+     用例的 oracle 平移**只对 oracle_missing 用例开放**（2026-11-14 R2 收口，
+     红证 test_related_transfer_gated_on_oracle_missing），平移项强制追加来源
+     用例 URN 到 source_refs（R3），置信度 0.5；
   3. 历史缺陷（incident）：只抽事故文本中含义务标记（必须/不得/严禁/确保/应该）
      的句子，拿不准的叙述句不升级为断言，置信度 0.5。
 - 当前代码（code_symbol）**不在确定性侧编造 expectation 文本**——符号只给锚点，
@@ -223,13 +225,21 @@ def mine_deterministic(
                     _AC_CONFIDENCE, "requirement_ac")
 
     # 源②-b：相似活跃用例的现有断言（平移不升置信度）
-    for related in related_cases:
-        if related.urn == case.urn:
-            continue
-        for oracle in related.oracles:
-            refs = oracle.source_refs or [related.urn]
-            add(oracle.expectation, oracle.type, refs,
-                _DOC_CONFIDENCE, "existing_assertion")
+    # R2（2026-11-14 串案修复）：平移只服务 oracle_missing 用例。已有自身断言的
+    # 用例再整组灌入相似用例断言即纯噪声——V1 语料 276 行 existing_assertion 中
+    # 257 行错挂（93.1%），主因就是无界平移叠加检索饱和（红证见
+    # test_related_transfer_gated_on_oracle_missing）。
+    if case.oracle_missing:
+        for related in related_cases:
+            if related.urn == case.urn:
+                continue
+            for oracle in related.oracles:
+                # R3：S2.1 解析器给 oracle 盖的是文档级 source_refs，平移时必须
+                # 追加来源用例 URN（去重保序），否则草稿在审批页与自有断言不可
+                # 区分；旧 ``or [related.urn]`` 兜底在生产路径永不触发。
+                refs = list(dict.fromkeys([*(oracle.source_refs or []), related.urn]))
+                add(oracle.expectation, oracle.type, refs,
+                    _DOC_CONFIDENCE, "existing_assertion")
 
     # 源③：历史缺陷义务句（叙述句不抽，防编造）
     for ev in evidence:
