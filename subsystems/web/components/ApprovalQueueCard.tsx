@@ -10,6 +10,7 @@ import {
   REVIEW_ACTION_LABELS,
   SOURCE_KIND_LABELS,
   shortUrn,
+  transferCaseIds,
 } from "@/lib/approvalLabels";
 import type {
   CaseDecisionPlan,
@@ -170,6 +171,8 @@ function SuggestionRow({
 }) {
   const o = suggestion.oracle;
   const confirmedConfidence = Math.min(1, o.confidence + 0.3);
+  // R3：test_case 命名空间的 source_ref 是平移溯源标记，审批页显式标出来源用例
+  const transferredFrom = transferCaseIds(o.source_refs);
   return (
     <div className="ap-suggestion">
       <div className="ap-sg-head">
@@ -177,6 +180,14 @@ function SuggestionRow({
           {shortUrn(suggestion.urn, 40)}
         </span>
         <span className="tag">{SOURCE_KIND_LABELS[o.source_kind]}</span>
+        {transferredFrom.length > 0 && (
+          <span
+            className="tag tag-amber"
+            title={`相似用例断言平移（R2 仅对缺预期用例开放），来源：${transferredFrom.join(", ")}`}
+          >
+            平移自 {transferredFrom.join("、")}
+          </span>
+        )}
         <span className="tag">{o.provenance === "model" ? "模型产出" : "确定性产出"}</span>
         {suggestion.exploratory && <span className="tag tag-amber">探索性</span>}
       </div>

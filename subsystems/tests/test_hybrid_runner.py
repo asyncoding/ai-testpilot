@@ -49,7 +49,10 @@ from testpilot_workers.hybrid_runner import (
     unblock,
 )
 
-_T0 = datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc)
+# 锚定墙钟而非硬编码日期：本模块混用了注入时钟与 gate_service.list_gates 的
+# 真实 now 读时清扫，硬编码 _T0 一旦被当天墙钟越过，pending 闸门会在读取时
+# 被判过期（2026-11-14 日期翻转曾致 7 条用例集体假红）；断言只依赖相对增量。
+_T0 = datetime.now(timezone.utc)
 _UDID = "00008140-001A39590162801C"
 _BUNDLE = "com.example.AlarmKitSpike"
 _PNG_SIG = b"\x89PNG\r\n\x1a\n"

@@ -46,3 +46,22 @@ export const OUTBOX_STATUS_LABELS: Record<string, string> = {
 export function shortUrn(urn: string, keep = 48): string {
   return urn.length <= keep ? urn : `…${urn.slice(-(keep - 1))}`;
 }
+
+// 与 core testpilot_core.urn 的 test_case URN 命名空间对齐（R3 溯源补强）
+const TEST_CASE_URN_PREFIX = "urn:testpilot:fs-cases:test_case:";
+
+/**
+ * R3：从 source_refs 挑出来源用例 URN（test_case 命名空间），返回 # 后的
+ * external_id（如 TC-A5）。确定性平移项经 core 强制追加来源用例 URN，
+ * 审批页据此渲染「平移自」徽章，与用例自有断言（文档 URN）区分。
+ */
+export function transferCaseIds(sourceRefs: string[]): string[] {
+  const out: string[] = [];
+  for (const ref of sourceRefs) {
+    if (!ref.startsWith(TEST_CASE_URN_PREFIX)) continue;
+    const hash = ref.indexOf("#");
+    const id = hash >= 0 ? ref.slice(hash + 1) : ref;
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
