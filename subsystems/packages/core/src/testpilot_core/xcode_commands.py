@@ -110,6 +110,72 @@ def build_xcodebuild_argv(
     return argv
 
 
+def build_xcodebuild_xctestrun_argv(
+    *,
+    xctestrun_path: str,
+    udid: str,
+    only_testing: list[str],
+    result_bundle_path: str | None = None,
+    destination_platform: str = DESTINATION_PLATFORM_SIMULATOR,
+    maximum_test_execution_time_allowance: int | None = None,
+) -> list[str]:
+    """拼 ``xcodebuild test-without-building`` argv（USB relay 转正，docs/03 §3.8）。
+
+    与 :func:`build_xcodebuild_argv` 的区别：消费 ``build-for-testing`` 预构建的
+    ``.xctestrun``（relay 场景的注入副本，env 已在副本里改好），因此没有
+    workspace/scheme，改为 ``-xctestrun`` 直指产物；runbook 02/03 手工命令里的
+    ``-only-testing:$OID`` 冒号形式与这里的两参数形式对 xcodebuild 完全等价，
+    产品内统一两参数形式（同 build_xcodebuild_argv 惯例）。
+
+    仍然只做选择执行：``only_testing`` 为空直接拒，防静默退化为全量。
+    ``maximum_test_execution_time_allowance`` 给秒级正整数（对应 runbook 的 600），
+    必须大于被测用例内全部闸门硬超时之和，由上层 profile 兜底，本函数只做形态校验。
+    """
+    _require_nonempty("xctestrun_path", xctestrun_path)
+    _require_nonempty("udid", udid)
+    if not _UDID_RE.match(udid):
+        raise ValueError(f"非法设备 udid（只允许字母数字与连字符）: {udid!r}")
+    if destination_platform not in DESTINATION_PLATFORMS:
+        raise ValueError(
+            f"非法 destination_platform（白名单 {sorted(DESTINATION_PLATFORMS)}）: "
+            f"{destination_platform!r}"
+        )
+    if not only_testing:
+        raise ValueError("only_testing 不能为空：本系统只做选择执行，不跑无范围全量")
+    if result_bundle_path is not None:
+        _require_nonempty("result_bundle_path", result_bundle_path)
+    if maximum_test_execution_time_allowance is not None:
+        # bool 是 int 子类，显式挡掉 True/False 这种手滑值
+        if (
+            isinstance(maximum_test_execution_time_allowance, bool)
+            or not isinstance(maximum_test_execution_time_allowance, int)
+            or maximum_test_execution_time_allowance <= 0
+        ):
+            raise ValueError(
+                "maximum_test_execution_time_allowance 必须是正整数秒: "
+                f"{maximum_test_execution_time_allowance!r}"
+            )
+
+    argv = [
+        "xcodebuild",
+        "test-without-building",
+        "-xctestrun",
+        xctestrun_path,
+        "-destination",
+        f"platform={destination_platform},id={udid}",
+    ]
+    for identifier in only_testing:
+        argv.extend(("-only-testing", validate_only_testing(identifier)))
+    if result_bundle_path is not None:
+        argv.extend(("-resultBundlePath", result_bundle_path))
+    if maximum_test_execution_time_allowance is not None:
+        argv.extend((
+            "-maximum-test-execution-time-allowance",
+            str(maximum_test_execution_time_allowance),
+        ))
+    return argv
+
+
 def build_simctl_shutdown_argv(udid: str) -> list[str]:
     _require_nonempty("udid", udid)
     if not _UDID_RE.match(udid):

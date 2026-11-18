@@ -1122,6 +1122,7 @@ dependencies = [
     { name = "testpilot-adapters" },
     { name = "testpilot-core" },
     { name = "testpilot-orchestrator" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -1131,6 +1132,7 @@ requires-dist = [
     { name = "testpilot-adapters", editable = "packages/adapters" },
     { name = "testpilot-core", editable = "packages/core" },
     { name = "testpilot-orchestrator", editable = "packages/orchestrator" },
+    { name = "websockets", specifier = ">=14" },
 ]
 
 [[package]]

@@ -66,3 +66,6 @@ class ProfileConfig(BaseModel):
     qa: dict[str, Any] = Field(default_factory=dict)
     # S4.2 FR-FRS-002：保鲜阈值（高价值判定/rename 相似度）；缺省由 workers 侧常量兜底
     freshness: dict[str, Any] = Field(default_factory=dict)
+    # USB relay（ws-run）：一期保持松散字典同 qa/freshness 先例，闭集校验在
+    # workers.ws_relay_session 装配期做，老 profile 缺省 {} 零影响、factory 无分支。
+    usb_relay: dict[str, Any] = Field(default_factory=dict)

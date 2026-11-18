@@ -105,3 +105,28 @@ class SubprocessExecutor:
                 f"命令不存在（工具链未安装？）: {argv[0]}"
             ) from exc
         return SubprocessProcess(process, list(argv))
+
+    async def spawn_attached(
+        self, argv: list[str], *, cwd: str | None = None
+    ) -> SubprocessProcess:
+        """交互式子进程出口：stdin=None 继承父进程 TTY，stdout/stderr 仍 PIPE。
+
+        ws-run 的闸门驱动走这里：结构跑（--structural）零提问、全自动，是本入口
+        的受支持形态；人工模式下 input() 可读继承来的终端 stdin，但提示语随
+        stdout 入管，全 TTY 人工会话应直接在独立终端运行 testpilot-ws-gate-driver
+        （docs/15 已写死这条边界）。out/err 保持 PIPE 是为沿用 communicate 排空
+        纪律，防止驱动日志撑爆管道缓冲反压协议帧。
+        """
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=cwd,
+                stdin=None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            raise AdapterUnavailableError(
+                f"命令不存在（工具链未安装？）: {argv[0]}"
+            ) from exc
+        return SubprocessProcess(process, list(argv))

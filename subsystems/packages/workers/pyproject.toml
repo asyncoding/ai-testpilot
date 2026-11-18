@@ -9,6 +9,10 @@ dependencies = [
     "testpilot-orchestrator",
     "pydantic>=2.8",
     "pyyaml>=6.0",
+    # WS 闸门驱动（ws_gate_driver.WebsocketsConnection）的真实传输栈；
+    # 此前仅经 langgraph-sdk/langsmith 传递存在，S8 裸 python3 事故证明必须显式声明。
+    # 导入仍延迟到 connect() 工厂内，hermetic/非 mac 宿主不触发 socket 栈。
+    "websockets>=14",
 ]
 
 [project.scripts]
@@ -30,6 +34,8 @@ testpilot-scan-generated-swift = "testpilot_workers.scan_generated_swift:main"
 testpilot-impact-rerun = "testpilot_workers.impact_rerun:main"
 testpilot-lint-cases = "testpilot_workers.lint_cases:main"
 testpilot-hybrid = "testpilot_workers.hybrid_cli:main"
+testpilot-inject-xctestrun = "testpilot_workers.xctestrun_inject:main"
+testpilot-ws-gate-driver = "testpilot_workers.ws_gate_driver:main"
 
 [build-system]
 requires = ["hatchling"]

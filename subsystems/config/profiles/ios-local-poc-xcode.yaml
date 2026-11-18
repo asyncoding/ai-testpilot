@@ -146,3 +146,27 @@ adapters:
       timeout: 30
   queue:      {type: sqlite}
   tracer:     {type: noop}
+
+# USB 反向监听 relay（testpilot-hybrid ws-run，2026-11-18 转正切片）。
+# 一期单用例形态：Runner 设备 loopback WS 服务端 + Mac 驱动客户端，模拟器直连
+# loopback；真机走 iproxy USB 反向监听（代码已落地但本期不经真机验证，故
+# iproxy.enabled=false，device profile 本期不改）。token 不写本文件：运行期
+# TESTPILOT_RELAY_TOKEN 注入，缺省回退线协议默认 tok-p0 并打 stderr 警告。
+usb_relay:
+  relay_url_template: "ws://127.0.0.1:{port}/ws/hybrid/{session}"
+  listen_port: 9876
+  session: hsess-p0
+  retry_seconds: 300          # 驱动先起重试窗；最小值校验禁止调小（driver-first 纪律）
+  grace_seconds: 30           # xcodebuild 先退后等 step_finished 的有界宽限
+  auto_delay: 1.0
+  structural_default: false
+  time_allowance_s: 600       # 必须大于 Swift 三闸硬超时之和；真机 900 随 S9 再加
+  gates_human: tests/fixtures/ws-gates/ws-gates.human.json
+  gates_structural: tests/fixtures/ws-gates/ws-gates.structural.json
+  evidence_subdir: ws-relay-sessions
+  iproxy:
+    enabled: false            # 真机切片（S9 重启）才置 true
+    local_port: 9876
+    device_port: 9876
+  xctestrun:
+    output_suffix: ".injected.xctestrun"
