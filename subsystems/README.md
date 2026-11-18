@@ -1722,3 +1722,82 @@ curl -s "http://127.0.0.1:8765/api/runs?status=failed&project=AlarmKitSpike-demo
 - 验证边界（如实声明）：真机 xcodebuild 执行未跑（依赖演示分支签名就绪，runbook 在
   docs/03 §3.7）；刺激 spike S-1～S-6 未开始；go-ios 仅 Web 资料级调研（docs/14 附录 A，
   本机未安装）。
+
+## USB 反向监听单用例执行（ws-run，2026-11 转正；FR-EX 混合闸门执行）
+
+把 P0/S2–S8 在 gitignored 批次目录（`out/cs-architecture/`）验证过的 USB C/S 拓扑转正为
+workers 包正式能力。一期 **CLI-first、单用例形态**（一次调用一条 TC-Ax）；web 桥接、
+多会话循环、test_runs 直写均列二期（见 docs/15 §8.2 与本节末边界）。
+
+### 拓扑与线协议（字面量冻结，Swift TestPilotKit 按字对线）
+
+角色反转：Runner（XCTest 进程内 TestPilotKit）在**设备 loopback** `127.0.0.1:9876` 起
+RFC6455 WS 服务端（NWListener），Mac 侧驱动是 WS 客户端；模拟器与 Mac 共享 loopback 直连，
+真机经 `iproxy`（usbmuxd）把设备端口转发到 Mac loopback。协议标识 `tp-hybrid-ws-p0`，
+环境键 `TP_LISTEN_PORT/TP_SESSION/TP_TOKEN/TP_TCA1_STRUCTURAL`，消息
+hello/hello_ack/step_reached/wait_gate/gate_result/heartbeat/evidence/evidence_ack/
+step_finished/complete/fail；fail-loud = fail 帧 + close 1008 + 驱动 exit 2。
+TestPilotKit Swift 留语料仓本地 SPM，**本期零 Swift 改动、不进 Python 包**。
+
+### 组件与入口（workers console script 18 → 20）
+
+| 模块 / 入口 | 职责 |
+|---|---|
+| `core/xcode_commands.py` `build_xcodebuild_xctestrun_argv` | `xcodebuild test-without-building -xctestrun …` argv 纯函数（零 IO），与 runbook 手工 argv 逐字对齐 |
+| `workers/xctestrun_inject.py`（`testpilot-inject-xctestrun`） | PlistBuddy 同目录副本注入四环境键，FV1/FV2 自适应、Delete-then-Add 幂等、UITargetApp 刻意不注 |
+| `workers/ws_gate_driver.py`（`testpilot-ws-gate-driver`） | 闸门驱动客户端；websockets 延迟导入（非 mac/无依赖宿主不触发）；四 outcome 见下 |
+| `workers/ws_gate_transcript.py` | 正式转录 `ws-gate-transcript-v1`（pydantic 闭集、tmp+os.replace 原子写、证据 localfs URN 回填） |
+| `workers/ws_relay_session.py` | ws-run 全链路编排：注入→条件 iproxy→driver-first 双进程→first-exit 对账→证据 fail-loud→分型落盘 |
+| `adapters/process_executor.py` `spawn_attached` | stdin 继承终端（交互裁决可用），stdout/stderr 仍 PIPE 排空 |
+| `testpilot-hybrid ws-run` | 交互式子命令（不进 worker 队列：worker 无 TTY，`input()` 物理不成立） |
+
+### 运行方式（模拟器 structural，CI/演示唯一可全自动形态）
+
+```bash
+# 前置：语料仓 build-for-testing 产物就位；UDID 必须显式，禁止隐式 booted
+xcrun simctl list devices | grep Booted
+TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml \
+.venv/bin/testpilot-hybrid ws-run \
+  --gates tests/fixtures/ws-gates/ws-gates.structural.json --structural \
+  --xctestrun <DerivedData>/AlarmKitSpike_iphonesimulator27.0-arm64.xctestrun \
+  --udid <Booted-UDID> \
+  --only-testing AlarmKitSpikeUITests/AgentQuickAlarmUITests/test_TCA1_lockRelayFullFlow
+# 成功：stdout 单个 JSON 快照，exit 0
+# 人工形态：去掉 --structural、改 --gates ws-gates.human.json，终端按闸门提示交互裁决
+```
+
+退出码契约（借 scan_generated_swift 先例）：**0 全绿；2 硬错误**（注入失败/iproxy 缺失带
+runbook 指引/重试窗耗尽/驱动 rc2/无产物/证据应到未到）；**3 产品侧响亮失败**（xcodebuild
+有产物的失败，含人工 reject→serverFail）。**reject 是合法人工裁决，永不自动冲绿。**
+
+驱动侧四 outcome 与进程退出码：`complete`(rc0) / `peer_closed`(rc1) /
+`fail_loud`(rc2) / `connect_timeout`(rc2)，每种收口都落驱动转录
+（`ws-gate-driver-transcript-v1`）。其中 peer_closed 覆盖真实 reject 链：Runner 的
+`XCTAssertEqual(verdict,"approve")` 在 reject 时抛错，`finish()/close()` 不执行、XCTest
+拆掉 NWConnection，驱动靠此 outcome 留痕（含 rejected 闸门），编排器分型为产品失败 exit 3；
+无 reject 留痕的提前断链仍判硬错误（Runner 崩溃/环境故障，不能算产品失败）。
+
+### 配置与红线
+
+- profile `ios-local-poc-xcode.yaml` 增 `usb_relay` 块（13 键；老 profile 缺省 `{}` 零影响）：
+  端口/会话/retry_seconds（**最小值 300 硬校验，禁止调小**，driver-first 靠它兜 xcodebuild
+  启动墙钟）/grace_seconds/time_allowance_s（须大于 Swift 三闸硬超时之和）/两份 gates 夹具/
+  iproxy 开关（默认 `enabled: false`）/注入副本后缀。
+- **token 不入库**：运行期 `TESTPILOT_RELAY_TOKEN` 环境变量注入；缺省回退线协议默认
+  `tok-p0` 并 stderr 警告；yaml/转录/快照只允许出现键名与掩码，绝不写明文。
+- 账本走 **B1**：会话目录 `<data_dir>/ws-relay-sessions/wssess-<UTCstamp>-<hash8>/`
+  （证据 PNG + 驱动转录 + 正式 `transcript.json`，证据带 `urn:testpilot:localfs:` URN）；
+  一期**不写 test_runs 表、不碰 FileGateStore**（core 四态无 rejected、gate id 闭集不同构），
+  `test_run_ref` 字段恒 null 给二期回填；schema 保持 v15 零 DDL。
+- `websockets>=14` 在 workers pyproject **显式声明**（S8 裸 python3 ModuleNotFoundError
+  事故的教训），代码内保持延迟导入，hermetic/非 mac 宿主零依赖可测。
+- 收口 best-effort 跑 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 端口对账，结果入转录，
+  工具失败只转录不致命。
+
+### 边界（明确不做，二期清单见 docs/15 §8.2）
+
+单用例 per invocation；iproxy 代码本期落地但**不经真机验证**（device profile 不启用，
+S9 真机人工验收按用户指令暂缓、四取证点在 runbook 待命）；web WS↔gate store 桥接、
+多会话循环、test_runs 终态直写、DerivedData 自动发现均为二期；模拟器结论不外推真机。
+术语见 docs/09（反向监听/WS 闸门驱动/xctestrun 注入/闸门转录/iproxy），分步 runbook 见
+docs/03，契约与「明确不做」见 docs/12，方案与 B1/FileGateStore 边界见 docs/15。

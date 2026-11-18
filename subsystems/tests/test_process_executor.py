@@ -43,6 +43,40 @@ async def test_spawn_terminate_marks_and_signals_sleeping_process():
     assert rc != 0
 
 
+async def test_spawn_attached_inherits_stdin_but_pipes_output():
+    """spawn_attached：stdin 必须是父进程 fd0 的继承（交互输入可达），stdout 仍走管道。
+
+    子进程 fstat(0) 的 (dev,ino) 与父进程一致即证明继承；若误接 PIPE，
+    管道 inode 不同，子进程断言失败 rc=1。100KB 输出验证管道仍被 wait 排空。
+    """
+    import os
+
+    parent_stat = os.fstat(0)
+    code = (
+        "import os, sys; "
+        "s = os.fstat(0); "
+        "assert (s.st_dev, s.st_ino) == (int(sys.argv[1]), int(sys.argv[2])); "
+        "sys.stdout.write('z' * 100000)"
+    )
+    executor = SubprocessExecutor()
+    proc = await executor.spawn_attached(
+        [sys.executable, "-c", code,
+         str(parent_stat.st_dev), str(parent_stat.st_ino)]
+    )
+    rc = await asyncio.wait_for(proc.wait(), timeout=15)
+    assert rc == 0
+
+
+async def test_spawn_attached_terminate_reaps():
+    executor = SubprocessExecutor()
+    proc = await executor.spawn_attached(
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+    proc.terminate()
+    rc = await asyncio.wait_for(proc.wait(), timeout=10)
+    assert rc != 0
+
+
 async def test_spawn_interrupt_sends_sigint_and_reaps():
     """红证背景：simctl io recordVideo 只认 SIGINT 优雅收尾，SIGTERM 会泄漏
     宿主侧录制句柄（Resource busy，2026-11-10 真机探针取证）。interrupt()

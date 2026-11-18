@@ -263,6 +263,166 @@ JSON 解析/UDID 白名单）、`oslog_commands.py` 的 `build_device_log_collec
 真机 run 的 TestRun `provider=ios-device`、`uncovered_layers=[]`（三层设备独占能力物理
 可验），与模拟器 run 的三层未覆盖声明互不为默认值。
 
+### 3.8 USB 反向监听单用例执行正式 runbook（ws-run，2026-11-18 转正，模拟器 structural）
+
+S0–S8 在 `subsystems/out/cs-architecture/`（gitignored 批次态）验证的反向监听 C/S 架构
+（Runner 设备 loopback WS 服务端 + Mac 驱动客户端 + iproxy）已于 2026-11-18 转正为
+workers 包正式产品能力，入口是 console script `testpilot-hybrid ws-run`：**一条命令**
+替代批次 runbook 02 的双终端手工流程，自动完成 xctestrun 注入 → driver-first 双进程
+编排 → first-exit 对账 → 证据 URN 回填 → 转录落盘。线协议字面量（`tp-hybrid-ws-p0`、
+`TP_*` 环境变量、`g-*` 闸门 ID、消息类型）冻结，Swift 侧 TestPilotKit 本期零改动。
+批次代码制品（`40-mac-driver/`、`50-xctestrun-injector/`）保持冻结，runbook 02/03 仅
+做六处 console-script 文字替换；本 runbook 是唯一的正式版操作序列。
+
+**证据边界（硬纪律，沿用 S8）**：模拟器给不出真实响铃/侧边键/感官，structural 的
+g-sensory 是夹具固定值（`AUTO structural fixture` note），**永远不能作为真机证据**；
+真机人工验收走 S9（用户 2026-11-18 指令暂缓，非取消，runbook 03 四取证点待命）。
+模拟器任何结论不外推真机。
+
+#### 0. 前置与参数（全部参数化，不写机器绝对路径）
+
+```bash
+cd subsystems   # 以下命令均以 subsystems/ 为 cwd；解释器一律走 .venv（裸 python3 无 websockets）
+
+# 0.1 当次 Booted UDID 必须实查显式传参，禁止隐式 booted：
+#     profile 里的模拟器 UDID（5411787C-…）不一定处于 Booted，S8 机就是另一个 UDID。
+xcrun simctl list devices | /usr/bin/grep Booted
+export SIM_UDID=<当次 Booted 的 UDID>
+
+# 0.2 build-for-testing 产物在 Xcode 默认 DerivedData（ws-run 一期不做 DerivedData 自动发现）；
+#     排除历次注入副本，源 xctestrun 永不原地改。
+export SRC_RUN=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 4 \
+  -name 'AlarmKitSpike_iphonesimulator*-arm64.xctestrun' \
+  ! -name '*.injected.xctestrun' ! -name 'injected-*' -print | head -n1)
+export OID="AlarmKitSpikeUITests/AgentQuickAlarmUITests/test_TCA1_lockRelayFullFlow"
+
+# 0.3 token 走环境变量，绝不进 yaml/转录/截图；不设则回退线协议默认 tok-p0 并 stderr 警告
+#     （本地模拟器演示可接受，任何共享/真机场景必须显式设置）。
+export TESTPILOT_RELAY_TOKEN=tok-p0
+```
+
+#### 1. 绿路：ws-run 单命令（driver-first 由编排器内部保证，retry-300 是硬下限不可调小）
+
+```bash
+TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml \
+.venv/bin/testpilot-hybrid ws-run \
+  --gates tests/fixtures/ws-gates/ws-gates.structural.json --structural \
+  --xctestrun "$SRC_RUN" \
+  --udid "$SIM_UDID" \
+  --only-testing "$OID"
+# 预期：stderr 先出现驱动 ConnectionRefused 重试行（模拟器 preflight 实测 37–65s），
+# Runner listener 起来后立即 connected；三闸自动 approve，g-sensory 落夹具固定值，
+# 收 PNG 后 complete；stdout 打印单个 JSON 快照（outcome=passed），exit 0。
+```
+
+编排器内部链路（代码事实，排障时对照）：注入副本写源同目录
+`<stem>.injected.xctestrun`（DerivedData 内、gitignored，`__TESTROOT__` 同目录约束）→
+`spawn_attached` 先起驱动（继承终端 TTY，`--retry-seconds 300`）→ 后起
+`xcodebuild test-without-building`（argv 只许来自 core 纯函数
+`build_xcodebuild_xctestrun_argv`，含 `-resultBundlePath` 与 600s time-allowance）→
+first-exit 对账（驱动先非零退立即杀 xcodebuild；任一先正常退走 30s 有界宽限）→
+lsof 端口对账 → 正式转录原子落盘。产物落点（profile `data_dir=store/ios-local-poc-xcode`）：
+
+```
+store/ios-local-poc-xcode/ws-relay-sessions/wssess-<UTCstamp>-<hash8>/
+├── transcript.json          # 正式账本 ws-gate-transcript-v1（含 localfs URN、进程台账、outcome）
+├── driver-transcript.json   # 驱动侧 ws-gate-driver-transcript-v1（四 outcome 原始事实）
+└── evidence/                # 回流证据（PNG 等）
+store/ios-local-poc-xcode/xcresult-ws/<同 sid>.xcresult
+```
+
+绿路五项验收（逐项取证，缺一项不算过）：
+
+1. stdout 快照 `outcome=passed`、进程 exit 0；转录 processes 台账里 xcodebuild rc=0，
+   xcodebuild 日志 `Executed 1 test, with 0 failures`；
+2. `transcript.json` schema 合法（`ws-gate-transcript-v1`），三闸时序齐全
+   g-lock → g-sidebutton → g-sensory；g-sensory values 与夹具逐字一致：
+   `ringtone_heard=true / vibration_felt=true / confidence=high`，
+   note 为 `AUTO structural fixture (simulator, not human sensory evidence)`；
+3. `evidence/` 内 PNG 真实非空（`file` 认 PNG、`stat -f%z` 记字节数，p0 同形态 73KB 量级），
+   正式转录证据带 localfs URN（经 LocalFsArtifactAdapter 回填，非裸路径）；
+4. `lsof -nP -iTCP:9876 -sTCP:LISTEN` 无残留，且转录 `port_cleanup_verified=true`；
+5. 注入副本只在 DerivedData（与源 xctestrun 同目录），仓内 `git status` 零生成物、
+   `store/` 与 `out/` 均不入库。
+
+#### 2. 红证：错令牌必须 fail-loud（独立 console script 制造错配，随后强制复绿）
+
+**为什么不能直接用 ws-run 走红证**：ws-run 的 token 是单源的——`resolve_token()`
+取到的同一个值同时写进注入 plist 的 `TP_TOKEN` 和驱动 `--token`，结构上无法自构错配
+（这是防呆属性，不是缺口）。错配要用两个独立 console script 手工制造，等价复现 S8
+红证；ws-run 自身的 fail-loud 分型（驱动 rc=2 → `protocol_error` → exit 2）由
+`tests/test_ws_relay_session.py` 全假件红证钉住，不依赖真机/模拟器。
+
+```bash
+# 2.1 注入 9877 独占端口副本：Runner plist 内 TP_TOKEN 仍是缺省 tok-p0
+.venv/bin/testpilot-inject-xctestrun \
+  --input "$SRC_RUN" \
+  --output "$(dirname "$SRC_RUN")/injected-wsrun-nodriver.xctestrun" \
+  --port 9877 --env TP_TCA1_STRUCTURAL=1
+```
+
+```bash
+# 终端 1：持错令牌的驱动连 9877（鉴权主体是驱动：它校验入站 hello 的 token）
+.venv/bin/testpilot-ws-gate-driver \
+  --gates tests/fixtures/ws-gates/ws-gates.structural.json \
+  --structural --token WRONG-TOKEN \
+  --url ws://127.0.0.1:9877/ws/hybrid/hsess-p0 \
+  --evidence-dir /tmp/tp-wsrun-red/evidence \
+  --transcript-out /tmp/tp-wsrun-red/driver-transcript.json \
+  --retry-seconds 300 ; echo "driver rc=$?"
+# 预期：WS 能连上，Runner 主动发 hello（token=注入真值 tok-p0），驱动校验不匹配 →
+# 回 fail 帧并 close 1008、rc=2；转录 outcome=fail_loud；hello 阶段早夭，
+# /tmp/tp-wsrun-red/evidence 目录不生成属预期（不是缺陷）。
+```
+
+```bash
+# 终端 2：同一 9877 副本跑 OID（这是预期红，不是产品缺陷）
+xcodebuild test-without-building \
+  -xctestrun "$(dirname "$SRC_RUN")/injected-wsrun-nodriver.xctestrun" \
+  -destination "platform=iOS Simulator,id=$SIM_UDID" \
+  "-only-testing:$OID" \
+  -maximum-test-execution-time-allowance 600
+# 预期：Runner awaitMessage(hello_ack) 收到 fail 帧 → TPChannelError.serverFail
+# （reason 逐字 "auth rejected, hello={…真 token…}"），测试 failed，
+# xcodebuild 打印 ** TEST EXECUTE FAILED **（S8 实测 10.142s）。
+```
+
+红证取证后**必须原样重跑 §1 绿路**确认 exit 0 / outcome=passed，零 TEMP-RED 残留
+（复演 S8 纪律；红证副本与 /tmp 转录随 DerivedData/tmp 自然清理，不入库）。
+
+#### 3. 退出码、失败分型与已知 flake
+
+| 退出码 | 含义 | 转录 outcome |
+| --- | --- | --- |
+| 0 | 全绿 | `passed` |
+| 2 | 硬错误：注入失败/工具链缺失/重试窗耗尽/驱动 fail-loud（rc=2）/证据应到未到/现场矛盾 | `protocol_error` 或 `hard_error` |
+| 3 | 产品侧响亮失败：xcodebuild 非零且有产物，**含人工 reject**；快照照打、转录已落盘 | `product_failure` |
+
+reject 链路：Swift `XCTAssertEqual(verdict, "approve")` 抛错 → XCTest 拆连接 →
+驱动收到 peer closed（rc=1），ws-run 据驱动转录的 rejected 留痕分型 `product_failure`
+exit 3——**reject 在任何链路下都不存在自动冲绿路径**（structural 模式全程自动裁决，
+reject 只可能发生在人工闸门形态）。完整四 outcome 映射与 B1 账本边界见 docs/15 §8.5。
+
+| 现象 | 判定 | 处置 |
+| --- | --- | --- |
+| `App event loop idle notification not received`，随后驱动 `keepalive ping timeout`（rc=1） | 模拟器 XCTest 调度层 flake，S4 四跑对照已证与 TP_ 变量无因果 | **先原样重跑**，不查产品代码；连续两次同签名才升级排查并记录，不得充产品缺陷 |
+| 驱动长时间刷 `ConnectionRefused` | preflight 期 Runner 未起监听；retry-300 内连上即正常（p0 真机实测最长 53s） | 等；超过 300s 才查注入位置 |
+| `nw_listener_socket ... SO_NECP_LISTENUUID failed [2]` | 模拟器良性警告，p0/S2–S4 每次都出现 | 忽略 |
+
+#### 4. 边界与红线（一期定案，二期清单见 docs/12 E6 / docs/15 §8.5）
+
+- 一期是**单用例形态**：一次调用一条 OID、单会话 complete 即收口；一条 action 串行
+  多用例的多会话循环列二期靠前。`--target device` 本期直接硬错误
+  （`usb_relay.iproxy.enabled=false`）：iproxy 代码随转正落地但未经真机验证，随 S9 重启。
+- 账本走 B1（本地转录 JSON + localfs URN），**不写 FileGateStore、不碰 test_runs 表**，
+  转录 `test_run_ref` 恒 null；web 交互页/WS↔gate store 桥接整体留二期。
+- `retry_seconds` 300s 硬下限（profile 调小即启动报错）；token 只走
+  `TESTPILOT_RELAY_TOKEN` 环境变量；`websockets>=14` 是 workers 包显式依赖
+  （S8 裸 python3 ModuleNotFoundError 事故的根治措施）。
+- 配套文档：docs/12 §E6（argv 契约与转正边界）、docs/15 §8.2/§8.5（ws-run 走查与
+  B1 账本）、docs/09（反向监听/闸门驱动/iproxy 五术语）、subsystems/README
+  「USB 反向监听单用例执行」；批次原貌留 runbook 02（S8 双终端叙事，已换 console script）。
+
 ## 4. 对 Demo 各模块的喂料方式
 
 | 模块 | 怎么用这个工程 |

@@ -17,6 +17,7 @@ from testpilot_core.xcode_commands import (
     build_simctl_erase_argv,
     build_simctl_shutdown_argv,
     build_xcodebuild_argv,
+    build_xcodebuild_xctestrun_argv,
     env_lease_id,
     evaluate_capabilities,
     is_env_lease_expired,
@@ -100,6 +101,114 @@ def test_udid_injection_chars_rejected(bad_udid):
     kwargs = dict(_KWARGS, udid=bad_udid)
     with pytest.raises(ValueError):
         build_xcodebuild_argv(only_testing=["AlarmKitSpikeTests"], **kwargs)
+
+
+# ── test-without-building / -xctestrun argv（USB relay 转正）──────────────────
+
+_XCTESTRUN = "/DerivedData/Products/AlarmKitSpike_iphonesimulator27.0-arm64.injected.xctestrun"
+_OID = "AlarmKitSpikeUITests/AgentQuickAlarmUITests/test_TCA1_lockRelayFullFlow"
+_XC_KWARGS = dict(xctestrun_path=_XCTESTRUN, udid=_UDID)
+
+
+def test_xctestrun_argv_matches_runbook02_exact_shape():
+    # 与 runbook 02 手工命令逐字等价（runbook 用 -only-testing:$OID 冒号形式，
+    # xcodebuild 与两参数形式等价；产品内统一两参数形式）
+    argv = build_xcodebuild_xctestrun_argv(
+        only_testing=[_OID], maximum_test_execution_time_allowance=600, **_XC_KWARGS
+    )
+    assert argv == [
+        "xcodebuild", "test-without-building",
+        "-xctestrun", _XCTESTRUN,
+        "-destination", f"platform=iOS Simulator,id={_UDID}",
+        "-only-testing", _OID,
+        "-maximum-test-execution-time-allowance", "600",
+    ]
+
+
+def test_xctestrun_argv_optional_flags_absent_by_default():
+    argv = build_xcodebuild_xctestrun_argv(only_testing=[_OID], **_XC_KWARGS)
+    assert "-resultBundlePath" not in argv
+    assert "-maximum-test-execution-time-allowance" not in argv
+
+
+def test_xctestrun_argv_result_bundle_appended_before_allowance():
+    argv = build_xcodebuild_xctestrun_argv(
+        only_testing=[_OID],
+        result_bundle_path="/tmp/relay.xcresult",
+        maximum_test_execution_time_allowance=900,
+        **_XC_KWARGS,
+    )
+    assert argv[-4:] == [
+        "-resultBundlePath", "/tmp/relay.xcresult",
+        "-maximum-test-execution-time-allowance", "900",
+    ]
+
+
+def test_xctestrun_argv_multiple_only_testing_in_order():
+    argv = build_xcodebuild_xctestrun_argv(
+        only_testing=["AlarmKitSpikeUITests/FooTests/test_a",
+                      "AlarmKitSpikeUITests/BarTests/test_b"],
+        **_XC_KWARGS,
+    )
+    assert argv.count("-only-testing") == 2
+    first = argv.index("-only-testing")
+    assert argv[first + 1].endswith("test_a")
+    assert argv[first + 3].endswith("test_b")
+
+
+def test_xctestrun_argv_device_destination_supported():
+    argv = build_xcodebuild_xctestrun_argv(
+        only_testing=[_OID],
+        destination_platform=DESTINATION_PLATFORM_DEVICE,
+        **{**_XC_KWARGS, "udid": "00008140-001A39590162801C"},
+    )
+    assert argv[4:6] == [
+        "-destination", "platform=iOS,id=00008140-001A39590162801C"]
+
+
+def test_xctestrun_argv_empty_only_testing_rejected():
+    with pytest.raises(ValueError, match="选择执行"):
+        build_xcodebuild_xctestrun_argv(only_testing=[], **_XC_KWARGS)
+
+
+def test_xctestrun_argv_blank_xctestrun_path_rejected():
+    with pytest.raises(ValueError, match="xctestrun_path"):
+        build_xcodebuild_xctestrun_argv(
+            only_testing=[_OID], **{**_XC_KWARGS, "xctestrun_path": "  "})
+
+
+def test_xctestrun_argv_blank_result_bundle_rejected():
+    with pytest.raises(ValueError, match="result_bundle_path"):
+        build_xcodebuild_xctestrun_argv(
+            only_testing=[_OID], result_bundle_path=" ", **_XC_KWARGS)
+
+
+def test_xctestrun_argv_bad_udid_rejected():
+    with pytest.raises(ValueError, match="非法设备 udid"):
+        build_xcodebuild_xctestrun_argv(
+            only_testing=[_OID], **{**_XC_KWARGS, "udid": "UDID WITH SPACE"})
+
+
+def test_xctestrun_argv_unknown_platform_rejected():
+    with pytest.raises(ValueError, match="destination_platform"):
+        build_xcodebuild_xctestrun_argv(
+            only_testing=[_OID], destination_platform="macOS,id=evil", **_XC_KWARGS)
+
+
+def test_xctestrun_argv_bad_identifier_rejected():
+    with pytest.raises(ValueError, match="非法 -only-testing"):
+        build_xcodebuild_xctestrun_argv(
+            only_testing=["Suite/Class/method/extra"], **_XC_KWARGS)
+
+
+@pytest.mark.parametrize("bad_allowance", [0, -1, 1.5, True, False, "600"])
+def test_xctestrun_argv_allowance_must_be_positive_int(bad_allowance):
+    with pytest.raises(ValueError, match="maximum_test_execution_time_allowance"):
+        build_xcodebuild_xctestrun_argv(
+            only_testing=[_OID],
+            maximum_test_execution_time_allowance=bad_allowance,
+            **_XC_KWARGS,
+        )
 
 
 # ── 真机目的地（切片一，2026-11-13）──────────────────────────────────────────

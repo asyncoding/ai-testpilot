@@ -1,0 +1,75 @@
+{
+  "protocol": "tp-hybrid-ws-p0",
+  "case_id": "TC-A1",
+  "mode": "structural",
+  "doc": "外置结构跑闸门声明示例（内容取自 TC-A1 模拟器结构跑，--structural / TP_TCA1_STRUCTURAL=1 使用）。表单规格与 ws-gates.human.json 逐字相同，差异仅在每闸带 auto_values：驱动不交互直接裁决，note 如实标注 AUTO 夹具来源。模拟器给不出真实感官，本文件永远不能作为真机证据。gate_id 由被测 Swift 用例决定，不是平台内建闭集。",
+  "gates": [
+    {
+      "gate_id": "g-lock",
+      "order": 1,
+      "timeout_hint": 120,
+      "prompt": "[structural] 闸门 1：锁屏动作（夹具自动确认）",
+      "verdict_form": {
+        "type": "acknowledge",
+        "fields": [],
+        "require_evidence": false
+      },
+      "auto_values": {}
+    },
+    {
+      "gate_id": "g-sidebutton",
+      "order": 2,
+      "timeout_hint": 240,
+      "prompt": "[structural] 闸门 2：侧边键处置（夹具自动确认）",
+      "verdict_form": {
+        "type": "acknowledge",
+        "fields": [],
+        "require_evidence": false
+      },
+      "auto_values": {}
+    },
+    {
+      "gate_id": "g-sensory",
+      "order": 3,
+      "timeout_hint": 240,
+      "prompt": "[structural] 闸门 3：感官裁决（夹具固定值，非人工感官证据）",
+      "verdict_form": {
+        "type": "verdict",
+        "require_evidence": true,
+        "fields": [
+          {
+            "key": "ringtone_heard",
+            "label": "是否听到铃声",
+            "kind": "boolean",
+            "required": true
+          },
+          {
+            "key": "vibration_felt",
+            "label": "是否感到震动",
+            "kind": "boolean",
+            "required": true
+          },
+          {
+            "key": "confidence",
+            "label": "裁决置信度",
+            "kind": "choice",
+            "options": ["high", "medium", "low"],
+            "required": true
+          },
+          {
+            "key": "note",
+            "label": "备注（可选）",
+            "kind": "text",
+            "required": false
+          }
+        ]
+      },
+      "auto_values": {
+        "ringtone_heard": true,
+        "vibration_felt": true,
+        "confidence": "high",
+        "note": "AUTO structural fixture (simulator, not human sensory evidence)"
+      }
+    }
+  ]
+}

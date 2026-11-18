@@ -9,7 +9,10 @@ runbook 人工驱动（自动步连环推进、人工步挂闸门、/gates 轮�
 - ``resume --session ... --gate gate-... --udid ... --bundle-id ...``：
   人工闸门裁决后续跑（前置闸门/步骤闸门两条路由 hybrid_runner 内部区分）；
 - ``unblock --session ... --udid ... --bundle-id ...``：环境阻塞解除后续跑；
-- ``get --session ...``：只读打印会话快照（计划/检查点/账本）。
+- ``get --session ...``：只读打印会话快照（计划/检查点/账本）；
+- ``ws-run``：USB 反向监听单用例全链路（xctestrun 注入→驱动→xcodebuild
+  test-without-building→闸门转录），退出码 0 全绿 / 2 硬错误 / 3 产品失败
+  （含人工 reject，reject 永不自动冲绿）。
 
 设备目标（udid/bundle_id）显式传参，不写死机器信息；缺参 exit 2。
 硬错误统一 exit 2、成功 exit 0，stdout 为单个 JSON 快照，stderr 只放装配日志。
@@ -35,6 +38,12 @@ from testpilot_workers.hybrid_runner import (
     resume_after_gate,
     start_session,
     unblock,
+)
+from testpilot_workers.ws_relay_session import (
+    WsRelayHardError,
+    WsRelayProductFailure,
+    WsRelayRequest,
+    run_ws_relay,
 )
 
 # 与既有 worker CLI 同口径：业务/装配硬错误收口 exit 2，不抛 traceback
@@ -115,7 +124,46 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_get = sub.add_parser("get", help="只读打印会话快照")
     p_get.add_argument("--session", required=True)
+
+    # ws-run：USB 反向监听单用例全链路（注入→iproxy→驱动→xcodebuild→转录）。
+    # 一期交互式 CLI 形态，不进 worker 队列（无 TTY 的 worker 进程 input() 不成立）。
+    p_ws = sub.add_parser("ws-run", help="USB 反向监听单用例会话（driver-first 全链路）")
+    p_ws.add_argument("--gates", default=None,
+                      help="闸门声明 JSON；缺省按 --structural 取 profile usb_relay.gates_*")
+    p_ws.add_argument("--xctestrun", required=True,
+                      help="build-for-testing 产出的 .xctestrun（一期不做 DerivedData 自动发现）")
+    p_ws.add_argument("--udid", required=True, help="目标模拟器/真机 UDID，禁止隐式 booted")
+    p_ws.add_argument("--only-testing", action="append", default=[],
+                      help="Suite[/Class[/method]]，可重复；本系统只做选择执行")
+    p_ws.add_argument("--structural", action="store_true",
+                      help="结构跑：auto_values 自动裁决，CI/演示唯一可全自动的形态")
+    p_ws.add_argument("--target", choices=("sim", "device"), default="sim")
+    p_ws.add_argument("--transcript-note", default="", help="转录备注（不参与判定）")
     return parser
+
+
+def _resolve_gates_path(container, args: argparse.Namespace) -> Path:
+    if args.gates:
+        return Path(args.gates)
+    key = "gates_structural" if args.structural else "gates_human"
+    configured = container.config.usb_relay.get(key)
+    if not configured:
+        raise ValueError(f"未显式 --gates 且 profile usb_relay.{key} 缺省")
+    return Path(configured)
+
+
+async def run_ws_run(container, args: argparse.Namespace) -> dict[str, Any]:
+    """ws-run 子命令主体；成功/产品失败都返回快照（产品失败由 main 映射 exit 3）。"""
+    req = WsRelayRequest(
+        gates_path=_resolve_gates_path(container, args),
+        xctestrun_path=Path(args.xctestrun),
+        udid=args.udid,
+        only_testing=list(args.only_testing),
+        structural=bool(args.structural),
+        target=args.target,
+        transcript_note=args.transcript_note,
+    )
+    return await run_ws_relay(container, req)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -129,6 +177,17 @@ def main(argv: list[str] | None = None) -> None:
             _print(run_get(container, args.session))
             return
 
+        if args.command == "ws-run":
+            try:
+                snapshot = asyncio.run(run_ws_run(container, args))
+            except WsRelayProductFailure as exc:
+                # 产品侧响亮失败（含 reject）：转录已落盘，快照照打，exit 3 与 0/2 区分。
+                _print(exc.snapshot)
+                print(f"[hybrid-worker] 产品失败: {exc}", file=sys.stderr)
+                sys.exit(3)
+            _print(snapshot)
+            return
+
         ctx = _ctx(args)
         if args.command == "drive":
             snapshot = asyncio.run(run_drive(container, args.session, ctx))
@@ -140,6 +199,10 @@ def main(argv: list[str] | None = None) -> None:
         else:  # pragma: no cover - argparse required 已兜住
             raise ValueError(f"未知子命令: {args.command}")
         _print(snapshot)
+    except WsRelayHardError as exc:
+        # ws-run 硬错误（协议/工具链/证据/重试窗）：exit 2，不产 JSON 快照。
+        print(f"[hybrid-worker] 硬错误: {type(exc).__name__}: {exc}", file=sys.stderr)
+        sys.exit(2)
     except _CLI_ERRORS as exc:
         print(f"[hybrid-worker] 被拒: {type(exc).__name__}: {exc}", file=sys.stderr)
         sys.exit(2)
