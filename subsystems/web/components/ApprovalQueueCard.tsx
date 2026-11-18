@@ -9,6 +9,7 @@ import {
   ORACLE_TYPE_OPTIONS,
   REVIEW_ACTION_LABELS,
   SOURCE_KIND_LABELS,
+  groupSuggestionsByStep,
   shortUrn,
   transferCaseIds,
 } from "@/lib/approvalLabels";
@@ -118,17 +119,32 @@ export default function ApprovalQueueCard({ item, reviewer, onSubmitted }: Props
         </div>
       </div>
 
-      {item.suggestions.map((s) => (
-        <SuggestionRow
-          key={s.urn}
-          suggestion={s}
-          action={actions[s.urn] ?? "adopt"}
-          editedType={types[s.urn] ?? s.oracle.type}
-          editedExpectation={expectations[s.urn] ?? s.oracle.expectation}
-          onAction={(a) => setAction(s.urn, a)}
-          onType={(t) => setTypes((p) => ({ ...p, [s.urn]: t }))}
-          onExpectation={(v) => setExpectations((p) => ({ ...p, [s.urn]: v }))}
-        />
+      <CaseStepsBlock
+        preconditions={item.preconditions ?? []}
+        steps={item.steps ?? []}
+      />
+
+      <CaseContextBlock notes={item.context_notes ?? []} />
+
+      {groupSuggestionsByStep(item.suggestions).map((group) => (
+        <div key={group.stepId ?? "case-level"} className="ap-step-group">
+          <div className="ap-group-head">
+            <span className="tag">{group.label}</span>
+            <span className="ap-group-count">{group.suggestions.length} 条断言</span>
+          </div>
+          {group.suggestions.map((s) => (
+            <SuggestionRow
+              key={s.urn}
+              suggestion={s}
+              action={actions[s.urn] ?? "adopt"}
+              editedType={types[s.urn] ?? s.oracle.type}
+              editedExpectation={expectations[s.urn] ?? s.oracle.expectation}
+              onAction={(a) => setAction(s.urn, a)}
+              onType={(t) => setTypes((p) => ({ ...p, [s.urn]: t }))}
+              onExpectation={(v) => setExpectations((p) => ({ ...p, [s.urn]: v }))}
+            />
+          ))}
+        </div>
       ))}
 
       <div className="ap-footer">
@@ -148,6 +164,61 @@ export default function ApprovalQueueCard({ item, reviewer, onSubmitted }: Props
         </button>
       </div>
       {error && <div className="error-banner">评审失败：{error}</div>}
+    </div>
+  );
+}
+
+function CaseStepsBlock({
+  preconditions,
+  steps,
+}: {
+  preconditions: string[];
+  steps: string[];
+}) {
+  // docs/16 §4.5：审批前先看到「怎么操作」，断言分组的步骤序号才有人脑对齐基准；
+  // 老后端载荷缺这两列时整块不渲染，不回退成占位空框。
+  if (preconditions.length === 0 && steps.length === 0) return null;
+  return (
+    <div className="ap-steps">
+      {preconditions.length > 0 && (
+        <div className="ap-steps-section">
+          <span className="ap-steps-title">前置</span>
+          <ul>
+            {preconditions.map((p, i) => (
+              <li key={`pre-${i}`}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {steps.length > 0 && (
+        <div className="ap-steps-section">
+          <span className="ap-steps-title">操作步骤</span>
+          <ol>
+            {steps.map((s, i) => (
+              <li key={`step-${i}`}>{s}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CaseContextBlock({ notes }: { notes: string[] }) {
+  // docs/16 §4.3 C2：知识/平台约束与断言分桶，只读呈现且明示不可作为断言依据；
+  // 这些条目不会出现在下方草稿列表，也不进导出 oracles[]。
+  if (notes.length === 0) return null;
+  return (
+    <div className="ap-context">
+      <div className="ap-steps-title">
+        背景与平台约束
+        <em>（仅供理解，不可作为断言依据，不进自动化导出）</em>
+      </div>
+      <ul>
+        {notes.map((n, i) => (
+          <li key={`ctx-${i}`}>{n}</li>
+        ))}
+      </ul>
     </div>
   );
 }

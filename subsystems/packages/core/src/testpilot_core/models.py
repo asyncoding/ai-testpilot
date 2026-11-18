@@ -172,6 +172,9 @@ class Oracle(BaseModel):
     expectation: str
     source_refs: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # docs/16 步骤锚点（2026-11-15）：1-based 对齐 TestCase.steps 序号；
+    # None=用例级（全程）断言。零 DDL：随 raw_json 落库，老数据反序列化即 None。
+    step_id: int | None = None
 
 
 class TestCase(BaseModel):
@@ -181,6 +184,10 @@ class TestCase(BaseModel):
     preconditions: list[str] = Field(default_factory=list)
     steps: list[str]
     oracles: list[Oracle] = Field(default_factory=list)
+    # docs/16 §4.3 C2 知识分流（2026-11-16）：不可判定真假的背景/平台约束/机制指针
+    # 与断言分桶；不进 oracle_suggestions、不参与 exploratory、不进 v1 导出 oracles[]。
+    # 零 DDL：随 raw_json 落库，老数据反序列化即 []。
+    context_notes: list[str] = Field(default_factory=list)
     oracle_missing: bool = False  # 只有步骤无预期（docs/08 FR-CON-003）
     exploratory: bool = False  # 挖不到 oracle 的探索性用例，不进自动化链路
     tags: list[str] = Field(default_factory=list)
@@ -314,6 +321,12 @@ class TestExecutionRequest(BaseModel):
     build_id: str | None = None
     triggered_by: str = "agent"
     daily_budget_key: str | None = None  # 重跑配额账本 key
+    # H4（docs/15 §6.2）：混合执行探针产出的 App 启动参数（如 --ak-purge-dates）。
+    # 仅作账本追溯——xcodebuild CLI 没有 launch-argument 旗标（xcodebuild -help 实证），
+    # 参数的真实生效由生成的 Swift 测试经 XCUIApplication.launchArguments 实现
+    # （docs/12 §3.2 生成约定），xcode_runner 拼装 argv 时不消费本字段。
+    # 随 request_json/raw_json 持久化，schema v15 零 DDL。
+    launch_arguments: list[str] = Field(default_factory=list)
 
 
 class ArtifactRef(BaseModel):

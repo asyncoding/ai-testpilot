@@ -74,6 +74,9 @@ class MinedOracle(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     source_kind: SourceKind
     provenance: Provenance = "deterministic"
+    # docs/16 步骤锚点：确定性自有/平移断言透传解析期 step_id；AC/事故源无步骤
+    # 语义恒 None；模型补点仅允许 null 或 1..步骤总数，越界逐行拒入死信。
+    step_id: int | None = None
 
 
 class RejectedOracle(BaseModel):
@@ -188,7 +191,8 @@ def mine_deterministic(
     seen: set[str] = set()
 
     def add(expectation: str, oracle_type: OracleType, refs: list[str],
-            confidence: float, kind: SourceKind) -> None:
+            confidence: float, kind: SourceKind,
+            step_id: int | None = None) -> None:
         normalized = _normalize_text(expectation)
         if not normalized or normalized in seen:
             return
@@ -196,13 +200,15 @@ def mine_deterministic(
         mined.append(MinedOracle(
             type=oracle_type, expectation=expectation, source_refs=refs,
             confidence=confidence, source_kind=kind, provenance="deterministic",
+            step_id=step_id,
         ))
 
-    # 源②-a：用例自身 S2.1 已解析的断言（文档源，置信度不动）
+    # 源②-a：用例自身 S2.1 已解析的断言（文档源，置信度不动，步骤锚点原样透传）
     for oracle in case.oracles:
         refs = oracle.source_refs or [case.urn]
         add(oracle.expectation, oracle.type, refs,
-            oracle.confidence or _DOC_CONFIDENCE, "existing_assertion")
+            oracle.confidence or _DOC_CONFIDENCE, "existing_assertion",
+            step_id=oracle.step_id)
 
     # 源①：需求验收标准（FR tag ↔ AC 链接的确定性join）
     # L3-6：优先只 join AC 句首标题声明的主级 FR；无标题习惯的文档 primary 为空，
@@ -239,7 +245,8 @@ def mine_deterministic(
                 # 区分；旧 ``or [related.urn]`` 兜底在生产路径永不触发。
                 refs = list(dict.fromkeys([*(oracle.source_refs or []), related.urn]))
                 add(oracle.expectation, oracle.type, refs,
-                    _DOC_CONFIDENCE, "existing_assertion")
+                    _DOC_CONFIDENCE, "existing_assertion",
+                    step_id=oracle.step_id)
 
     # 源③：历史缺陷义务句（叙述句不抽，防编造）
     for ev in evidence:
@@ -306,7 +313,10 @@ def build_oracle_messages(
         "2) source_refs 必须逐字抄写白名单中的完整 URN，禁止裸 ID、禁止编造 URN；"
         "3) expectation 是一条可判定真假的断言，中文动宾结构，不写步骤；"
         "4) 不要输出 confidence 字段，置信度由系统统一标定；"
-        "5) 只能依据白名单材料推断，材料不足以支撑可执行断言时输出 manual 类型。"
+        "5) 只能依据白名单材料推断，材料不足以支撑可执行断言时输出 manual 类型；"
+        f"6) step_id 仅当断言与用例某个编号步骤显式对应时填写该步骤序号"
+        f"（1..{len(case.steps)}），否则填 null；T0/按键后/解锁后等事件描述"
+        "不是步骤序号，禁止猜测，越界序号会被整行拒绝。"
     )
     return [{"role": "system", "content": system},
             {"role": "user", "content": user}]
@@ -327,6 +337,9 @@ def oracle_json_schema() -> dict:
                         "expectation": {"type": "string"},
                         "source_refs": {"type": "array",
                                         "items": {"type": "string"}},
+                        # docs/16：可空步骤锚点；运行期再按 case.steps 长度做越界校验
+                        "step_id": {"type": ["integer", "null"],
+                                    "minimum": 1},
                     },
                     "required": ["type", "expectation", "source_refs"],
                 },
@@ -385,6 +398,18 @@ def apply_model_oracles(
         if otype not in allowed_types:
             _reject(rejected, row, "bad_type", f"type 不在四类枚举: {otype}")
             continue
+        # docs/16：模型 step_id 只允许 null 或 1..步骤总数；事件描述不得猜序号
+        raw_step_id = row.get("step_id")
+        step_id: int | None
+        if raw_step_id is None:
+            step_id = None
+        elif isinstance(raw_step_id, bool) or not isinstance(raw_step_id, int) \
+                or not 1 <= raw_step_id <= len(case.steps):
+            _reject(rejected, row, "bad_shape",
+                    f"step_id 越界或非整数（合法值 null 或 1..{len(case.steps)}）")
+            continue
+        else:
+            step_id = raw_step_id
         if any(not isinstance(ref, str) or ref not in whitelist for ref in refs):
             _reject(rejected, row, "unknown_source",
                     "source_refs 存在白名单外 URN（需求/证据/相似用例 URN）")
@@ -401,6 +426,7 @@ def apply_model_oracles(
             confidence=_MODEL_CONFIDENCE,  # 模型不能自标高置信
             source_kind="model_proposed",
             provenance="model",
+            step_id=step_id,
         ))
 
     mined = [*spine_result.mined, *accepted]

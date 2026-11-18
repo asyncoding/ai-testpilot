@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.4 五切片全部落地 + 契约二 UI 测试双 target 化**（2026-11-13：E1–E5 已落地并完成真实 xcodebuild 端到端验证；v1.4 修订契约二/附录 A/B，XCUITest 生成从「人工另行开口」升级为契约内一等分支，并修正外部 Agent 阅读清单为语料仓 CLAUDE.md + V1 三文档；全量 1248 测试、verify_s0 24/24）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md` 与 `.agent-handoff/2026-11-13-ui-test-contract-and-prompt-fix.md`
+> 状态：**v1.5 = v1.4 全部落地 + 附录 C 外部生成偏差回流与用例变更流程**（2026-11-13：E1–E5 已落地并完成真实 xcodebuild 端到端验证；v1.4 修订契约二/附录 A/B，XCUITest 生成从「人工另行开口」升级为契约内一等分支，并修正外部 Agent 阅读清单为语料仓 CLAUDE.md + V1 三文档；全量 1248 测试、verify_s0 24/24。2026-11-17：v1.5 新增附录 C，源自 TC-A1 首批外部生成的三条实测偏差，首批实例见 `subsystems/out/external-generation/tca1/04-corpus-hook-proposal/` 与 `05-amendments/`）｜落地任务见 `.agent-handoff/2026-11-13-case-export-xcode-loop.md`、`.agent-handoff/2026-11-13-ui-test-contract-and-prompt-fix.md` 与 `.agent-handoff/2026-11-16-h4-childrun-wiring-and-tca1-generation.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -141,7 +141,7 @@
    - 等待一律 `waitForExistence(timeout:)` 轮询，禁止死等；断言旧页面消失而非仅断言新标题存在（防同名假绿）；关键步截图作为 xcresult attachment；
    - V1 测试用例文档中标 📱（硬件键/全屏闹钟画面/音频/震动/锁屏视觉）的用例模拟器不可验，**不得生成模拟器 UI 测试**，进 skipped 并注明「仅真机可验」；🤖 标记才可生成；
 5. **编译门禁**：两类产物都必须在 `AlarmKitSpike/` 子目录先 `xcodegen generate`（两个 target 的 sources 都是 folder group，新文件必须重新生成工程才进编译）再 `xcodebuild build-for-testing` 通过，人审确认断言与 oracle 期望一致才可合入；
-6. **禁止事项**：不改 `Sources/` 生产代码、不修改/删除 `Tests/` 与 `UITests/` 存量测试、不引入第三方依赖与新 Pod；
+6. **禁止事项**：不改 `Sources/` 生产代码、不修改/删除 `Tests/` 与 `UITests/` 存量测试、不引入第三方依赖与新 Pod（外部 Agent 的生成活动受此约束；若实测确认是产品侧测试钩子/能力缺口，按**附录 C** 立 `fixture_change` 类 AR，补丁由 TestPilot 侧起草、人工评审后在语料仓独立分支应用，不属于外部 Agent 的生成 diff）；
 7. 每个方法的断言必须能回溯到导出 JSON 中该 TC 的 `oracles[].expectation`（`mined_oracle_suggestions` 仅 `status=approved` 可作补充断言来源），生成记录（对话/补丁）作为附件存 testpilot 写根 `external-generation/<export hash8>/`。
 
 ### 3.3 契约三：自动化映射文件（`automation-map-v1`，E3 产出）
@@ -547,3 +547,154 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml \
   与语料仓 HEAD 不一致时 E4 拒绝提交执行并提示重扫，杜绝对着过期映射跑测试；
 - 演示分支永不合入 `alarmkit-spike`/`master`；如误合，按语料仓正常 revert 流程处理，
   testpilot 不提供也不需要任何写语料仓的能力。
+
+---
+
+## 附录 C：外部生成偏差回流与用例变更流程（AR 流程，v1.5 新增）
+
+> 来源：2026-11-17 TC-A1 首批外部生成（`generation-report.md` DEVICE-VERIFY 章）登记
+> 三条实测偏差。本附录把「偏差如何收口、什么情况下才允许改用例」固化为流程，后续每一轮
+> 外部生成均按此处理。首批实例与模板：`subsystems/out/external-generation/tca1/`
+> 下 `04-corpus-hook-proposal/`（语料仓产品侧补丁提案）与 `05-amendments/`（AR 文件）。
+
+### C.1 总原则（不可绕过）
+
+1. **用例评审库是唯一事实源，Swift 测试是下游生成物。** 收口方向只能是「偏差 → 用例库
+   变更 → 重新导出 → 重新生成」，禁止只改 Swift 断言而库内规格不动（否则 automation-map
+   锚定的规格与分支上的实际断言漂移，整条导出闭环失去可信度）。
+2. **外部 Agent 只有登记权，没有规格修改权。** 实测与锁定规格不符时，逐字保持规格、
+   在 `generation-report.md` 登记证据并提请人工确认（与附录 A 任务书 §6.2 同口径）；
+   修订必须等 AR 裁决后由新一轮生成承接。
+3. **语料仓只读纪律不变。** TestPilot Agent 不向语料仓写任何文件；跨边界产物（语料仓
+   补丁草稿、用例文档修订块、新版 prompt）一律落本仓 gitignored 目录，由**人工携入**。
+4. **无证据不受理。** 每条 AR 必须附实测证据（xcresult/截图附件/os_log 摘录/源码行号
+   至少一项），推测性偏差退回补充取证。
+
+### C.2 偏差三分类（先分类，再定路径）
+
+| 分类 | 判定标准 | 改用例吗 | 审批权重 | 典型收口 |
+| --- | --- | --- | --- | --- |
+| **product_defect（产品缺陷）** | 规格成立、产品实现与规格不符，且产品侧已有/应有修复 | **不改**，规格一字不动 | 低：确认修复合入即可 | 语料仓合入修复 commit，重跑同一规格验证转绿 |
+| **fixture_change（夹具/刺激方式变更）** | 断言成立，但既有测试钩子/夹具驱动不出规格要求的状态（能力缺口） | 只改 **steps 的刺激方式**，oracle 不动 | 中：审 steps 改动与新钩子设计 | 语料仓先补测试钩子（走产品正规链路），再修订步骤文本与 Swift 启动参数 |
+| **spec_amendment（规格修订）** | 规格自身与平台事实不符（SwiftUI 呈现模型、系统权限归属等），原断言在当前平台恒红或恒真 | 改 steps 和/或 oracle | **高**：强制红证方案，禁止弱化成恒真断言（与 docs/15 §9 防假绿同源） | 修订断言锚点/补条件步骤，mutate-red 证明新断言仍抓得住缺陷 |
+
+分类有争议时从高不从低（按更严一档走审批与红证）。
+
+### C.3 六阶段流程
+
+1. **登记（AR）**：每条偏差复制 `05-amendments/_AR-TEMPLATE.md` 建一份
+   `AR-NNN-<简短名>.md`，填证据、分类、拟议变更、影响面、红证方案；在任务 handoff 与
+   本附录实例索引登记。登记不阻断其他用例的生成与执行。
+2. **人工裁决**：按 C.2 权重审批。spec_amendment 必须当场确认红证方案可执行；裁决结论
+   以**日期追加**写在 AR 内，原始偏差登记与证据不删不改。
+3. **产品基线先冻结**：语料仓侧动作（合入缺陷修复、应用钩子补丁）全部由人工在演示分支
+   完成并过 `xcodegen generate` + `build-for-testing` 门禁；产品基线未定型前不得动
+   TestPilot 侧规格。
+4. **库内修订（身份稳定、版本自动递增）**：
+   - 用例 `external_id` **保持不变**（TC-A1 修订后仍是 TC-A1），不新建「TC-A1-r2」，
+     保证 OID、automation-map、hybrid 计划接线不断；
+   - 修订动作落在语料仓用例文档（演示分支），TestPilot 侧重跑 ingest 即可：
+     `TestCase.version` 由文档内容 hash 自动赋值（`case_docs.py` 解析期
+     `version=sha256(文档文本)[:12]`），文档一改版本自动换新，零 DDL；
+   - 修订前导出的 `case-set-<UTC>-<hash8>.json` 是不可变快照，原样留存，AR 记录
+     新旧 version 与两个快照文件名。
+5. **下游再生成（内容寻址自动换代）**：重新导出 case-set → 出新版 prompt 包（v2/v3…）
+   → 外部 Agent 按修订规格改 Swift，重跑构建门禁与 GS 扫描 → 重建 hybrid-plan。
+   plan 是内容寻址制品，规格文本一变 hash 自动变；旧 plan 文件与 `hsess-*` 会话账本
+   原样保留为历史证据（加日期注记，不删除不覆盖）。
+6. **红证 + 真机验收**：每条获准 AR 做 mutate-red/revert-green（临时回退产品修复/钩子、
+   恢复旧断言，分别证明对应测试变红后复原），零 TEMP-RED 残留，再进 hybrid E2E runbook
+   的真机走查。红证记录贴回 AR。
+
+### C.4 具体操作步骤（命令级，按角色分工）
+
+> 路径均为相对路径；`<语料仓根>` 指 app-calendar-alarm 工作区，`<hash8>` 取当轮
+> case-set 文件名中的 8 位 hash。TestPilot 侧命令在 `subsystems/` 目录执行。
+
+**阶段 1–2：登记与裁决（TestPilot Agent 起草，人工裁决）**
+
+```bash
+# 在本仓（gitignored 工作态，不入库）
+cp subsystems/out/external-generation/<批次>/05-amendments/_AR-TEMPLATE.md \
+   subsystems/out/external-generation/<批次>/05-amendments/AR-001-<简短名>.md
+# 填证据/分类/拟议变更/红证方案；人工在 AR 末尾追加 dated 裁决（批准/驳回/改分类）
+```
+
+**阶段 3：产品基线冻结（纯人工，语料仓演示分支）**
+
+```bash
+cd <语料仓根>
+git checkout demo/agent-generated-tests && git pull --ff-only
+git checkout -b fix/<AR 编号>-<简短名>
+# 3a. product_defect：合入已评审的修复（如 TC-A1 偏差 2 的 853cef0）
+git merge <修复分支或 commit>
+# 3b. fixture_change：按 04-corpus-hook-proposal/ 的补丁草稿人工应用到 Sources/
+#     （草稿含锚点说明与 .patch；行号漂移时按 README 的完整代码块手工落）
+cd AlarmKitSpike
+xcodegen generate && pod install
+xcodebuild build-for-testing -workspace AlarmKitSpike.xcworkspace -scheme AlarmKitSpike \
+  -destination 'platform=iOS Simulator,id=<本机模拟器 udid>'
+cd ..
+git add AlarmKitSpike/Sources AlarmKitSpike/AlarmKitSpike.xcodeproj
+git commit -m "fix(hook): <AR 编号> <一句话变更>"
+```
+
+**阶段 4：用例文档修订 + 库内重灌（人工携入，TestPilot 侧人工跑命令）**
+
+```bash
+# 4a. 人工把 05-amendments/case-doc-amendment-<TC>.md 的修订块应用到
+#     <语料仓根>/docs/V1测试用例文档.md（仅演示分支；主线文档不动），提交
+# 4b. 回 TestPilot 重灌（profile 必须是持有评审库的 ios-local-poc-xcode；
+#     四命令序列，缺步会让旧 oracle 建议 URN 原样复活）：
+cd subsystems
+export TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml
+uv run testpilot-ingest-cases            # 增量：文档 hash 变化自动换 version
+uv run testpilot-extract-requirements    # 需求 AC 未改也照跑，防幽灵 URN 复活
+uv run testpilot-mine-oracles
+uv run testpilot-lint-cases              # 退出码 0/1/2 语义见 docs/13；error 必须为 0
+# 4c. 取证：记录修订前后 TestCase.version（文档 hash 12 位）写回 AR
+```
+
+**阶段 5：再导出与再生成（TestPilot Agent 备料，外部 Agent 执行）**
+
+```bash
+# 5a. 新快照（新 UTC 时间戳文件名，旧快照不删）
+uv run testpilot-export-cases --out out/external-generation/<批次>/01-case-export
+# 5b. 按 AR 裁决更新 02-prompt-package 任务书（版本号递增，变更点置顶列 diff），
+#     连同新 case-set 人工交外部 Agent；Swift 只许改 AR 批准的行（类名/方法名/OID 冻结）
+# 5c. 外部 Agent 在语料仓重跑：xcodegen → build-for-testing → GS 扫描
+uv run testpilot-scan-generated-swift --repo <语料仓根>   # 必须 exit 0
+# 5d. 重建 hybrid-plan（输出新内容寻址文件 + 覆盖稳定名副本，旧文件留存）
+uv run python out/hybrid-tca1/build_tca1_plan.py
+```
+
+**阶段 6：红证与真机（人工执行为主，TestPilot Agent 只读复验）**
+
+```bash
+# 6a. 红证（在语料仓临时回退，验完立即复原，工作区零 TEMP-RED 残留）：
+#     - product_defect：git revert 修复 commit → 对应测试必红 → 复原
+#     - fixture_change：注释新钩子调用走旧钩子 → 首页行断言必红 → 复原
+#     - spec_amendment：临时恢复旧断言 → 在新基线上验证旧断言仍红（证明改的是事实不是放水）
+# 6b. 按 out/hybrid-tca1/runbook/tca1_e2e_runbook.md 跑六步真机走查（三进程同 device profile）
+# 6c. AR 回填红证输出 + 真机 xcresult/os_log/录屏证据位置，标 closed
+```
+
+### C.5 版本链与证据保全对照
+
+| 制品 | 版本机制 | 修订后的处置 |
+| --- | --- | --- |
+| 语料仓用例文档 | git 轨迹（演示分支） | 修订块带日期小节；主线文档不动 |
+| `TestCase.version` | 文档 sha256 前 12 位，ingest 自动赋值 | 重灌即换，AR 记录新旧值 |
+| case-set 导出 | 文件名带 UTC 时间戳 + hash8 | 每轮新文件，旧文件不可变留存 |
+| prompt 任务书 | 包内版本号（v1/v2…） | 新版置顶列与上版 diff |
+| hybrid-plan | 内容寻址 hash 文件名 | 新 hash 新文件；旧 plan、`hsess-*` 账本保留加日期注记 |
+| generation-report / AR | dated 追加 | 原始偏差登记永不删改，裁决与红证向下追加 |
+
+### C.6 首批实例索引（TC-A1，2026-11-17）
+
+| AR | 分类 | 偏差摘要 | 裁决建议 | 状态 |
+| --- | --- | --- | --- | --- |
+| AR-001 | fixture_change | `--ak-schedule` 只走 `schedulePrimary` 不写 `RoutineAlarmStore`，首页无快速闹钟行 | 批准新增 `--ak-schedule-quick` 钩子（`04-corpus-hook-proposal/`），oracle 不动、steps 换夹具 | 已批准并落地（2026-11-17，语料仓 `81bc80f`，段 A 模拟器转绿 13.25s） |
+| AR-002 | product_defect | 接力页标题关键词启发式误判家族，按钮文案不符 | 规格不动；人工合入 853cef0（RelayKindPolicy） | 已批准并落地（cherry-pick 为 `610a102`，hostless 97/97 绿） |
+| AR-003 | spec_amendment | cover 下首页标题不离 AX 树，负向断言恒红；Debug 广告层需条件「跳过」步骤 | 断言改锚接力页专属元素 + 补条件步骤；报告「钩子仅 DEBUG 编译」说法经源码证伪，已在 AR 内更正 | 已批准（2026-11-17；注：语料仓随后合入 `8ebd07c`，钩子区当前整体 DEBUG 编译，AR-003 内有日期注记保留两态事实） |
+| AR-004 | fixture_change | 每个 xcodebuild test action 重装 AUT，跨 action 一次性钟被 mobiletimerd 物理撤销，双段（s1/s6）架构结构性必红 | 2026-11-17 裁决：A/B 临时方案不采纳，定案通用 C/S 架构（TestPilot server + XCTest client 单方法全步骤 + WS/轮询中断协议），调研设计稿见 `subsystems/out/cs-architecture/`，按 P0–P3 分期落地 | 设计已裁，实现待启动 |

@@ -63,6 +63,10 @@ def test_container_wires_every_adapter(tmp_path, monkeypatch):
         # S3.5：归因服务默认装配（Null 证据 → needs_human 兜底，不硬归因）
         from testpilot_workers.attribution_service import AttributionService
         assert isinstance(container.get("attribution"), AttributionService)
+        # H4：混合 xcodebuild 子 run 端口 profile 无关始终装配，接 execution_service
+        from testpilot_workers.hybrid_child_run import ExecutionServiceChildRun
+        assert isinstance(
+            container.get("hybrid_child_run"), ExecutionServiceChildRun)
         # 文档/检索默认分支来自 project.default_branch（branch 一致性修复）
         assert container.get("docs").branch == "alarmkit-spike"
         assert container.get("search").default_branch == "alarmkit-spike"
@@ -573,6 +577,10 @@ def test_device_profile_wires_real_device_stack(tmp_path):
         assert logs.use_sudo is False
         assert logs.work_dir == tmp_path / "archive-work"
         assert logs.work_dir.is_dir()
+        # H4：真机 profile 的混合子 run 端口同样落位（锁屏 E2E 六步计划走它派段）
+        from testpilot_workers.hybrid_child_run import ExecutionServiceChildRun
+        assert isinstance(
+            container.get("hybrid_child_run"), ExecutionServiceChildRun)
     finally:
         container.get("store").close()
 

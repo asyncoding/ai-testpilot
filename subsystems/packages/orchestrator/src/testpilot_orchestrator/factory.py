@@ -104,11 +104,19 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
         SubprocessExecutor(), data_dir / "devicectl-work")
 
     # H3（docs/15 §6）：混合会话文件态存储，零 DDL；游标+计划+账本同文件原子写。
-    # xcodebuild 子 run 端口（hybrid_child_run）H4 接 execution_service，
-    # 未装配时编排器对 xcodebuild 段 fail-loud，拒绝裸跑。
     from testpilot_adapters.hybrid_session_store import FileHybridSessionStore
 
     container.adapters["hybrid_session_store"] = FileHybridSessionStore(data_dir)
+
+    # H4（docs/15 §6.2）：xcodebuild 混合段子 run 接 execution_service——同一队列、
+    # 同一 run 账本与五态状态机，不造第二套执行通道。端口提交后轮询账本到终态：
+    # failed 抛 ChildRunFailedError 走步骤 failure_policy，error/timeout/等待超时
+    # 抛 AdapterUnavailableError 子类转 blocked。runner=stub 时入队仍成功，由 worker
+    # 侧既有契约 fail-loud，装配期不为 profile 分叉。懒导入保持 workers→orchestrator
+    # 单向包依赖（与 attribution 同模式）。
+    from testpilot_workers.hybrid_child_run import ExecutionServiceChildRun
+
+    container.adapters["hybrid_child_run"] = ExecutionServiceChildRun(container)
 
     # ── 被测仓库引用（路径配置化，禁止写死机器绝对路径）──
     repo_path = Path(config.project.repo_path).expanduser()
