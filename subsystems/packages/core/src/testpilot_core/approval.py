@@ -86,7 +86,48 @@ class ReviewQueueItem(BaseModel):
     module: str
     exploratory: bool
     oracle_missing: bool
+    # docs/16 §4.5：审批页要展示操作步骤/前置；数据本就在 raw_json，载荷携出零 SQL 改动
+    steps: list[str] = Field(default_factory=list)
+    preconditions: list[str] = Field(default_factory=list)
+    # docs/16 §4.3 C2：背景/平台约束只读展示，不进草稿与断言列表（老载荷缺列默认空）
+    context_notes: list[str] = Field(default_factory=list)
     suggestions: list[SuggestionView] = Field(default_factory=list)
+
+
+def _document_oracle_index(case: TestCase, expectation: str) -> int | None:
+    """草稿期望在正式用例预期段中的子弹序（解析器按文档顺序保序）。
+
+    自有确定性断言与 ``case.oracles`` 文本逐字同源，可回填文档坐标；
+    AC/事故/模型建议在用例文档中没有对应子弹，返回 ``None`` 由调用方沉底。
+    """
+    for index, oracle in enumerate(case.oracles):
+        if oracle.expectation == expectation:
+            return index
+    return None
+
+
+def _suggestion_sort_key(case: TestCase, suggestion: SuggestionView) -> tuple:
+    """审批卡片断言排序键：与卡片顶部「操作步骤」同坐标，替代无业务语义的 URN 序。
+
+    排序轴（2026-11-16，用户要求审批页按操作步骤顺序展示）：
+    1. 锚定项（step_id 非空）在前，按步骤序号升序——与操作步骤编号一一对应；
+       用例级（step_id=None，前端「用例级（全程）」组）在扁平载荷中置后，
+       前端分组仍把该组置顶，组内继承这里的次序；
+    2. 同步骤/用例级内：能回填文档子弹序的排前（文档子弹本身随步骤叙事排列，
+       治愈老文档全 null 锚点时的乱序），无文档坐标的 AC/事故/模型建议沉底；
+    3. URN 终裁：任意输入顺序下输出确定，不依赖 store 的 ORDER BY。
+    """
+    step_id = suggestion.oracle.step_id
+    doc_index = _document_oracle_index(case, suggestion.oracle.expectation)
+    anchored = 0 if step_id is not None else 1
+    has_doc = 0 if doc_index is not None else 1
+    return (
+        anchored,
+        step_id or 0,
+        has_doc,
+        doc_index if doc_index is not None else 0,
+        suggestion.urn,
+    )
 
 
 def build_review_queue(
@@ -116,7 +157,11 @@ def build_review_queue(
                 module=case.module,
                 exploratory=any(s.exploratory for s in pending),
                 oracle_missing=case.oracle_missing,
-                suggestions=sorted(pending, key=lambda s: s.urn),
+                steps=list(case.steps),
+                preconditions=list(case.preconditions),
+                context_notes=list(case.context_notes),
+                suggestions=sorted(
+                    pending, key=lambda s: _suggestion_sort_key(case, s)),
             )
         )
     return sorted(items, key=lambda item: item.external_id)
@@ -226,8 +271,11 @@ def render_case_markdown(
     date_part = decided_at.date().isoformat()
     lines.append(f"**预期**（人审回写 reviewer={reviewed_by} date={date_part}）：")
     for oracle in oracles:
-        tag = f"【{EXPLICIT_TYPE_LABELS[oracle.type]}】"
-        lines.append(f"- {tag}{oracle.expectation}")
+        # docs/16 §4.6：仅锚定断言输出「｜步骤N」段；None 保持旧字节风格，round-trip 无损
+        label = EXPLICIT_TYPE_LABELS[oracle.type]
+        if oracle.step_id is not None:
+            label += f"｜步骤{oracle.step_id}"
+        lines.append(f"- 【{label}】{oracle.expectation}")
     lines.append("")
     return "\n".join(lines)
 
@@ -332,6 +380,8 @@ def plan_case_decision(
             expectation=revised_expectation,
             source_refs=list(mined.source_refs),  # 来源 URN 人审不可改，追溯链不断
             confidence=confirmed_confidence(mined.confidence),
+            # docs/16：人审可改类型/文本，锚点不在可改字段内，随草稿原样透传
+            step_id=mined.step_id,
         ))
         updates.append(SuggestionUpdate(
             urn=item.suggestion_urn, status=SUGGESTION_APPROVED,
@@ -343,6 +393,7 @@ def plan_case_decision(
                 type=revised_type, expectation=revised_expectation,
                 source_refs=list(mined.source_refs),
                 confidence=confirmed_confidence(mined.confidence),
+                step_id=mined.step_id,
             )
             sample_digest = hashlib.sha1(
                 f"{item.suggestion_urn}|{revised_expectation}".encode("utf-8")

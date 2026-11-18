@@ -3,6 +3,7 @@ import type {
   OracleTypeStr,
   ReviewAction,
   SuggestionSourceKind,
+  SuggestionView,
 } from "./types";
 
 // 与 testpilot_core.testcase.EXPLICIT_TYPE_LABELS 对齐（回写 Markdown 同款显式标签）
@@ -64,4 +65,49 @@ export function transferCaseIds(sourceRefs: string[]): string[] {
     if (id && !out.includes(id)) out.push(id);
   }
   return out;
+}
+
+// docs/16 §4.5：审批卡片按步骤锚点分组的纯函数（前端无单测，人工走查 + 门禁构建）。
+export interface StepGroup {
+  // null 恒为第一组「用例级（全程）」；其余按 step_id 数值升序，乱序输入确定收敛
+  stepId: number | null;
+  label: string;
+  suggestions: SuggestionView[];
+}
+
+/**
+ * 把草稿按 oracle.step_id 确定性分组：null 归「用例级（全程）」置顶，
+ * 步骤组按序号升序（与卡片顶部「操作步骤」编号同坐标）；组内保持输入顺序——
+ * core build_review_queue 已按「步骤锚点 → 文档子弹序 → URN 终裁」排好，
+ * 前端不再二次排序，老文档全 null 锚点时组内即文档预期段顺序。
+ * 老后端缺 step_id 字段时 ?? null 兜底，等同升级前的扁平列表。
+ */
+export function groupSuggestionsByStep(suggestions: SuggestionView[]): StepGroup[] {
+  const caseLevel: SuggestionView[] = [];
+  const byStep = new Map<number, SuggestionView[]>();
+  for (const suggestion of suggestions) {
+    const stepId = suggestion.oracle.step_id ?? null;
+    if (stepId === null) {
+      caseLevel.push(suggestion);
+      continue;
+    }
+    const bucket = byStep.get(stepId);
+    if (bucket) {
+      bucket.push(suggestion);
+    } else {
+      byStep.set(stepId, [suggestion]);
+    }
+  }
+  const groups: StepGroup[] = [];
+  if (caseLevel.length > 0) {
+    groups.push({ stepId: null, label: "用例级（全程）", suggestions: caseLevel });
+  }
+  for (const stepId of [...byStep.keys()].sort((a, b) => a - b)) {
+    groups.push({
+      stepId,
+      label: `步骤 ${stepId}`,
+      suggestions: byStep.get(stepId) ?? [],
+    });
+  }
+  return groups;
 }

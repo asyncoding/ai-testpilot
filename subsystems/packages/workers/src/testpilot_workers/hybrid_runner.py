@@ -74,6 +74,14 @@ class ChildRunPort(Protocol):
         ...
 
 
+class ChildRunFailedError(RuntimeError):
+    """子 run 走到产品失败终态（failed）：按步骤 failure_policy 收口，不是基础设施问题。"""
+
+
+class ChildRunUnavailableError(AdapterUnavailableError):
+    """子 run 因基础设施未就位收口（error/timeout/canceled/等待超时）：会话转 blocked。"""
+
+
 # ── 装配取件与小工具 ──────────────────────────────────────────────────────────
 
 
@@ -291,12 +299,13 @@ async def _drive_once(
     try:
         detail = await _dispatch_auto(container, step, ctx, resolution)
     except AdapterUnavailableError as exc:
-        # 基础设施缺席（设备掉线/工具链不可用）= blocked，绝不记产品失败
+        # 基础设施缺席（设备掉线/工具链不可用/子 run error|timeout|等待超时）
+        # = blocked，绝不记产品失败；ChildRunUnavailableError 是其子类，同路收口
         _append_ledger(record, {
             "type": "step_blocked", "step_id": step.step_id,
             "reason": f"适配器不可用：{exc}"}, moment)
         return _advance(container, record, step, StepStatus.BLOCKED, moment)
-    except (DhAxActionError, DevicectlControlError) as exc:
+    except (DhAxActionError, DevicectlControlError, ChildRunFailedError) as exc:
         return _fail_or_block(container, record, step, exc, moment)
 
     _append_ledger(record, {

@@ -58,11 +58,12 @@ def _case(**overrides) -> TestCase:
 def _mined(oid: str, *, otype=OracleType.STATE_ASSERTION,
            expectation="落库一条 stopped 记录", confidence=0.5,
            source_kind="model_proposed", provenance="model",
-           refs=None) -> MinedOracle:
+           refs=None, step_id=None) -> MinedOracle:
     return MinedOracle(
         type=otype, expectation=expectation, confidence=confidence,
         source_kind=source_kind, provenance=provenance,  # type: ignore[arg-type]
         source_refs=refs if refs is not None else [_FR1_URN],
+        step_id=step_id,
     )
 
 
@@ -158,6 +159,88 @@ def test_queue_exploratory_flag_and_sort():
 def test_queue_unknown_case_is_loud_failure():
     with pytest.raises(ApprovalValidationError, match="不存在的用例"):
         build_review_queue([_view("a", case_urn="urn:ghost")], [_case()])
+
+
+# ── 审批卡片按操作步骤排序（2026-11-16，替代无业务语义的 URN 序） ──────────────
+
+def _doc_case_with_oracles() -> TestCase:
+    """三条文档断言（预期段子弹序即步骤叙事序），模拟老文档全 null 锚点形态。"""
+    return _case(
+        oracle_missing=False,
+        steps=["第一步", "第二步", "第三步"],
+        oracles=[
+            Oracle(type=OracleType.UI_ASSERTION, expectation="文档断言 O1"),
+            Oracle(type=OracleType.LOG_ASSERTION, expectation="文档断言 O2"),
+            Oracle(type=OracleType.STATE_ASSERTION, expectation="文档断言 O3"),
+        ],
+    )
+
+
+def test_queue_null_anchor_suggestions_follow_document_order_not_urn():
+    # 活库现状：老建议全 null 锚点，URN 序与文档序相反时必须以文档子弹序为准
+    case = _doc_case_with_oracles()
+    views = [
+        _view("urn-a", _mined("urn-a", expectation="文档断言 O3",
+                              source_kind="existing_assertion",
+                              provenance="deterministic")),
+        _view("urn-m", _mined("urn-m", expectation="文档断言 O1",
+                              source_kind="existing_assertion",
+                              provenance="deterministic")),
+        _view("urn-z", _mined("urn-z", expectation="文档断言 O2",
+                              source_kind="existing_assertion",
+                              provenance="deterministic")),
+    ]
+    item = build_review_queue(views, [case])[0]
+    assert [s.oracle.expectation for s in item.suggestions] == [
+        "文档断言 O1", "文档断言 O2", "文档断言 O3",
+    ]
+
+
+def test_queue_anchored_suggestions_sort_by_step_and_null_sinks_in_payload():
+    # 前端再把 null 组重新置顶；扁平载荷的契约是步骤 1..N 在前、用例级沉底
+    case = _case(steps=["第一步", "第二步", "第三步"])
+    views = [
+        _view("s3", _mined("s3", expectation="步骤三断言", step_id=3)),
+        _view("n0", _mined("n0", expectation="用例级断言", step_id=None,
+                           source_kind="requirement_ac",
+                           provenance="deterministic")),
+        _view("s1", _mined("s1", expectation="步骤一断言", step_id=1)),
+        _view("s2", _mined("s2", expectation="步骤二断言", step_id=2)),
+    ]
+    item = build_review_queue(views, [case])[0]
+    assert [(s.oracle.step_id, s.oracle.expectation)
+            for s in item.suggestions] == [
+        (1, "步骤一断言"), (2, "步骤二断言"), (3, "步骤三断言"),
+        (None, "用例级断言"),
+    ]
+
+
+def test_queue_within_step_document_matches_first_then_urn_tiebreak():
+    case = _doc_case_with_oracles()
+    # 同步骤 2：URN 更小的 AC 建议无文档坐标，必须沉到文档匹配项之后
+    ac_step2 = _view("a-ac", _mined(
+        "a-ac", expectation="AC 文本无文档子弹", step_id=2,
+        source_kind="requirement_ac", provenance="deterministic"))
+    doc_step2 = _view("z-doc", _mined(
+        "z-doc", expectation="文档断言 O1", step_id=2,
+        source_kind="existing_assertion", provenance="deterministic"))
+    # 用例级两条无文档坐标：输入逆序，URN 终裁保证确定收敛
+    null_b = _view("null-b", _mined(
+        "null-b", expectation="模型建议 B", source_kind="model_proposed"))
+    null_a = _view("null-a", _mined(
+        "null-a", expectation="模型建议 A", source_kind="model_proposed"))
+    item = build_review_queue(
+        [ac_step2, null_b, doc_step2, null_a], [case])[0]
+    assert [s.urn.rsplit("#", 1)[1] for s in item.suggestions] == [
+        "z-doc", "a-ac", "null-a", "null-b",
+    ]
+
+    # 输入排列打乱，输出不变（排序不依赖 store ORDER BY 与插入顺序）
+    shuffled = build_review_queue(
+        [null_a, doc_step2, ac_step2, null_b], [case])[0]
+    assert [s.urn.rsplit("#", 1)[1] for s in shuffled.suggestions] == [
+        "z-doc", "a-ac", "null-a", "null-b",
+    ]
 
 
 # ── 人审计划：采纳 ──────────────────────────────────────────────────────────

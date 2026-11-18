@@ -174,6 +174,8 @@ export interface MinedOracleView {
   confidence: number;
   source_kind: SuggestionSourceKind;
   provenance: SuggestionProvenance;
+  // docs/16 步骤锚点：null=用例级（全程）断言；老后端/老数据缺字段时渲染侧 ?? null 兜底
+  step_id: number | null;
 }
 
 export interface SuggestionView {
@@ -193,6 +195,11 @@ export interface ReviewQueueItem {
   module: string;
   exploratory: boolean;
   oracle_missing: boolean;
+  // docs/16 §4.5：审批页前置/步骤展示，数据来自 test_cases.raw_json，老后端可能缺字段
+  steps?: string[];
+  preconditions?: string[];
+  // docs/16 §4.3 C2：背景与平台约束只读展示，不可作为断言依据，老后端可能缺字段
+  context_notes?: string[];
   suggestions: SuggestionView[];
 }
 

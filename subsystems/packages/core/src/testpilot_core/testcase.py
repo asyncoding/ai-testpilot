@@ -2,8 +2,10 @@
 
 零 IO、零三方：吃文本，吐结构化 ``TestCase`` 与解析死信。覆盖 V1 用例文档的两种形态：
 
-- 叙事体：``## 模块`` → ``### TC-xx 标题（FR 引用）P0`` → 编号步骤 →
-  ``**预期**：`` 子弹列表（可含嵌套）→ 可选 ``**实测记录**``；
+- 叙事体：``## 模块`` → ``### TC-xx 标题（FR 引用）P0`` → 可选 ``**前置**：`` →
+  编号步骤 → ``**预期**：`` 子弹列表（可含嵌套）→ 可选独立 ``**背景与平台约束**``
+  段（入 context_notes）→ 可选 ``**实测记录**``（docs/17 先导批起支持前置/背景段，
+  无这两段的历史文档行为完全不变）；
 - 表格体：含 ``ID`` 表头列的 Markdown 表格，列名不统一（步骤要点/环境+步骤/级…），
   按表头语义映射列位。
 
@@ -36,6 +38,16 @@ _STEP_RE = re.compile(r"^\d+\.\s+(?P<body>.+?)\s*$")
 _BULLET_RE = re.compile(r"^(?P<indent>\s*)-\s+(?P<body>.+?)\s*$")
 # 允许 **预期**（备注）： 形态——真档 TC-A7 在标记与冒号间夹了回归说明括号
 _EXPECT_MARKER_RE = re.compile(r"^\*\*预期\*\*[^：:]*[：:]\s*(?P<inline>.*)$")
+# docs/17 先导批：前置段标记，同样允许标记与冒号间夹说明括号
+_PRECOND_MARKER_RE = re.compile(r"^\*\*前置\*\*[^：:]*[：:]\s*(?P<inline>.*)$")
+# docs/17 先导批：独立背景段「**背景与平台约束**（备注）：」，冒号可选（纯标题分段也合法），
+# 背景段子弹统一进 context_notes 桶，与预期段内 C2 词表分流合流
+_CONTEXT_SECTION_MARKER_RE = re.compile(
+    r"^\*\*背景[^*]*\*\*[^：:]*[：:]?\s*(?P<inline>.*)$"
+)
+# 回写渲染与规范化模板都输出 **步骤**： 段标记；显式识别为 body 分段，
+# 否则该行会被前置段续行逻辑误拼进最后一条前置（红证：回写往返夹具）
+_STEP_SECTION_MARKER_RE = re.compile(r"^\*\*步骤\*\*[^：:]*[：:]")
 _RECORD_MARKER_RE = re.compile(r"^\*\*实测记录")
 _PRIORITY_RE = re.compile(r"\b(P[0-3])\b")
 _FR_REF_RE = re.compile(r"FR-[0-9A-Za-z]+")
@@ -115,18 +127,110 @@ EXPLICIT_TYPE_LABELS: dict[OracleType, str] = {
     OracleType.MANUAL: "人工确认",
 }
 _EXPLICIT_TAG_RE = re.compile(r"^【(?P<label>[^】]+)】\s*(?P<rest>.*)$")
+# docs/16 回写标签内的锚点段：【UI 断言｜步骤3】，全角 ｜ 为主、半角 | 兼容
+_TAG_ANCHOR_SPLIT_RE = re.compile(
+    r"^(?P<label>.+?)\s*[｜|]\s*步骤\s*(?P<n>[0-9]+)\s*$"
+)
+# docs/16 正文显式步骤引用：只认阿拉伯数字；中文数字与事件描述（T0/解锁后/侧边键后）
+# 没有「步骤/Step」前缀，天然不匹配——事件不是稳定序号，硬映射就是猜测
+_STEP_ANCHOR_RE = re.compile(r"(?:步骤|\bStep)\s*([0-9]+)", re.IGNORECASE)
+
+
+def split_explicit_tag(text: str) -> tuple[OracleType | None, int | None, str]:
+    """拆分显式标签 ``【类型】`` / ``【类型｜步骤N】``。
+
+    无标签或标签未知时返回 ``(None, None, 原文)``，调用方回退关键词分类器；
+    标签类型已知但不带锚点时 step_id 为 None（用例级写法，旧字节风格）。
+    """
+    match = _EXPLICIT_TAG_RE.match(text.strip())
+    if not match:
+        return None, None, text
+    raw_label = match.group("label").strip()
+    rest = match.group("rest").strip()
+    anchor_match = _TAG_ANCHOR_SPLIT_RE.match(raw_label)
+    label = anchor_match.group("label").strip() if anchor_match else raw_label
+    for oracle_type, name in EXPLICIT_TYPE_LABELS.items():
+        if label == name:
+            step_id = int(anchor_match.group("n")) if anchor_match else None
+            return oracle_type, step_id, rest
+    return None, None, text
 
 
 def split_explicit_type(text: str) -> tuple[OracleType | None, str]:
-    """拆分显式类型标签；无标签/未知标签返回 (None, 原文)，调用方回退分类器。"""
-    match = _EXPLICIT_TAG_RE.match(text.strip())
-    if not match:
-        return None, text
-    label = match.group("label").strip()
-    for oracle_type, name in EXPLICIT_TYPE_LABELS.items():
-        if label == name:
-            return oracle_type, match.group("rest").strip()
-    return None, text
+    """拆分显式类型标签（不含锚点，兼容旧调用方）；无标签/未知标签返回 (None, 原文)。"""
+    oracle_type, _, rest = split_explicit_tag(text)
+    return oracle_type, rest
+
+
+def extract_step_anchor(text: str) -> tuple[int | None, str]:
+    """从断言正文提取显式步骤引用（docs/16 §4.2 保守口径）。
+
+    返回 ``(锚点序号或 None, 歧义说明)``：唯一 N 才锚定；同条断言出现多个
+    不同 N 属歧义，不锚并交调用方记死信；无引用返回 (None, "")。
+    """
+    numbers = {int(m.group(1)) for m in _STEP_ANCHOR_RE.finditer(text)}
+    if not numbers:
+        return None, ""
+    if len(numbers) > 1:
+        ordered = sorted(numbers)
+        return None, "同一断言引用多个步骤: " + ", ".join(str(n) for n in ordered)
+    return numbers.pop(), ""
+
+
+# ── C2 知识分流（docs/16 §4.3，2026-11-16）─────────────────────────────────
+# 词表刻意只收强结构信号，默认 assertion——宁可漏分流不可误杀可判定断言；
+# 增减词表必须由 tests/test_context_notes.py 的红证夹具驱动。
+BulletRole = Literal["assertion", "context"]
+# 段首标记：平台约束/真机实锤/实测记录/历史（历史要求冒号或年份紧随，防「历史数据应…」
+# 这类真断言误分流）
+_CONTEXT_PREFIX_RE = re.compile(
+    r"^(?:平台约束|真机实锤|实测记录|历史(?:记录)?(?:[:：]|\s*\d{4}))"
+)
+# 句首括号机制夹注：活样本「（2026-11-14 按代码现文案核对；机制见 X.y(…)）：」，
+# 正文允许嵌套半角括号（setHaptics(active:false) 等代码符号），故要求三端齐备：
+# 句首括号 + 关键词 + 句尾括号（可选冒号）。刻意要求句首就是括号——
+# 「日志（…按代码现文案核对…」以日志开头且不以括号收尾，仍是真断言。
+_CONTEXT_META_PAREN_RE = re.compile(
+    r"^[（(].*(?:机制见|按代码现文案核对|代码现文案).*[）)]\s*[:：]?\s*$"
+)
+# 纯机制说明句式：活样本「iOS 26.4 不投递 LA .ended」「仅为其他版本/出口保留」
+_CONTEXT_MECHANISM_RE = re.compile(
+    r"iOS\s*\d+(?:\.\d+)*\s*不投递|仅为其他版本|出口保留"
+)
+
+
+def classify_bullet_role(text: str) -> BulletRole:
+    """叙事体预期 bullet 的断言/背景知识分流（docs/16 §4.3 C2）。
+
+    保守口径：默认 assertion，仅命中确定性结构词表才归 context；
+    人审回写显式标签 ``【类型…】`` 是权威断言，任何词表不得覆盖。
+    注意本函数面向**拼接完整**的 bullet 文本；入口期（首物理行可能未闭合）
+    只用 ``_is_context_entry`` 的段首标记，句形规则在 build 期复核。
+    """
+    stripped = _strip_inline(text)
+    explicit_type, _, _ = split_explicit_tag(stripped)
+    if explicit_type is not None:
+        return "assertion"
+    if _CONTEXT_PREFIX_RE.match(stripped):
+        return "context"
+    if _CONTEXT_META_PAREN_RE.match(stripped):
+        return "context"
+    if _CONTEXT_MECHANISM_RE.search(stripped):
+        return "context"
+    return "assertion"
+
+
+def _is_context_entry(text: str) -> bool:
+    """入口期分流：只认段首标记（首物理行即完整的强信号）。
+
+    机制夹注/句式可能跨多个物理行（活样本 TC-A1b 三行才闭合括号），
+    入口文本不完整，句形类规则统一留到 build() 对拼接全文复核，避免漏分流。
+    """
+    stripped = _strip_inline(text)
+    explicit_type, _, _ = split_explicit_tag(stripped)
+    if explicit_type is not None:
+        return False
+    return bool(_CONTEXT_PREFIX_RE.match(stripped))
 
 
 # ── 叙事体解析 ──────────────────────────────────────────────────────────────
@@ -144,45 +248,152 @@ class _NarrativeBuilder:
         self.tags = _FR_REF_RE.findall(heading_rest)
         self.steps: list[str] = []
         self.oracle_texts: list[str] = []
-        self.mode: Literal["body", "oracle", "record"] = "body"
+        # docs/16：与 oracle_texts 平行的步骤锚点表。None=该条无显式引用（用例级）；
+        # 嵌套子弹/续行只拼文本、不改锚点，天然实现「嵌套继承顶层 bullet 锚点」。
+        self.oracle_anchors: list[int | None] = []
+        # 与锚点表平行的歧义说明（多步骤引用）；越界判定在 build 期（需步骤总数）
+        self.oracle_anchor_notes: list[str] = []
+        # C2：知识型材料分桶（平台约束/机制指针/历史记录），与断言桶互斥；
+        # _last_bucket 决定嵌套子弹与续行的归属，保证子项随父 bullet 角色。
+        # docs/17 先导批：独立「**背景与平台约束**」段的子弹也进同一桶。
+        self.context_texts: list[str] = []
+        self._last_bucket: Literal["oracle", "context"] | None = None
+        # docs/17 先导批：「**前置**：」段累积器；模型/审批/回写渲染早已支持
+        # preconditions，这里补齐 parser 抽取，老文档无该段时恒为空列表。
+        self.preconditions: list[str] = []
+        self.mode: Literal[
+            "body", "precondition", "oracle", "context_section", "record"
+        ] = "body"
+
+    def append_bullet(self, text: str) -> None:
+        """收录一条顶层预期 bullet：C2 先分流知识型材料，断言桶再定步骤锚点。
+
+        入口只按段首标记分流（首行即完整的强信号）；跨多行才完整的机制夹注
+        留 build 期复核，使嵌套子项先随父桶汇聚、最终角色由完整文本裁定。
+        标签锚点（人审回写）优先于正文引用；嵌套子弹与续行走 append_nested/
+        append_continuation，不经过本方法，因此无法引入或覆盖父 bullet 的锚点与角色。
+        """
+        if _is_context_entry(text):
+            self.context_texts.append(text)
+            self._last_bucket = "context"
+            return
+        _, tag_step_id, _ = split_explicit_tag(text)
+        if tag_step_id is not None:
+            anchor, note = tag_step_id, ""
+        else:
+            anchor, note = extract_step_anchor(text)
+        self.oracle_texts.append(text)
+        self.oracle_anchors.append(anchor)
+        self.oracle_anchor_notes.append(note)
+        self._last_bucket = "oracle"
+
+    def append_precondition(self, text: str) -> None:
+        """前置段顶层子弹开新条；嵌套/续行由 append_nested/append_continuation 拼接。"""
+        self.preconditions.append(text)
+
+    def append_context_section(self, text: str) -> None:
+        """独立背景段顶层子弹：进 C2 同一背景桶，嵌套子项随父汇聚。"""
+        self.context_texts.append(text)
+        self._last_bucket = "context"
+
+    def append_nested(self, text: str) -> None:
+        """缩进子弹：拼到当前段最后一条，角色与锚点都继承父 bullet。"""
+        if self.mode == "precondition":
+            bucket_texts = self.preconditions
+        else:
+            bucket_texts = (
+                self.context_texts if self._last_bucket == "context" else self.oracle_texts
+            )
+        if bucket_texts:
+            bucket_texts[-1] = f"{bucket_texts[-1]} {_strip_inline(text)}"
 
     def append_continuation(self, line: str) -> None:
-        """非标记的续行：按当前段落挂到最后一个步骤或预期。"""
+        """非标记的续行：按当前段落挂到最后一个步骤/前置/当前桶预期。"""
         text = line.strip()
         if not text:
             return
-        if self.mode == "oracle" and self.oracle_texts:
-            self.oracle_texts[-1] = f"{self.oracle_texts[-1]} {_strip_inline(text)}"
+        if self.mode == "precondition" and self.preconditions:
+            self.preconditions[-1] = f"{self.preconditions[-1]} {_strip_inline(text)}"
+        elif self.mode in ("oracle", "context_section") and (
+            self.oracle_texts or self.context_texts
+        ):
+            bucket = (
+                self.context_texts
+                if self._last_bucket == "context"
+                else self.oracle_texts
+            )
+            if bucket:
+                bucket[-1] = f"{bucket[-1]} {_strip_inline(text)}"
         elif self.mode == "body" and self.steps:
             self.steps[-1] = f"{self.steps[-1]} {_strip_inline(text)}"
 
     def build(self, *, module: str, doc_external_id: str, source_system: str,
-              version: str | None) -> tuple[TestCase | None, CaseParseError | None]:
+              version: str | None
+              ) -> tuple[TestCase | None, list[CaseParseError]]:
         if not self.steps and not self.oracle_texts:
-            return None, CaseParseError(
+            return None, [CaseParseError(
                 doc_external_id=doc_external_id, line=self.line,
                 case_id_hint=self.case_id, snippet=self.title,
                 error="用例块既无步骤也无预期，无法结构化",
-            )
+            )]
         oracles = []
-        for text in self.oracle_texts:
+        anchor_errors: list[CaseParseError] = []
+        step_count = len(self.steps)
+        # C2 两阶段分流：对拼接完整的断言文本复核句形类词表（机制夹注跨多行时
+        # 入口期无法判定），命中者移入背景桶，其锚点与锚点死信一并撤销——
+        # 背景材料不参与步骤关联，也不产出断言。
+        final_texts: list[str] = []
+        final_anchors: list[int | None] = []
+        final_notes: list[str] = []
+        for text, raw_anchor, note in zip(
+            self.oracle_texts, self.oracle_anchors, self.oracle_anchor_notes
+        ):
+            if classify_bullet_role(text) == "context":
+                self.context_texts.append(text)
+                continue
+            final_texts.append(text)
+            final_anchors.append(raw_anchor)
+            final_notes.append(note)
+        for text, raw_anchor, note in zip(final_texts, final_anchors, final_notes):
             # 显式标签优先（S2.5 人审回写文档）；无标签回退关键词分类，历史行为不变
-            explicit_type, expectation = split_explicit_type(text)
+            explicit_type, _, expectation = split_explicit_tag(text)
+            step_id: int | None = None
+            if note:
+                # 歧义不静默：降级用例级并留死信，整批继续（docs/16 §4.2 + AC2）
+                anchor_errors.append(CaseParseError(
+                    doc_external_id=doc_external_id, line=self.line,
+                    case_id_hint=self.case_id, snippet=text[:120], error=note,
+                ))
+            elif raw_anchor is not None:
+                if 1 <= raw_anchor <= step_count:
+                    step_id = raw_anchor
+                else:
+                    # 越界 fail-loud：用户拍板的死信策略，step_id 置 None 不阻断整批
+                    anchor_errors.append(CaseParseError(
+                        doc_external_id=doc_external_id, line=self.line,
+                        case_id_hint=self.case_id, snippet=text[:120],
+                        error=(f"步骤锚点 {raw_anchor} 越界（用例共 {step_count} 个步骤），"
+                               "降级为用例级断言"),
+                    ))
             oracles.append(
                 Oracle(
                     type=explicit_type or classify_oracle(text),
                     expectation=expectation,
                     source_refs=[make_urn(source_system, "document", doc_external_id)],
                     confidence=0.5,  # 文档解析只做确定性归类，置信度留给 S2.4 oracle 挖掘复评
+                    step_id=step_id,
                 )
             )
         case = TestCase(
             urn=make_urn(source_system, "test_case", f"{doc_external_id}#{self.case_id}"),
             external_id=_strip_inline(self.case_id),
             title=self.title or _strip_inline(self.case_id),
+            preconditions=[_strip_inline(p) for p in self.preconditions],
             steps=[_strip_inline(s) for s in self.steps],
             oracles=oracles,
-            oracle_missing=bool(self.steps) and not self.oracle_texts,
+            # C2：知识材料不充当预期，只有背景条目的用例仍是 oracle_missing
+            context_notes=list(self.context_texts),
+            oracle_missing=bool(self.steps) and not final_texts,
             tags=self.tags,
             version=version,
             module=module,
@@ -190,7 +401,7 @@ class _NarrativeBuilder:
             lifecycle="cancelled" if self.cancelled else "active",
             source_line=self.line,
         )
-        return case, None
+        return case, anchor_errors
 
 
 def _parse_narrative(lines: list[tuple[int, str]], *, doc_external_id: str,
@@ -206,13 +417,12 @@ def _parse_narrative(lines: list[tuple[int, str]], *, doc_external_id: str,
         nonlocal builder
         if builder is None:
             return
-        case, error = builder.build(
+        case, errors = builder.build(
             module=module, doc_external_id=doc_external_id,
             source_system=source_system, version=version)
         if case is not None:
             cases.append(case)
-        if error is not None:
-            dead.append(error)
+        dead.extend(errors)
         builder = None
 
     for lineno, raw in lines:
@@ -239,12 +449,32 @@ def _parse_narrative(lines: list[tuple[int, str]], *, doc_external_id: str,
             continue
         if builder is None:
             continue
+        precond = _PRECOND_MARKER_RE.match(stripped)
+        if precond:
+            builder.mode = "precondition"
+            inline = precond.group("inline").strip()
+            if inline:
+                builder.append_precondition(_strip_inline(inline))
+            continue
         expect = _EXPECT_MARKER_RE.match(stripped)
         if expect:
             builder.mode = "oracle"
             inline = expect.group("inline").strip()
             if inline:
-                builder.oracle_texts.append(_strip_inline(inline))
+                builder.append_bullet(_strip_inline(inline))
+            continue
+        # docs/17：独立背景段必须在通用加粗小节分支前识别（标题行带括号备注，
+        # 不以 ** 收尾，本也落不进通用分支，此处显式处理语义更清晰）
+        context_section = _CONTEXT_SECTION_MARKER_RE.match(stripped)
+        if context_section:
+            builder.mode = "context_section"
+            inline = context_section.group("inline").strip()
+            if inline:
+                builder.append_context_section(_strip_inline(inline))
+            continue
+        if _STEP_SECTION_MARKER_RE.match(stripped):
+            # 显式步骤段标记：结束前置/背景分段，编号行由既有步骤分支收录
+            builder.mode = "body"
             continue
         if _RECORD_MARKER_RE.match(stripped):
             builder.mode = "record"
@@ -253,20 +483,38 @@ def _parse_narrative(lines: list[tuple[int, str]], *, doc_external_id: str,
             # 其他加粗小节标题（如「平台约束」）：结束预期收集但不丢已收集内容
             builder.mode = "body"
             continue
-        # 顶格编号才是步骤（stripped 已去缩进，等价于原文列 0 起始）
+        # 顶格编号才是步骤（stripped 已去缩进，等价于原文列 0 起始）；
+        # 前置/背景段遇顶格编号说明该段结束、步骤开始，切回 body 再收录
         step = _STEP_RE.match(stripped)
         if step and not line[0].isspace() and builder.mode != "oracle":
+            if builder.mode in ("precondition", "context_section"):
+                builder.mode = "body"
             builder.steps.append(step.group("body").strip())
             continue
         bullet = _BULLET_RE.match(line)
-        if bullet and builder.mode == "oracle":
-            # 顶层子弹开新条；缩进子弹（嵌套）挂前一条
-            if len(bullet.group("indent")) > 0 and builder.oracle_texts:
-                builder.oracle_texts[-1] = (
-                    f"{builder.oracle_texts[-1]} {_strip_inline(bullet.group('body'))}")
-            else:
-                builder.oracle_texts.append(_strip_inline(bullet.group("body")))
-            continue
+        if bullet:
+            indented = len(bullet.group("indent")) > 0
+            if builder.mode == "precondition":
+                if indented and builder.preconditions:
+                    builder.append_nested(bullet.group("body"))
+                else:
+                    builder.append_precondition(_strip_inline(bullet.group("body")))
+                continue
+            if builder.mode == "context_section":
+                # 背景段与预期段共用 context 桶，嵌套子项随父汇聚
+                if indented and (builder.oracle_texts or builder.context_texts):
+                    builder.append_nested(bullet.group("body"))
+                else:
+                    builder.append_context_section(_strip_inline(bullet.group("body")))
+                continue
+            if builder.mode == "oracle":
+                # 顶层子弹开新条（入口处 C2 分流 + 定锚点）；缩进子弹（嵌套）挂当前桶
+                # 最后一条并继承其角色与锚点
+                if indented and (builder.oracle_texts or builder.context_texts):
+                    builder.append_nested(bullet.group("body"))
+                else:
+                    builder.append_bullet(_strip_inline(bullet.group("body")))
+                continue
         builder.append_continuation(line)
     flush()
     return cases
@@ -339,6 +587,8 @@ def _parse_table_block(header_line: str, rows: list[tuple[int, str]], *, module:
             tags.append(f"env:{cells[env_col].strip()}")
         oracles: list[Oracle] = []
         if expect_text:
+            # docs/16 §4.2 规则 4：表格体单预期格无步骤结构，step_id 恒 None；
+            # C2：表格体无知识/断言双段结构，context_notes 恒空（默认值，不显式传）
             oracles.append(Oracle(
                 type=classify_oracle(expect_text),
                 expectation=expect_text,

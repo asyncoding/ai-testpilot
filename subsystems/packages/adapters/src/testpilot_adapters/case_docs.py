@@ -46,6 +46,9 @@ class ParsedCaseDoc:
     uri: str
     content_hash: str
     result: CaseParseResult
+    # docs/17 M1：lint 探针的原文规则（缺冒号/段结构/表格识别）需要 raw 文本；
+    # 非持久化字段，不参与任何 URN/hash 计算，老装配方按关键字构造不受影响
+    text: str = ""
 
 
 class CaseDocumentAdapter:
@@ -137,5 +140,6 @@ class CaseDocumentAdapter:
                 uri=f"file://{path.resolve()}",
                 content_hash=_sha256(text),
                 result=result,
+                text=text,
             ))
         return docs, errors
