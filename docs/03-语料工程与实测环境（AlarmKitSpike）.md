@@ -564,9 +564,19 @@ iproxy 9876 9876    # usbmuxd 把 Mac 127.0.0.1:9876 转进设备同端口；ipr
    not … unlocked")` 拒绝激活，测试当场抛错、Runner 拆连接，驱动收 peer_closed
    （2026-11-19 红跑 manual-20261119T022951Z.xcresult 在案，见 §5 故障表）。
    g-lock 窗口有 120s，解锁后再输 y 时间充裕，严禁锁屏态回 y；
-2. Swift 自测 `press(.home)` + `app.activate()` 保活；120s 响铃窗口内闹钟触发，
-   **人工按真实硬件侧边键**处置（取证点 C，禁止软件事件冒充）；
-3. **g-sidebutton（240s）**：确认侧边键动作与响铃/静音表现，输 `y`；
+2. Swift 自测 `press(.home)` + `app.activate()` 保活；**g-sidebutton 提示通常在此时
+   就出现、比闹钟响铃早约 80 秒（2026-11-19 两跑实测 83s/68s），先不要回复**。
+   120s 响铃窗口内闹钟触发后，**人工按真实硬件侧边键**处置（取证点 C，禁止软件事件
+   冒充），操作时手机须处于锁屏、锁屏正呈现系统闹钟的状态：先按一次音量加键（响铃后
+   **第一个物理键**，预期锁屏闹钟呈现变化、App 静音门 1–2s 内解除），约 15s 后按一次
+   电源/侧键（**第二个物理键**，预期闹钟状态不再变化——首键已消费状态迁移，后续键无效
+   是系统语义而非异常；电源键本身仍会锁屏）。首键/后续键口径与待闭合的判别实验见
+   §3.C 2026-11-19 晚校正注记；
+3. **g-sidebutton（240s）——电源键锁屏后必须先解锁、目视确认回到 AlarmKitSpike
+   （接力页/App 界面），再输 `y`**。原因：真机分支在本闸之后直接做接力页断言且没有
+   `activate()` 兜底（Swift:124-135），锁屏态回 y 会让断言超时失败。任一步骤异常
+   输 `n`（reject 是合法响亮失败）；夹具 ws-gates.human.json 提示语 2026-11-19
+   已按此顺序重写（g-lock 同步改为「只有解锁回 App 后才能输 y」的编号硬顺序）；
 4. **g-sensory（240s）**：如实录听感/触感/置信度；silence.caf 漂移（见取证点 C）下
    若确实没听到铃声，ringtone_heard 填 false，不许凑绿；
 5. 驱动收 PNG 证据后 complete、rc=0；Swift 继续 oracle[12] 接力页断言与 finish。
@@ -715,6 +725,39 @@ sudo /usr/bin/log collect --device-udid "$DEVICE_UDID" \
 > 呈现态、H2=操作偏差且 acknowledge 闸表不记录按键类型；受控重跑方案与 AR 去向见
 > `out/cs-architecture/tca1-carryin/20-generated-test/generation-report.md` §7 取证点 C
 > 与 §8 第 5 条。重跑前本表期望文案保留不改（历史 oracle 不篡改）。
+>
+> **2026-11-19 manual-controlled-1 受控重跑补证（同日）**：前台触发（appState=0）
+> 路径下静音门根本不装备（无 gate armed，两条 unmuted 变体均不可达）；T-vup/T-side
+> 受控按键在 App subsystem 零闹钟状态迁移日志，H2 不被支持、整体偏 H1；严格闭合
+> 尚缺一次后台路径（appState=2）受控跑，等用户裁决补跑或直接走 AR。
+>
+> **2026-11-19 manual-controlled-2 后台路径受控跑——定性闭合（同日）**：锁屏/后台态
+> 闹钟以 appState=2 触发、gate armed 正常装备；锁屏态音量加（T-vup 15:44:59）后
+> **1.44s** 出现第三种原因串 `RINGER gate unmuted (primary vanished from snapshot)`
+> （15:45:00.44），硬顶未触发；电源键 T-side 对 App 仍零日志。结论：音量加经
+> 「系统闹钟主条目从快照消失」解除静音门，原 H1 被精确证伪；oracle 预期的
+> `state left .alerting` 三跑从未出现，真实 unmuted 原因串为三变体闭集
+> （state-left 未见 / 120s hard cap / primary vanished from snapshot），
+> 按 docs/12 附录 C 走 AR 修订本事件表。另记录后台起播 NSOSStatus 560557684
+> 三连失败后第 4 次重试成功（产品重试机制生效）。
+>
+> **2026-11-19 晚口径校正（用户纠正，待一次判别实验闭合；上条 controlled-2 注记原文保留）**：
+> 上条「音量加经快照消失解门、电源键对 App 不可见」的**键型归因是过度断言**——该跑只有
+> 「音量加首按→解门、电源键次按→零日志」一种操作次序，两个竞争假设对这组数据预测完全
+> 相同、n=1 不能判别：H_first（用户口径）=**锁屏下只有第一个物理键（不分键型）会改变
+> 闹钟状态，后续物理键不再产生状态变化**（与 iOS 任一硬件键首按静音、重复按无效的系统
+> 语义一致）；H_type = 音量键/电源键的键型差异。旁证 re-examine：controlled-1 的 T-side
+> 产生过 scenePhase 迁移而 controlled-2 的 T-side 零日志，差异可由两跑 App scene 状态
+> 不同解释（前台 active→锁屏有迁移；已 background 的 scene 再锁屏无事件），不构成
+> 「电源键对 App 不可见」的证据。manual-rerun-1 硬顶在 H_first 口径下回溯为：首个物理键
+> 未有效作用于锁屏闹钟呈现（acknowledge 闸无键型/时刻字段，不可回溯的证据边界与原 H2
+> 注记相同，不假装已闭合）。**判别实验原设计（任务 #71，2026-11-19 用户裁决不执行，
+> 缺口保留）**：锁屏响铃后第一个物理键直接按电源/侧键（不按音量键）——若 1–2s 内出现
+> `primary vanished from snapshot` 则 H_first 成立、键型归因作废；若 120s hard cap
+> 兜底则 H_type 成立。实验不跑意味着两口径在本期证据内**并列留存、不二选一落死**，
+> 后续 oracle AR（#70）事件表的触发条件须按双口径书写并标注 n=1。夹具 g-sidebutton
+> 提示语已按首键/后续键预期重写。三变体闭集与双路径（前台无门/后台有门）模型不受本次
+> 校正影响。
 
 **silence.caf 漂移注记（诚实边界）**：quick 测试钩子现码铃音为 `silence.caf`
 （App.swift DEBUG 钩子），V1 文档/oracle[6] 的 GoodMorning.m4a 描述在 quick 夹具下
