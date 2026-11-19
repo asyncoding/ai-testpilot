@@ -3,6 +3,7 @@ name = "testpilot-adapters"
 version = "0.1.0"
 description = "TestPilot 适配器：文件/Git/JSON/xcodebuild/SQLite/录制型离线适配器"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "testpilot-core",
     "pydantic>=2.8",

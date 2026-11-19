@@ -3,6 +3,7 @@ name = "testpilot-workers"
 version = "0.1.0"
 description = "TestPilot workers：ingest / runner / eval（独立进程，S0 骨架）"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "testpilot-core",
     "testpilot-adapters",

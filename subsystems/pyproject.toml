@@ -3,6 +3,7 @@ name = "testpilot-workspace"
 version = "0.1.0"
 description = "研发测试质量智能体平台（TestPilot）workspace 根"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "testpilot-core",
     "testpilot-adapters",
