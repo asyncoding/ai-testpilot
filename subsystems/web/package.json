@@ -2,6 +2,7 @@
   "name": "testpilot-web",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "TestPilot 智能研发测试助手 · 对话页（FR-UI-001），Next.js 静态导出由 FastAPI 同端口托管",
   "scripts": {
     "dev": "next dev",

@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 
 # 知识库/向量库中间产物（可再生成）
 # 锚定具体运行时目录：packages/.../testpilot_adapters/store/ 是源码包，必须入库

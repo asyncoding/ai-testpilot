@@ -34,7 +34,7 @@ cd subsystems
 uv sync                       # 创建 .venv 并以 editable 方式安装四个包
 ```
 
-> 网络备注：若默认 PyPI 源 TLS 失败，用清华镜像（只作为本机环境变量，不写进仓内配置）：
+> 网络备注：若默认 PyPI 源 TLS 失败，可用受限网络镜像 fallback（只作为临时环境变量，不写进仓内配置）：
 > `UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple uv sync`
 >
 > 若曾在包目录尚未建全时执行过 `uv sync`，editable 安装可能是空壳（import 报
@@ -387,7 +387,7 @@ tmp 容器，TestClient 真实跑 lifespan 但不起端口。
 后端只打 warning，API 与门禁不受影响。
 
 ```bash
-# 1) 构建静态产物（不入自动门禁；国内网络用镜像）
+# 1) 构建静态产物（不入自动门禁；受限网络可用 NPM_REGISTRY 指定镜像）
 bash scripts/build_web.sh
 #   registry 受限时：NPM_REGISTRY=https://registry.npmmirror.com bash scripts/build_web.sh
 
@@ -673,7 +673,7 @@ curl -s http://127.0.0.1:3030/api/public/health   # 期望 {"status":"OK","versi
 docker logs testpilot-langfuse-worker-1 --tail 5
 ```
 
-镜像拉取（受限网络实测：docker.io 直连 TLS EOF；**docker.1ms.run 可用**，daocloud blob CDN 不稳；
+镜像拉取（受限网络 fallback：docker.io 直连 TLS EOF 时可试 docker.1ms.run，daocloud blob CDN 不稳；
 镜像源不写进 compose，拉完 `tag` 回标准名保持文件可移植）：
 
 ```bash
