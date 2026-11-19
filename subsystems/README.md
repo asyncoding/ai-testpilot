@@ -1748,7 +1748,7 @@ TestPilotKit Swift 留语料仓本地 SPM，**本期零 Swift 改动、不进 Py
 | `workers/ws_gate_driver.py`（`testpilot-ws-gate-driver`） | 闸门驱动客户端；websockets 延迟导入（非 mac/无依赖宿主不触发）；四 outcome 见下 |
 | `workers/ws_gate_transcript.py` | 正式转录 `ws-gate-transcript-v1`（pydantic 闭集、tmp+os.replace 原子写、证据 localfs URN 回填） |
 | `workers/ws_relay_session.py` | ws-run 全链路编排：注入→条件 iproxy→driver-first 双进程→first-exit 对账→证据 fail-loud→分型落盘 |
-| `adapters/process_executor.py` `spawn_attached` | stdin 继承终端（交互裁决可用），stdout/stderr 仍 PIPE 排空 |
+| `adapters/process_executor.py` `spawn_attached` | stdin 继承终端，stdout/stderr 仍 PIPE 排空——**人工提示语不可见**：ws-run 受支持形态仅 `--structural`；全 TTY 人工会话在独立终端跑 `testpilot-ws-gate-driver`（2026-11-19 真机事故实证，docs/03 §3.9） |
 | `testpilot-hybrid ws-run` | 交互式子命令（不进 worker 队列：worker 无 TTY，`input()` 物理不成立） |
 
 ### 运行方式（模拟器 structural，CI/演示唯一可全自动形态）
@@ -1763,8 +1763,20 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc-xcode.yaml \
   --udid <Booted-UDID> \
   --only-testing AlarmKitSpikeUITests/AgentQuickAlarmUITests/test_TCA1_lockRelayFullFlow
 # 成功：stdout 单个 JSON 快照，exit 0
-# 人工形态：去掉 --structural、改 --gates ws-gates.human.json，终端按闸门提示交互裁决
+# 注意：ws-run 单命令不支持人工 gates——驱动 stdout 走 PIPE 被排空，闸门提示不可见
+# （2026-11-19 真机 g-lock 120s 超时实证）。人工形态见下方三终端序列。
 ```
+
+真机人工验收（S9，2026-11-18 用户指令重启 / 2026-11-19 事故修订）走
+`ios-local-poc-device.yaml`（iproxy `enabled: true`、900s 人工窗口）的
+**三终端正式序列**（全部是产品 console script，不用 out/ 批次脚本）：
+① 终端 1 `iproxy 9876 9876` 常驻；② 终端 2 独立 TTY 跑
+`testpilot-ws-gate-driver --gates tests/fixtures/ws-gates/ws-gates.human.json
+--url ws://127.0.0.1:9876/ws/hybrid/hsess-p0 --retry-seconds 300 …`，提示语可见、
+人工逐闸裁决；③ 终端 3 `testpilot-inject-xctestrun` 注入后手工
+`xcodebuild test-without-building`。**必须真实终端 TTY**；完整命令、交互时间线与
+四取证点 runbook 见 docs/03 §3.9。手工形态只产驱动侧转录（无正式 B1
+`ws-gate-transcript-v1`/URN 账本），ws-run stdout 转发产品化列二期。
 
 退出码契约（借 scan_generated_swift 先例）：**0 全绿；2 硬错误**（注入失败/iproxy 缺失带
 runbook 指引/重试窗耗尽/驱动 rc2/无产物/证据应到未到）；**3 产品侧响亮失败**（xcodebuild
@@ -1779,16 +1791,21 @@ runbook 指引/重试窗耗尽/驱动 rc2/无产物/证据应到未到）；**3 
 
 ### 配置与红线
 
-- profile `ios-local-poc-xcode.yaml` 增 `usb_relay` 块（13 键；老 profile 缺省 `{}` 零影响）：
+- 两个 profile 各持一份同构 `usb_relay` 块（13 键；老 profile 缺省 `{}` 零影响）：
   端口/会话/retry_seconds（**最小值 300 硬校验，禁止调小**，driver-first 靠它兜 xcodebuild
   启动墙钟）/grace_seconds/time_allowance_s（须大于 Swift 三闸硬超时之和）/两份 gates 夹具/
-  iproxy 开关（默认 `enabled: false`）/注入副本后缀。
+  iproxy 开关/注入副本后缀。模拟器 profile `ios-local-poc-xcode.yaml` 保持
+  `iproxy.enabled: false`（sim 共享 Mac loopback）；真机 profile
+  `ios-local-poc-device.yaml` 2026-11-18 起 `enabled: true`、allowance 900s，开关分裂由
+  hostless 测试 `test_device_profile_enables_usb_relay_for_s9_wsrun` 钉住。
 - **token 不入库**：运行期 `TESTPILOT_RELAY_TOKEN` 环境变量注入；缺省回退线协议默认
   `tok-p0` 并 stderr 警告；yaml/转录/快照只允许出现键名与掩码，绝不写明文。
 - 账本走 **B1**：会话目录 `<data_dir>/ws-relay-sessions/wssess-<UTCstamp>-<hash8>/`
   （证据 PNG + 驱动转录 + 正式 `transcript.json`，证据带 `urn:testpilot:localfs:` URN）；
   一期**不写 test_runs 表、不碰 FileGateStore**（core 四态无 rejected、gate id 闭集不同构），
-  `test_run_ref` 字段恒 null 给二期回填；schema 保持 v15 零 DDL。
+  `test_run_ref` 字段恒 null 给二期回填；schema 保持 v15 零 DDL。**B1 正式转录只有
+  ws-run 编排器写**——人工三终端形态（docs/03 §3.9）只有驱动侧转录与裸路径证据，
+  正式账本缺口随二期 ws-run stdout 转发切片补齐，验收报告须如实注明。
 - `websockets>=14` 在 workers pyproject **显式声明**（S8 裸 python3 ModuleNotFoundError
   事故的教训），代码内保持延迟导入，hermetic/非 mac 宿主零依赖可测。
 - 收口 best-effort 跑 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 端口对账，结果入转录，
@@ -1796,8 +1813,9 @@ runbook 指引/重试窗耗尽/驱动 rc2/无产物/证据应到未到）；**3 
 
 ### 边界（明确不做，二期清单见 docs/15 §8.2）
 
-单用例 per invocation；iproxy 代码本期落地但**不经真机验证**（device profile 不启用，
-S9 真机人工验收按用户指令暂缓、四取证点在 runbook 待命）；web WS↔gate store 桥接、
-多会话循环、test_runs 终态直写、DerivedData 自动发现均为二期；模拟器结论不外推真机。
+单用例 per invocation；iproxy 已在 device profile 启用并随 S9 真机验收走查
+（2026-11-18 重启，正式 runbook docs/03 §3.9；物理设备重连前 fail-closed，模拟器结论
+不外推真机）；web WS↔gate store 桥接、多会话循环、test_runs 终态直写、DerivedData
+自动发现均为二期。
 术语见 docs/09（反向监听/WS 闸门驱动/xctestrun 注入/闸门转录/iproxy），分步 runbook 见
-docs/03，契约与「明确不做」见 docs/12，方案与 B1/FileGateStore 边界见 docs/15。
+docs/03（§3.8 模拟器 / §3.9 真机），契约与「明确不做」见 docs/12，方案与 B1/FileGateStore 边界见 docs/15。

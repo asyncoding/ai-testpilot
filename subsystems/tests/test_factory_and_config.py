@@ -585,6 +585,44 @@ def test_device_profile_wires_real_device_stack(tmp_path):
         container.get("store").close()
 
 
+def test_device_profile_enables_usb_relay_for_s9_wsrun():
+    """S9 重启（2026-11-18 用户指令）：真机 profile 的 ws-run usb_relay 块落位。
+
+    模拟器 profile 必须保持 iproxy 关闭（sim 共享 Mac loopback），两个 profile 的
+    开关分裂由本测试钉住，任一侧被翻转即红。
+    """
+    import json
+
+    from testpilot_workers.ws_relay_session import resolve_settings
+
+    device_config = load_profile(DEVICE_IOS_PROFILE)
+    relay = device_config.usb_relay
+    assert relay["iproxy"]["enabled"] is True
+    assert relay["iproxy"]["local_port"] == 9876
+    assert relay["iproxy"]["device_port"] == 9876
+    assert relay["listen_port"] == 9876
+    assert relay["retry_seconds"] == 300          # driver-first 硬下限
+    assert relay["structural_default"] is False   # 人工验收绝不默认 structural
+    assert relay["time_allowance_s"] == 900       # 大于 Swift 三闸硬超时之和
+    assert relay["evidence_subdir"] == "ws-relay-sessions"
+    # 人工闸门声明是仓内真实夹具，且为 interactive 形态（零 auto_values）
+    gates_path = SUBSYSTEMS / relay["gates_human"]
+    gates_doc = json.loads(gates_path.read_text(encoding="utf-8"))
+    assert gates_doc["protocol"] == "tp-hybrid-ws-p0"
+    assert gates_doc["mode"] == "interactive"
+    assert [g["gate_id"] for g in gates_doc["gates"]] == [
+        "g-lock", "g-sidebutton", "g-sensory"]
+
+    # resolve_settings 闭集校验必须接受该块（形状漂移在此刻红，不等真机才暴露）
+    settings = resolve_settings(relay)
+    assert settings["iproxy"]["enabled"] is True
+    assert settings["time_allowance_s"] == 900
+
+    # 对照面：模拟器 profile 的 iproxy 保持关闭，--target device 仍走硬错误闸门
+    sim_config = load_profile(XCODE_IOS_PROFILE)
+    assert sim_config.usb_relay["iproxy"]["enabled"] is False
+
+
 def test_device_runner_unknown_target_rejected(tmp_path):
     config = _offline_config(tmp_path)
     config.adapters.runner = AdapterRef(type="xcode", settings={

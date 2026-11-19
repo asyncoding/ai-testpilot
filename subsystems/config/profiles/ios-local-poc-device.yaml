@@ -151,3 +151,27 @@ adapters:
       timeout: 30
   queue:      {type: sqlite}
   tracer:     {type: noop}
+
+# USB 反向监听真机人工验收（S9，2026-11-18 用户指令：走转正流程 ws-run，弃用 out/ 批次三终端）。
+# 与 xcode profile 的 usb_relay 块差异仅两处：iproxy.enabled=true（真机必须经 usbmuxd 把
+# Mac 127.0.0.1:9876 转进设备同端口）、time_allowance_s=900（真机三闸人工窗口，正式
+# runbook 见 docs/03 §3.9；900 为批次 runbook 03 校准原值的延续）。
+# 人工闸门走 gates_human（零 auto_values），ws-run 不带 --structural；交互需要真实终端 TTY。
+usb_relay:
+  relay_url_template: "ws://127.0.0.1:{port}/ws/hybrid/{session}"
+  listen_port: 9876
+  session: hsess-p0
+  retry_seconds: 300          # 驱动先起重试窗；最小值校验禁止调小（driver-first 纪律）
+  grace_seconds: 30
+  auto_delay: 1.0
+  structural_default: false
+  time_allowance_s: 900       # 真机人工验收；必须大于 Swift 三闸硬超时之和
+  gates_human: tests/fixtures/ws-gates/ws-gates.human.json
+  gates_structural: tests/fixtures/ws-gates/ws-gates.structural.json
+  evidence_subdir: ws-relay-sessions
+  iproxy:
+    enabled: true             # 真机路径：ws-run 自动 spawn iproxy（brew libimobiledevice，本机 2.1.1）
+    local_port: 9876
+    device_port: 9876
+  xctestrun:
+    output_suffix: ".injected.xctestrun"
