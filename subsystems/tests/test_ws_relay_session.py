@@ -619,7 +619,10 @@ async def test_device_target_blocked_when_iproxy_disabled(tmp_path,
                                                            fake_injection):
     container = FakeContainer(tmp_path)  # 默认 iproxy.enabled=false
     executor = _executor(driver=dict(_GREEN_DRIVER), xcode=dict(_GREEN_XCODE))
-    with pytest.raises(WsRelayHardError, match="iproxy.enabled=false"):
+    # 文案必须指向正式 docs/03 §3.9（S9 重启后 runbook 03 已降级为批次历史叙事）
+    with pytest.raises(
+            WsRelayHardError,
+            match=r"iproxy\.enabled=false.*docs/03 §3\.9"):
         await run_ws_relay(
             container, _req(tmp_path, target="device"), executor=executor)
     assert executor.order == []

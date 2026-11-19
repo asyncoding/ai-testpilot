@@ -5,7 +5,8 @@
 1. 读 profile ``usb_relay`` 松散块 + 闭集校验（retry 窗禁止调小、端口 1–65535）；
 2. xctestrun 同目录副本注入 TP_* 线协议环境（token 走 TESTPILOT_RELAY_TOKEN，
    缺省 tok-p0 并 stderr 警告，token 永不进 yaml/转录）；
-3. target=device 才起 iproxy（本期 enabled=false，代码落地不经真机验证）；
+3. target=device 才起 iproxy（模拟器 profile 关闭；device profile 2026-11-18 起为
+   S9 启用，正式 runbook 见 docs/03 §3.9；关闭态硬错误文案同指该节）；
 4. 先起闸门驱动（spawn_attached 继承 TTY，retry 窗等 Runner listener），
    再起 xcodebuild test-without-building（argv 只许来自 core 纯函数）；
 5. first-exit 对账：驱动先非零退 → 杀 xcodebuild；任一先正常退 → 有界宽限
@@ -341,13 +342,15 @@ async def run_ws_relay(
     injected_path, injected_sha, env_keys = prepare_injection(
         req.xctestrun_path, env, settings["xctestrun"]["output_suffix"])
 
-    # 2) iproxy（仅 device；本期 profile 默认关闭，代码落地不经真机验证）
+    # 2) iproxy（仅 device）：模拟器 profile 保持关闭（sim 共享 Mac loopback 不需要），
+    #    ios-local-poc-device 已为 S9 真机验收启用（2026-11-18 用户指令重启 S9）。
     iproxy_proc = None
     if req.target == "device":
         if not settings["iproxy"]["enabled"]:
             raise WsRelayHardError(
-                "device 路径本期未启用：usb_relay.iproxy.enabled=false；"
-                "真机验证随 S9 重启，见 runbook 03")
+                "device 路径未启用：当前 profile usb_relay.iproxy.enabled=false；"
+                "真机验收改用 config/profiles/ios-local-poc-device.yaml"
+                "（iproxy 已启用），正式 runbook 见 docs/03 §3.9")
         iproxy_argv = [
             "iproxy", str(settings["iproxy"]["local_port"]),
             str(settings["iproxy"]["device_port"]),

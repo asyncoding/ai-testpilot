@@ -1,6 +1,6 @@
 # 12 · 用例导出与 Xcode 执行闭环方案（细化设计）
 
-> 状态：**v1.6 = v1.5 全部落地 + E6 USB 反向监听 ws-run 转正**（2026-11-18：批次态 `out/cs-architecture/` 的 C/S 拓扑转正为 workers 正式能力，CLI-first 单用例，新增 `test-without-building -xctestrun` argv 契约与 `usb_relay` profile 块；hermetic 红证六张变异-复原双向闭合，模拟器 E2E 见 docs/03 §3.8。v1.5 = v1.4 全部落地 + 附录 C 外部生成偏差回流与用例变更流程；2026-11-13：E1–E5 已落地并完成真实 xcodebuild 端到端验证；v1.4 修订契约二/附录 A/B，XCUITest 生成从「人工另行开口」升级为契约内一等分支，并修正外部 Agent 阅读清单为语料仓 CLAUDE.md + V1 三文档；全量 1248 测试、verify_s0 24/24。2026-11-17：v1.5 新增附录 C，源自 TC-A1 首批外部生成的三条实测偏差，首批实例见 `subsystems/out/external-generation/tca1/04-corpus-hook-proposal/` 与 `05-amendments/`）｜落地任务见 `.agent-handoff/2026-11-18-usb-cs-productization.md`、`.agent-handoff/2026-11-13-case-export-xcode-loop.md`、`.agent-handoff/2026-11-13-ui-test-contract-and-prompt-fix.md` 与 `.agent-handoff/2026-11-16-h4-childrun-wiring-and-tca1-generation.md`
+> 状态：**v1.8 = v1.7 全部落地 + 人工 TTY 边界实证修订**（2026-11-19：两次真机 ws-run 人工试跑证伪单命令人工形态——`spawn_attached` 驱动 stdout 入 PIPE 被 `communicate()` 排空，闸门提示不可见，g-lock 等满 120s 超时（wssess-…015245 红跑 xcresult 在案）；人工 gates 定稿为独立 TTY 三终端 console script 序列（docs/03 §3.9），ws-run 受支持形态收敛为 structural；手工形态 B1 正式账本缺口（仅驱动转录、无 URN），ws-run stdout 转发列二期。v1.7 = v1.6 全部落地 + S9 重启走转正流程）（2026-11-19：用户 2026-11-18 指令 S9 弃用 out/ 批次三终端，改走 ws-run `--target device`；`ios-local-poc-device.yaml` 增 usb_relay 块（iproxy 启用、900s 人工窗口），正式真机 runbook 立 docs/03 §3.9，hostless 测试钉住两 profile 开关分裂；物理设备重连前 fail-closed。v1.6 = v1.5 全部落地 + E6 USB 反向监听 ws-run 转正）（2026-11-18：批次态 `out/cs-architecture/` 的 C/S 拓扑转正为 workers 正式能力，CLI-first 单用例，新增 `test-without-building -xctestrun` argv 契约与 `usb_relay` profile 块；hermetic 红证六张变异-复原双向闭合，模拟器 E2E 见 docs/03 §3.8。v1.5 = v1.4 全部落地 + 附录 C 外部生成偏差回流与用例变更流程；2026-11-13：E1–E5 已落地并完成真实 xcodebuild 端到端验证；v1.4 修订契约二/附录 A/B，XCUITest 生成从「人工另行开口」升级为契约内一等分支，并修正外部 Agent 阅读清单为语料仓 CLAUDE.md + V1 三文档；全量 1248 测试、verify_s0 24/24。2026-11-17：v1.5 新增附录 C，源自 TC-A1 首批外部生成的三条实测偏差，首批实例见 `subsystems/out/external-generation/tca1/04-corpus-hook-proposal/` 与 `05-amendments/`）｜落地任务见 `.agent-handoff/2026-11-18-usb-cs-productization.md`、`.agent-handoff/2026-11-13-case-export-xcode-loop.md`、`.agent-handoff/2026-11-13-ui-test-contract-and-prompt-fix.md` 与 `.agent-handoff/2026-11-16-h4-childrun-wiring-and-tca1-generation.md`
 > 关联：[08 需求说明书](08-需求说明书.md) FR-TD/FR-EX/FR-FRS · [03 实测环境](03-语料工程与实测环境（AlarmKitSpike）.md) §3.6 真机 runbook ·
 > [11 Web 补全方案](11-Web控制台功能设计-补全方案.md)（已搁置，本方案是其 W3.5 断点的独立收口）
 > 前置结论：系统内**不做 Swift 代码生成器**（2026-11-13 讨论定案），AI 产规格、外部 Agent 辅产代码、人审合入、系统负责映射与真实执行。
@@ -304,7 +304,7 @@ query 回显**；④ 连续 10 次运行零假绿方可转正在圈，证据录�
 
 把 gitignored 批次目录 `out/cs-architecture/`（P0/S2–S8 已验证：模拟器三跑、真机五跑）
 的反向监听 C/S 拓扑转正为 workers 包正式能力。一期 **CLI-first、单用例 per invocation**；
-拓扑与协议背景见 [15](15-混合执行与人工闸门方案.md) §8，分步操作见 [03](03-语料工程与实测环境（AlarmKitSpike）.md) §3.8，术语见 [09](09-术语表（人话版）.md) v1.3。
+拓扑与协议背景见 [15](15-混合执行与人工闸门方案.md) §8，模拟器分步操作见 [03](03-语料工程与实测环境（AlarmKitSpike）.md) §3.8，真机人工验收（S9）见 [03](03-语料工程与实测环境（AlarmKitSpike）.md) §3.9，术语见 [09](09-术语表（人话版）.md) v1.3。
 
 | 项 | 契约（钉版，改动先改本文档与 handoff） |
 |---|---|
@@ -313,12 +313,12 @@ query 回显**；④ 连续 10 次运行零假绿方可转正在圈，证据录�
 | 注入契约 | `testpilot-inject-xctestrun`：PlistBuddy 在**源同目录**生成 `.injected.xctestrun`（DerivedData 内、gitignored），FV1/FV2 plist 形态自适应，Delete-then-Add 幂等，UITargetApp 刻意不注；注入失败统一 exit 2 |
 | 驱动契约 | `testpilot-ws-gate-driver`：websockets>=14 **延迟导入**（非 mac/无依赖宿主不触发）；四 outcome `complete`(rc0)/`peer_closed`(rc1)/`fail_loud`(rc2)/`connect_timeout`(rc2)，每种收口必落驱动转录 `ws-gate-driver-transcript-v1`；fail-loud = fail 帧 + close 1008 + rc2。`peer_closed` 覆盖 reject 真实链：XCTAssert 抛错 → XCTest 拆 NWConnection，驱动留痕 rejected 闸门而不是吐 traceback |
 | 编排与退出码 | `testpilot-hybrid ws-run`（交互式子命令，**不进 worker 队列**：worker 无 TTY）。driver-first：驱动先起（retry 窗 300s 硬下限兜 xcodebuild 启动墙钟），xcodebuild 后起；first-exit 对账（驱动非零先退立即 terminate 对方，shield 宽限防 CancelledError 灌入子进程 wait）。退出码 **0 全绿 / 2 硬错误 / 3 产品失败**（有产物的 xcodebuild 失败，含 reject→serverFail）；**reject 永不自动冲绿**，无 reject 留痕的提前断链判硬错误（Runner 崩溃/环境故障） |
-| profile 块 | `ios-local-poc-xcode.yaml` 增 `usb_relay`（13 键；老 profile 缺省 `{}` 零影响）：`relay_url_template/listen_port/session/retry_seconds(≥300 硬校验)/grace_seconds/auto_delay/structural_default/time_allowance_s(须大于 Swift 三闸硬超时之和)/gates_human/gates_structural/evidence_subdir/iproxy.{enabled,local_port,device_port}/xctestrun.output_suffix`。iproxy 默认 `enabled: false`，device 目标遇关闭直接 exit 2；二进制缺失翻译硬错误带 `brew install libimobiledevice` 指引 |
+| profile 块 | `ios-local-poc-xcode.yaml` 增 `usb_relay`（13 键；老 profile 缺省 `{}` 零影响）：`relay_url_template/listen_port/session/retry_seconds(≥300 硬校验)/grace_seconds/auto_delay/structural_default/time_allowance_s(须大于 Swift 三闸硬超时之和)/gates_human/gates_structural/evidence_subdir/iproxy.{enabled,local_port,device_port}/xctestrun.output_suffix`。iproxy 在模拟器 profile 默认 `enabled: false`，device 目标遇关闭直接 exit 2（文案指向 docs/03 §3.9）；二进制缺失翻译硬错误带 `brew install libimobiledevice` 指引。**2026-11-18 起 `ios-local-poc-device.yaml` 增同构 usb_relay 块且 `iproxy.enabled: true`、`time_allowance_s: 900`，专供 S9 真机 ws-run（docs/03 §3.9）；两 profile 开关分裂由 hostless 测试钉住** |
 | 账本（B1） | 会话目录 `<data_dir>/ws-relay-sessions/wssess-<UTCstamp>-<hash8>/`：证据 PNG + 驱动转录 + 正式 `transcript.json`（schema `ws-gate-transcript-v1`，四 outcome passed/product_failure/protocol_error/hard_error 对 0/3/2/2；tmp+os.replace 原子写；证据经 LocalFsArtifactAdapter 取 `urn:testpilot:localfs:` URN，适配器缺失/抛错不写假 URN）。**一期不写 test_runs 表、不碰 FileGateStore**，`test_run_ref` 恒 null 给二期回填；schema 保持 v15 零 DDL |
 | token 红线 | 运行期 `TESTPILOT_RELAY_TOKEN` 环境变量注入；缺省回退线协议默认 `tok-p0` 并 stderr 警告；yaml/转录/快照只许出现键名与掩码，绝不写明文 token |
 | 收口对账 | best-effort `lsof -nP -iTCP:<port> -sTCP:LISTEN` 结果入转录，工具失败只转录不致命；iproxy 在 finally 回收，被杀进程账本 rc=None（编排器收口语义，非信号负数） |
 | 测试与红证 | 全假件 hermetic：`test_ws_relay_session.py` 32 条（FakeProcess 事件门控 hang 模式建模真实进程时序，杜绝同 tick 集合顺序 flaky）+ 驱动 36 + 转录 30 + spawn_attached/CLI 既有套件；红证六张 A–F（terminate 摘除/无产物误分型/reject 误分型/iproxy 异常不翻译/driver-first 反序/peer_closed 兜底摘除）全部变异-复原双向，零 TEMP-RED 残留；`websockets>=14` 显式入 workers pyproject（S8 裸 python3 事故教训），uv.lock 仅 +2 行零其他包漂移 |
-| 验证边界 | 模拟器 structural E2E 见 docs/03 §3.8（五验收 + 错令牌红证 + 强制复绿），**结论不外推真机**；iproxy 代码本期落地但不经真机验证，S9 真机人工验收按用户 2026-11-18 指令暂缓、四取证点在 runbook 03 待命；TestPilotKit Swift 本期零改动 |
+| 验证边界 | 模拟器 structural E2E 见 docs/03 §3.8（五验收 + 错令牌红证 + 强制复绿），**结论不外推真机**；S9 真机人工验收已按用户 2026-11-18 指令重启，走转正 console script 的**三终端人工序列**（iproxy + 独立 TTY `testpilot-ws-gate-driver` + 注入器/`xcodebuild`；2026-11-19 事故后 ws-run 单命令人工形态不受支持，理由见 docs/15 §8.5 步骤 4），四取证点 A–D 正式 runbook 在 docs/03 §3.9（批次 runbook 03 降级为历史叙事）；手工形态无正式 B1 转录/localfs URN，账本缺口随二期 stdout 转发补齐；设备态每次开跑实查，unavailable 即 fail-closed；TestPilotKit Swift 本期零改动 |
 
 ## 5. 验收总表与红证清单
 
@@ -352,10 +352,10 @@ query 回显**；④ 连续 10 次运行零假绿方可转正在圈，证据录�
 3. 不在系统内生成任何 Swift 代码（单元与 XCUITest 一律由系统外 Agent 按 §3.2 双分支约定生成、人审合入；v1.4 起 XCUITest 已是契约内一等分支，但系统本身仍零代码生成）；不做自动分支创建/自动合入；
 4. 不做 schema v16（映射走 raw_json + 独立 map 文件）；不改动 S2/S3/S4 既有语义与探针封存值；
 5. 不把外部 Agent 生成的代码拷入本仓，不把演示分支合入语料仓主线；
-6. （v1.6 增）不做 WS↔gate store 常驻桥接进程与 web 交互页：一期人工介入走 `testpilot-hybrid ws-run` 终端交互，web 整体留二期（与 [11](11-Web控制台功能设计-补全方案.md) §12 SSE/WS 推送禁令边界一致，不引 Node/WDA/Go 新运行时）；
+6. （v1.6 增，v1.8 修订）不做 WS↔gate store 常驻桥接进程与 web 交互页：一期人工介入走 CLI——structural 全自动用 `testpilot-hybrid ws-run` 单命令，**人工 gates 用独立 TTY 三终端序列**（`testpilot-ws-gate-driver` 前台交互，2026-11-19 真机实证 ws-run 管道边界后定稿，docs/03 §3.9），web 整体留二期（与 [11](11-Web控制台功能设计-补全方案.md) §12 SSE/WS 推送禁令边界一致，不引 Node/WDA/Go 新运行时）；
 7. （v1.6 增）不做多会话循环：一期一次调用一条 TC-Ax（单会话 complete 即收口）；一条 xcodebuild action 串行多用例的 gate_id 自路由多会话列二期靠前，hello 帧不加 test_id、转录 schema 加法带默认值；
 8. （v1.6 增）不写 test_runs 表、不接 FileGateStore（core 四态无 rejected、gate id 闭集不同构、双时钟会给假续期）；B1 本地转录 + localfs URN 是一期账本，`ws-relay:` 幂等前缀的终态直写导入器留二期；
-9. （v1.6 增）不做 build-for-testing 自动化与 DerivedData 自动发现（`--xctestrun` 必须显式）；iproxy 代码随 E6 落地但一期不启真机验证（device profile 不启用，S9 按用户指令暂缓）；TestPilotKit Swift 零改动、不进 Python 包。
+9. （v1.6 增，2026-11-19 两度修订）不做 build-for-testing 自动化与 DerivedData 自动发现（`--xctestrun` 必须显式）；iproxy 代码随 E6 落地，模拟器 profile 保持不启用，**device profile 已随 S9 重启启用（用户 2026-11-18 指令，docs/03 §3.9）；真机人工执行走三终端 console script 序列而非 ws-run 单命令（2026-11-19 g-lock 超时事故实证的 TTY 边界），ws-run 人工 stdout 转发增强列二期**；TestPilotKit Swift 零改动、不进 Python 包。
 
 ---
 
