@@ -1,4 +1,4 @@
-"""DevicectlControlAdapter hermetic 测试（docs/15 §3/§4，H3）。
+"""DevicectlControlAdapter hermetic 测试（docs/01 §3/§4，H3）。
 
 零真机：FakeExecutor 脚本化 rc，并在截图调用时模拟 devicectl 落盘 PNG，
 钉死三件事——① argv 全显式（设备/路径/PID，无隐式目标）；② rc!=0 一律

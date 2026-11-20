@@ -67,7 +67,7 @@ export function transferCaseIds(sourceRefs: string[]): string[] {
   return out;
 }
 
-// docs/16 §4.5：审批卡片按步骤锚点分组的纯函数（前端无单测，人工走查 + 门禁构建）。
+// docs/01 §4.5：审批卡片按步骤锚点分组的纯函数（前端无单测，人工走查 + 门禁构建）。
 export interface StepGroup {
   // null 恒为第一组「用例级（全程）」；其余按 step_id 数值升序，乱序输入确定收敛
   stepId: number | null;

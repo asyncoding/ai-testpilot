@@ -82,13 +82,13 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     container.adapters["store"] = store
     container.adapters["queue"] = SqliteQueue(store.conn)
 
-    # H2（docs/15 §7）：文件态人工闸门，profile 无关、零 DDL，始终装配；
+    # H2（docs/01 §7）：文件态人工闸门，profile 无关、零 DDL，始终装配；
     # 落 data_dir/gates/<gate_id>.json，不进 sqlite、不需要 schema 迁移。
     from testpilot_adapters.gate_store import FileGateStore
 
     container.adapters["gate_store"] = FileGateStore(data_dir)
 
-    # H3（docs/15 §3）：DH AX 语义刺激适配器，构造期不起进程；真机/Device Hub
+    # H3（docs/01 §3）：DH AX 语义刺激适配器，构造期不起进程；真机/Device Hub
     # 缺席时调用才报 AdapterUnavailableError。CLI 随仓入库 scripts/。
     from testpilot_adapters.dh_ax import DhAxAdapter
     from testpilot_adapters.process_executor import SubprocessExecutor
@@ -96,19 +96,19 @@ def build_container(config: ProfileConfig, base_dir: str | Path) -> Container:
     dh_cli = base_dir / "scripts" / "device_hub_ax_cli.swift"
     container.adapters["dh_ax"] = DhAxAdapter(SubprocessExecutor(), dh_cli)
 
-    # H3（docs/15 §3/§4）：devicectl 控制面（截图/启动/按 PID 终止），截图落
+    # H3（docs/01 §3/§4）：devicectl 控制面（截图/启动/按 PID 终止），截图落
     # data_dir/devicectl-work；同样构造期不起进程，rc!=0 由适配器响亮失败。
     from testpilot_adapters.devicectl_control import DevicectlControlAdapter
 
     container.adapters["devicectl"] = DevicectlControlAdapter(
         SubprocessExecutor(), data_dir / "devicectl-work")
 
-    # H3（docs/15 §6）：混合会话文件态存储，零 DDL；游标+计划+账本同文件原子写。
+    # H3（docs/01 §6）：混合会话文件态存储，零 DDL；游标+计划+账本同文件原子写。
     from testpilot_adapters.hybrid_session_store import FileHybridSessionStore
 
     container.adapters["hybrid_session_store"] = FileHybridSessionStore(data_dir)
 
-    # H4（docs/15 §6.2）：xcodebuild 混合段子 run 接 execution_service——同一队列、
+    # H4（docs/01 §6.2）：xcodebuild 混合段子 run 接 execution_service——同一队列、
     # 同一 run 账本与五态状态机，不造第二套执行通道。端口提交后轮询账本到终态：
     # failed 抛 ChildRunFailedError 走步骤 failure_policy，error/timeout/等待超时
     # 抛 AdapterUnavailableError 子类转 blocked。runner=stub 时入队仍成功，由 worker

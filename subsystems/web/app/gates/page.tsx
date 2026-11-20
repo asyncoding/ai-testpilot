@@ -1,6 +1,6 @@
 "use client";
 
-// docs/15 §7 人工闸门页：5s 轮询队列（不做 SSE/系统通知，headless 友好），
+// docs/01 §7 人工闸门页：5s 轮询队列（不做 SSE/系统通知，headless 友好），
 // pending/expired 置顶并由 GateCard 展示倒计时与裁决表单；已闭环闸门只读留痕。
 // 倒计时本地每秒重算，后端读时按 deadline 现算过期，两侧都不信任对方时钟做状态。
 import Link from "next/link";

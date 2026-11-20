@@ -1,4 +1,4 @@
-# ios-local-poc：日常开发与主演示 profile（docs/07 §9）
+# ios-local-poc：日常开发与主演示 profile（docs/01 §9）
 # S1.2 起 model=ollama、vectors=chroma、search=hybrid（真实嵌入+混合检索）；
 # runner 仍为 recorded（S3 起 xcode）、environment 仍 stub（S3 起 ios-simulator）。
 profile: ios-local-poc

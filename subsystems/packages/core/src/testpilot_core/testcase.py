@@ -127,11 +127,11 @@ EXPLICIT_TYPE_LABELS: dict[OracleType, str] = {
     OracleType.MANUAL: "人工确认",
 }
 _EXPLICIT_TAG_RE = re.compile(r"^【(?P<label>[^】]+)】\s*(?P<rest>.*)$")
-# docs/16 回写标签内的锚点段：【UI 断言｜步骤3】，全角 ｜ 为主、半角 | 兼容
+# docs/01 回写标签内的锚点段：【UI 断言｜步骤3】，全角 ｜ 为主、半角 | 兼容
 _TAG_ANCHOR_SPLIT_RE = re.compile(
     r"^(?P<label>.+?)\s*[｜|]\s*步骤\s*(?P<n>[0-9]+)\s*$"
 )
-# docs/16 正文显式步骤引用：只认阿拉伯数字；中文数字与事件描述（T0/解锁后/侧边键后）
+# docs/01 正文显式步骤引用：只认阿拉伯数字；中文数字与事件描述（T0/解锁后/侧边键后）
 # 没有「步骤/Step」前缀，天然不匹配——事件不是稳定序号，硬映射就是猜测
 _STEP_ANCHOR_RE = re.compile(r"(?:步骤|\bStep)\s*([0-9]+)", re.IGNORECASE)
 
@@ -163,7 +163,7 @@ def split_explicit_type(text: str) -> tuple[OracleType | None, str]:
 
 
 def extract_step_anchor(text: str) -> tuple[int | None, str]:
-    """从断言正文提取显式步骤引用（docs/16 §4.2 保守口径）。
+    """从断言正文提取显式步骤引用（docs/01 §4.2 保守口径）。
 
     返回 ``(锚点序号或 None, 歧义说明)``：唯一 N 才锚定；同条断言出现多个
     不同 N 属歧义，不锚并交调用方记死信；无引用返回 (None, "")。
@@ -177,7 +177,7 @@ def extract_step_anchor(text: str) -> tuple[int | None, str]:
     return numbers.pop(), ""
 
 
-# ── C2 知识分流（docs/16 §4.3，2026-11-16）─────────────────────────────────
+# ── C2 知识分流（docs/01 §4.3，2026-11-16）─────────────────────────────────
 # 词表刻意只收强结构信号，默认 assertion——宁可漏分流不可误杀可判定断言；
 # 增减词表必须由 tests/test_context_notes.py 的红证夹具驱动。
 BulletRole = Literal["assertion", "context"]
@@ -200,7 +200,7 @@ _CONTEXT_MECHANISM_RE = re.compile(
 
 
 def classify_bullet_role(text: str) -> BulletRole:
-    """叙事体预期 bullet 的断言/背景知识分流（docs/16 §4.3 C2）。
+    """叙事体预期 bullet 的断言/背景知识分流（docs/01 §4.3 C2）。
 
     保守口径：默认 assertion，仅命中确定性结构词表才归 context；
     人审回写显式标签 ``【类型…】`` 是权威断言，任何词表不得覆盖。
@@ -248,7 +248,7 @@ class _NarrativeBuilder:
         self.tags = _FR_REF_RE.findall(heading_rest)
         self.steps: list[str] = []
         self.oracle_texts: list[str] = []
-        # docs/16：与 oracle_texts 平行的步骤锚点表。None=该条无显式引用（用例级）；
+        # docs/01：与 oracle_texts 平行的步骤锚点表。None=该条无显式引用（用例级）；
         # 嵌套子弹/续行只拼文本、不改锚点，天然实现「嵌套继承顶层 bullet 锚点」。
         self.oracle_anchors: list[int | None] = []
         # 与锚点表平行的歧义说明（多步骤引用）；越界判定在 build 期（需步骤总数）
@@ -359,7 +359,7 @@ class _NarrativeBuilder:
             explicit_type, _, expectation = split_explicit_tag(text)
             step_id: int | None = None
             if note:
-                # 歧义不静默：降级用例级并留死信，整批继续（docs/16 §4.2 + AC2）
+                # 歧义不静默：降级用例级并留死信，整批继续（docs/01 §4.2 + AC2）
                 anchor_errors.append(CaseParseError(
                     doc_external_id=doc_external_id, line=self.line,
                     case_id_hint=self.case_id, snippet=text[:120], error=note,
@@ -587,7 +587,7 @@ def _parse_table_block(header_line: str, rows: list[tuple[int, str]], *, module:
             tags.append(f"env:{cells[env_col].strip()}")
         oracles: list[Oracle] = []
         if expect_text:
-            # docs/16 §4.2 规则 4：表格体单预期格无步骤结构，step_id 恒 None；
+            # docs/01 §4.2 规则 4：表格体单预期格无步骤结构，step_id 恒 None；
             # C2：表格体无知识/断言双段结构，context_notes 恒空（默认值，不显式传）
             oracles.append(Oracle(
                 type=classify_oracle(expect_text),

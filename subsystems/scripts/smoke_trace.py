@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S0 门禁冒烟：发一条"空链路"trace 并验证它真的落盘/上报（docs/07 §10）。
+"""S0 门禁冒烟：发一条"空链路"trace 并验证它真的落盘/上报（docs/01 §10）。
 
 默认 profile（noop tracer）：
     .venv/bin/python scripts/smoke_trace.py

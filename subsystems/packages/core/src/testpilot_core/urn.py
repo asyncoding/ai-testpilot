@@ -1,4 +1,4 @@
-"""统一资源标识（docs/07 §4）。
+"""统一资源标识（docs/01 §4）。
 
 外部系统 ID 不作为核心主键，统一包装为：
     urn:testpilot:<source_system>:<resource_type>:<external_id>@<version>

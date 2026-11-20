@@ -63,7 +63,7 @@ JSON 字符串/字典，进程调用与文件导出在适配器层（adapters/xc
     ]
 
 纪律：未知 nodeType/result、缺键、非法时长一律 :class:`SchemaValidationError`
-fail-closed，绝不静默猜状态（docs/07 证据驱动）。官方 18 种 nodeType 中本模块
+fail-closed，绝不静默猜状态（docs/01 证据驱动）。官方 18 种 nodeType 中本模块
 只放行真实 run 已观测/有 schema 证据的五类，其余（Repetition/Attachment/…）
 等真跑观测后再校准，不提前实现。
 """

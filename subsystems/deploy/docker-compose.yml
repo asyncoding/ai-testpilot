@@ -1,4 +1,4 @@
-# TestPilot 本地基础设施（docs/07 §6 技术选型；仅本地 POC，密钥均为开发默认值，禁止用于生产）
+# TestPilot 本地基础设施（docs/01 §6 技术选型；仅本地 POC，密钥均为开发默认值，禁止用于生产）
 #
 #   docker compose up -d                         # redis + chroma（S1+ 队列/向量检索用）
 #   docker compose --profile observability up -d  # 追加 Langfuse 全家桶（S0 trace 门禁用）

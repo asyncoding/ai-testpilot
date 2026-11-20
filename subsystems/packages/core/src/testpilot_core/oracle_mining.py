@@ -15,7 +15,7 @@ S2.1~S2.3 一致——**确定性脊柱先挖，模型只在白名单内补 orac
      的句子，拿不准的叙述句不升级为断言，置信度 0.5。
 - 当前代码（code_symbol）**不在确定性侧编造 expectation 文本**——符号只给锚点，
   断言文本由模型在白名单内生成或人工补；无中生有的 expectation 即幻觉。
-- 模型仅对 ``oracle_missing`` 用例调用（预算守卫，docs/07 §5.4），行级白名单：
+- 模型仅对 ``oracle_missing`` 用例调用（预算守卫，docs/01 §5.4），行级白名单：
   type 必须是四类枚举、source_refs 必须是「需求 URN ∪ 证据 URN ∪ 相似用例 URN」
   子集；违规逐行进 ``RejectedOracle``（worker 落 dead_letters，source=oracle-mine），
   整包形状错抛 ``OracleMiningValidationError`` 由 worker 降级；模型置信度统一 0.5，
@@ -74,7 +74,7 @@ class MinedOracle(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     source_kind: SourceKind
     provenance: Provenance = "deterministic"
-    # docs/16 步骤锚点：确定性自有/平移断言透传解析期 step_id；AC/事故源无步骤
+    # docs/01 步骤锚点：确定性自有/平移断言透传解析期 step_id；AC/事故源无步骤
     # 语义恒 None；模型补点仅允许 null 或 1..步骤总数，越界逐行拒入死信。
     step_id: int | None = None
 
@@ -337,7 +337,7 @@ def oracle_json_schema() -> dict:
                         "expectation": {"type": "string"},
                         "source_refs": {"type": "array",
                                         "items": {"type": "string"}},
-                        # docs/16：可空步骤锚点；运行期再按 case.steps 长度做越界校验
+                        # docs/01：可空步骤锚点；运行期再按 case.steps 长度做越界校验
                         "step_id": {"type": ["integer", "null"],
                                     "minimum": 1},
                     },
@@ -398,7 +398,7 @@ def apply_model_oracles(
         if otype not in allowed_types:
             _reject(rejected, row, "bad_type", f"type 不在四类枚举: {otype}")
             continue
-        # docs/16：模型 step_id 只允许 null 或 1..步骤总数；事件描述不得猜序号
+        # docs/01：模型 step_id 只允许 null 或 1..步骤总数；事件描述不得猜序号
         raw_step_id = row.get("step_id")
         step_id: int | None
         if raw_step_id is None:

@@ -38,6 +38,9 @@ videos/
 # 跨 Agent 接力工作态（纯本地）
 .agent-handoff/
 
+# Claude Code 本机个人设置（含本地权限许可，不随仓共享；.claude/ 下其余共享配置仍可入库）
+.claude/settings.local.json
+
 # 编辑器
 .obsidian/
 .vscode/

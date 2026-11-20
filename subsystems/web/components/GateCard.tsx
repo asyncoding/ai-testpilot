@@ -1,6 +1,6 @@
 "use client";
 
-// docs/15 §7 单条人工闸门卡片：pending 展示倒计时与操作/裁决表单，
+// docs/01 §7 单条人工闸门卡片：pending 展示倒计时与操作/裁决表单，
 // expired 给续期/放弃，responded/canceled 只读留痕。证据 URN 强制时
 // 前端先拦一道（后端 core 仍 fail-closed，前端只是体验层）。
 import { useEffect, useState } from "react";

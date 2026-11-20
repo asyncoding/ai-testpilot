@@ -92,7 +92,7 @@ class FeedbackReason(StrEnum):
     OTHER = "other"
 
 
-# ── 混合执行与人工闸门（docs/15，hybrid-plan-v1，schema v15 零 DDL）──────────
+# ── 混合执行与人工闸门（docs/01，hybrid-plan-v1，schema v15 零 DDL）──────────
 
 
 class StepActor(StrEnum):

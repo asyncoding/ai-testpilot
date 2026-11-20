@@ -1,10 +1,10 @@
-"""case-export-v1 结构化用例集导出纯函数（docs/12 §3.1，切片 E1）。
+"""case-export-v1 结构化用例集导出纯函数（docs/01 §3.1，切片 E1）。
 
 零 IO、零三方（仅 pydantic + 标准库）：吃 core 领域模型列表，吐
 ``case-export-v1`` 载荷 dict 与内容寻址 hash，供 worker 落盘、供外部 Agent
 携出系统边界生成 Xcode 测试。
 
-边界纪律（docs/12 §2）：
+边界纪律（docs/01 §2）：
 
 - 只导出 ``lifecycle=active`` 用例；cancelled 用例不进 ``cases``，只进
   ``excluded.cancelled_case_ids`` 留痕，导出物不假装库比实际更全；
@@ -32,13 +32,14 @@ from .requirement import RequirementParseResult
 
 CASE_EXPORT_SCHEMA_VERSION = "case-export-v1"
 
-# 外部 Agent 生成约定（docs/12 §3.2）：target 名是工程约定而非全域常量，
+# 外部 Agent 生成约定（docs/01 §9.3）：target 名是工程约定而非全域常量，
 # 允许 worker 按 profile 覆盖，默认值对齐 AlarmKitSpike 演示工程。
 DEFAULT_TEST_TARGET = "AlarmKitSpikeTests"
 DEFAULT_UI_TEST_TARGET = "AlarmKitSpikeUITests"
 DEFAULT_MARKER_COMMENT = "// testpilot-case: <TC-ID>"
 DEFAULT_NAMING = "func test_<TC-ID 去横线转驼峰>_<英文短描述>()"
-CONVENTION_DETAIL_DOC = "docs/12 §3.2"
+# 该字符串会序列化进每份导出 JSON 的 generation_convention.detail_doc，改动即契约面变更。
+CONVENTION_DETAIL_DOC = "docs/01 §9.3"
 
 
 class CaseExportError(ValueError):
@@ -75,7 +76,7 @@ def default_generation_convention(
 def tc_id_to_swift_token(tc_id: str) -> str:
     """TC-ID → Swift 方法名 token：``TC-C1`` → ``TCC1``（去横线、段首大写）。
 
-    与 docs/12 §3.2 命名约定同源，E3 扫描器反向匹配时复用同一口径，
+    与 docs/01 §3.2 命名约定同源，E3 扫描器反向匹配时复用同一口径，
     避免导出侧与映射侧各写一份转换规则。
     """
     segments = [seg for seg in tc_id.split("-") if seg]
@@ -98,7 +99,7 @@ def utc_export_stamp(now: datetime) -> str:
 
 
 def export_filename(now: datetime, content_hash: str) -> str:
-    """落盘文件名：``case-set-<UTC时间戳>-<hash8>.json``（docs/12 §3.1）。"""
+    """落盘文件名：``case-set-<UTC时间戳>-<hash8>.json``（docs/01 §3.1）。"""
     from datetime import timezone
 
     stamp = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

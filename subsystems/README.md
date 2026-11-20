@@ -1,12 +1,12 @@
 # TestPilot subsystems
 
-研发测试质量智能体平台的工程实现。架构与需求权威见 `../docs/07-最终版总体设计-v2.md`、
+研发测试质量智能体平台的工程实现。架构与需求权威见 `../docs/01-总体设计.md`、
 `../docs/08-需求说明书.md`；本文件是 S0 骨架的**运行手册**。文中黑话（脊柱/投影/hermetic/
 死信/探针等）先查 [`../docs/09-术语表（人话版）.md`](../docs/09-术语表（人话版）.md)。
 
-**新克隆仓库先看 [`../docs/13-系统使用说明书（克隆到演示全流程）.md`](../docs/13-系统使用说明书（克隆到演示全流程）.md)**：
+**新克隆仓库先看 [`../docs/13-系统使用说明书（克隆到演示全流程）.md`](13-系统使用说明书（克隆到使用全流程）.md)**：
 从环境准备到两个演示场景（需求→全量用例→真实 Xcode 执行；commit diff→影响面→选择重跑）
-的分步命令手册；其设计依据与契约见 [`../docs/12-用例导出与Xcode执行闭环方案.md`](../docs/12-用例导出与Xcode执行闭环方案.md)。
+的分步命令手册；其设计依据与契约见 [`../docs/01-总体设计.md`](../docs/01-总体设计.md)。
 
 ## 目录
 
@@ -282,7 +282,7 @@ TESTPILOT_PROFILE=config/profiles/ios-local-poc.yaml \
 ## 问答工作流（S1.4）：LangGraph 答案图、引用强制与三态版本标注
 
 落地 docs/08 **FR-QA-001～004**：知识问答必须带可溯源引用、代码问题强制现场核验、
-事故历史证词逐字并列、回答级反馈采集。编排用 LangGraph（docs/07 §11 指定），
+事故历史证词逐字并列、回答级反馈采集。编排用 LangGraph（docs/01 §11 指定），
 但 `import langgraph` 全仓只出现在 `qa_graph/graph.py` 一个薄装配文件里——节点函数
 全部是框架无关的 `async f(state, deps)`，备选手写状态机可零改动接管。
 
@@ -539,7 +539,7 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
   重算经评估无可靠靶点（intent_mismatch 来自模型分类过触发，regex_bypass 8 题全对），
   no-go 留诚实记账。
 
-### E5 隔离语义裁判（LLM-as-judge，docs/06 §6.3 / docs/07 §7）
+### E5 隔离语义裁判（LLM-as-judge，docs/06 §6.3 / docs/01 §7）
 
 裁判模型与生成模型不同体：生成 qwen2.5:7b，裁判 `deepseek-r1:7b`（prompt 版本
 semantic-judge-1）。裁判纯函数在 core（`semantic_judge.py`，零 IO 零三方），
@@ -857,7 +857,7 @@ TESTPILOT_PROFILE=config/profiles/offline-demo.yaml \
 | 优先级强制 | 优先级只从 FR 映射（缺省 P2），模型载荷**没有 priority 字段**，P0/P1 指标无法被模型灌水 |
 | 幻觉台账 | 违规逐行拒入 `RejectedPoint`（unknown_fr/unknown_source/empty_text/bad_kind/bad_shape），worker 落 `dead_letters`（source=`tp-gen`），**绝不进 test_points 正式清单**；整包形状错抛异常 → 纯确定性降级；幻觉率 = 拒入 /（有效模型点 + 拒入），重复行去重不进分母 |
 | 影响面检索 | 相似用例走 `search_test_cases`（FR tag json_each 精确 + 标题 LIKE，仅活跃、P0→P3 排序）；事故/符号走现有检索适配器按 kind 分流；检索故障只计 `retrieval_degraded`，不编造证据 URN |
-| 盲标评测 | 专家清单先封存（规范 JSON sha256），空清单/跨文档评测抛 `BlindOrderError`，流程上杜绝「先看 AI 再补专家」；匹配 = fr_id 相同前提下先严格关键词全命中，失败（含近义词改写）或无关键词时退 expert.text 全文 token（CJK bigram+ASCII word）Jaccard ≥0.5 回退（L3-1，阈值不下调）；输出覆盖率/精确率/漏点，**P0/P1 漏点与幻觉点单列**（AC2），真档案例见 [docs/10](../docs/10-QA专家盲评报告-2026-11.md) |
+| 盲标评测 | 专家清单先封存（规范 JSON sha256），空清单/跨文档评测抛 `BlindOrderError`，流程上杜绝「先看 AI 再补专家」；匹配 = fr_id 相同前提下先严格关键词全命中，失败（含近义词改写）或无关键词时退 expert.text 全文 token（CJK bigram+ASCII word）Jaccard ≥0.5 回退（L3-1，阈值不下调）；输出覆盖率/精确率/漏点，**P0/P1 漏点与幻觉点单列**（AC2），真档案例见 [BASE-20261112-01](../docs/archive/05-评测基线快照.md) |
 | 幂等 | 测试点 URN 内容寻址（`point_urn`，TestPoint 无 urn 字段不污染 S0 模型）；meta hash 增量跳过，重灌按 doc_urn 整组替换不留幽灵；schema v10 新表 `test_points`，草稿不进正式用例库（留待 S2.5 HITL） |
 
 ### 运行方式
@@ -1206,7 +1206,7 @@ kind=`bad_case`），修复后关联回归评测 run——pass 才闭环 fixed�
 （`tests/fixtures/s2_gate/`，不含语料仓 V1 原文）验证门禁机制本身；真档 5 真实需求盲标
 走下方手动命令，语料仓只读、路径参数化。**2026-11 真档专家盲评（W0–W3）已完成**：1 份
 新鲜需求测试点盲标 + 8 个 AC 派生 oracle 单元 + 11 个真实事故模式重建包归因标定，
-封存/盲序/红证全流程与双列指标见 [docs/10](../docs/10-QA专家盲评报告-2026-11.md)
+封存/盲序/红证全流程与双列指标见 [BASE-20261112-01](../docs/archive/05-评测基线快照.md)
 （「5 单元」承诺尚欠 4，随新需求文档按同 runbook 增量补评）。
 
 | # | 门禁（docs/06 §3.2） | 阈值 | 实现位置 |
@@ -1502,7 +1502,7 @@ workers 只负责证据组包（Provider 接缝依赖注入），**schema 保持
 - **手动验证状态**：真实模拟器/xcresult/os_log/ffmpeg 字段校准**已完成**（2026-11-10，
   见下节「S3.2/S3.3 真机探针校准」）；QA 节真档归因标定**已完成**（2026-11，W3：
   11 个真实事故模式重建包 11/11 对角、四门禁全过，三条解读限制在案，见
-  [docs/10](../docs/10-QA专家盲评报告-2026-11.md)）；本片 40 例仍是合成回归底座，
+  [BASE-20261112-01](../docs/archive/05-评测基线快照.md)）；本片 40 例仍是合成回归底座，
   独立第三方采集的真实 CI run 标定继续挂账（等 PipelineFinished 通道增量）。
 
 ### S3.2/S3.3 真机探针校准（2026-11-10，手动探针不进门禁）
@@ -1533,7 +1533,7 @@ xcresult 端到端 9 + os_log 13 + ffmpeg 5 + cancel/XCUITest 16，另有原始�
 ## 执行收口与 S3 五门禁总验（S3.5，FR-EX-001～007）：verdict 落库、HTTP API、真实证据 Provider、执行控制台
 
 S3 纵切收口片：S3.4 的归因结论此前只在进程内存在，本片把它**随 TestRun 落账、经 HTTP
-暴露、在 Web 控制台可浏览**，并以一条 hermetic 总验探针把 docs/07 §10 的 S3 五门禁一次
+暴露、在 Web 控制台可浏览**，并以一条 hermetic 总验探针把 docs/01 §10 的 S3 五门禁一次
 跑齐。纪律延续：**schema 保持 v15 零变更**（verdict 是 TestRun 的字段、随 raw_json
 持久化，不新增表/列），core 仍零 IO 零三方，自动门禁不起端口、不触真机/模拟器。
 
@@ -1569,7 +1569,7 @@ S3 纵切收口片：S3.4 的归因结论此前只在进程内存在，本片把
   查询参数 + `useSearchParams` 外包 Suspense。StaticFiles 不服务无扩展名目录路径，
   入口 URL 用 `/runs.html`、`/runs/detail.html`（与 `/approvals.html` 同一约定），
   进站后的前端路由再用漂亮路径。
-- **五门禁口径（docs/07 §10 / docs/06 §3.3）**：① 执行成功率=runner 任务成功产出
+- **五门禁口径（docs/01 §10 / docs/06 §3.3）**：① 执行成功率=runner 任务成功产出
   结构化 TestRun 的比例（基础设施口径，非用例通过率），error/timeout/canceled **单列不进
   分母**；② 准确率 ≥.7 且真缺陷 recall ≥.95、误误导率 ≤.02；③ 证据充分率 hermetic 口径
   = 引擎非弃权率（1−needs_human 弃权率），生产口径的人工抽检在报告注明为上线后环节；
@@ -1686,10 +1686,10 @@ curl -s "http://127.0.0.1:8765/api/runs?status=failed&project=AlarmKitSpike-demo
 - **schema 全程 v15 零变更**：事件/死信复用 events/dead_letters，CI run/草稿复用
   test_runs/approvals/outbox，治理进 raw_json，延迟进既有时间列与 report_json。
 
-## 真机切片一（2026-11-13，docs/14/details/12 §3.4）：真机 EnvironmentPort + os_log 两步采集，无新基建
+## 真机切片一（2026-11-13，EVD-20261113-02 / docs/01 §9.5）：真机 EnvironmentPort + os_log 两步采集，无新基建
 
 把模拟器执行链同构延伸到物理真机，**不引入任何新运行时/服务，schema v15 零 DDL**；
-刺激动作本切片只落契约（docs/12 §3.4 `stimulus-channel1-v0` 草案），不实现 DeviceControlPort。
+刺激动作本切片只落契约（docs/01 §9.5 `stimulus-channel1-v0` 草案），不实现 DeviceControlPort。
 
 | 层 | 模块 | 职责与红线 |
 |---|---|---|
@@ -1720,14 +1720,14 @@ curl -s "http://127.0.0.1:8765/api/runs?status=failed&project=AlarmKitSpike-demo
   exit 2 人工待办路径完整；verify_s0 仅 A4/A8 因本机 8765 被用户自有 uvicorn 占用而
   FAIL，同 app 换端口手起 `/health`、`/api/config` 均 200，证明与本切片无关。
 - 验证边界（如实声明）：真机 xcodebuild 执行未跑（依赖演示分支签名就绪，runbook 在
-  docs/03 §3.7）；刺激 spike S-1～S-6 未开始；go-ios 仅 Web 资料级调研（docs/14 附录 A，
+  docs/03 §3.7）；刺激 spike S-1～S-6 未开始；go-ios 仅 Web 资料级调研（docs/archive/02（CAL-20261113-02）附录 A，
   本机未安装）。
 
 ## USB 反向监听单用例执行（ws-run，2026-11 转正；FR-EX 混合闸门执行）
 
 把 P0/S2–S8 在 gitignored 批次目录（`out/cs-architecture/`）验证过的 USB C/S 拓扑转正为
 workers 包正式能力。一期 **CLI-first、单用例形态**（一次调用一条 TC-Ax）；web 桥接、
-多会话循环、test_runs 直写均列二期（见 docs/15 §8.2 与本节末边界）。
+多会话循环、test_runs 直写均列二期（见 docs/01 §8.2 与本节末边界）。
 
 ### 拓扑与线协议（字面量冻结，Swift TestPilotKit 按字对线）
 
@@ -1811,11 +1811,11 @@ runbook 指引/重试窗耗尽/驱动 rc2/无产物/证据应到未到）；**3 
 - 收口 best-effort 跑 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 端口对账，结果入转录，
   工具失败只转录不致命。
 
-### 边界（明确不做，二期清单见 docs/15 §8.2）
+### 边界（明确不做，二期清单见 docs/01 §8.2）
 
 单用例 per invocation；iproxy 已在 device profile 启用并随 S9 真机验收走查
 （2026-11-18 重启，正式 runbook docs/03 §3.9；物理设备重连前 fail-closed，模拟器结论
 不外推真机）；web WS↔gate store 桥接、多会话循环、test_runs 终态直写、DerivedData
 自动发现均为二期。
 术语见 docs/09（反向监听/WS 闸门驱动/xctestrun 注入/闸门转录/iproxy），分步 runbook 见
-docs/03（§3.8 模拟器 / §3.9 真机），契约与「明确不做」见 docs/12，方案与 B1/FileGateStore 边界见 docs/15。
+docs/03（§3.8 模拟器 / §3.9 真机），契约与「明确不做」见 docs/01，方案与 B1/FileGateStore 边界见 docs/01。

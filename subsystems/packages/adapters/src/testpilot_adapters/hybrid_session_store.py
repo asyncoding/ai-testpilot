@@ -1,4 +1,4 @@
-"""混合会话文件态存储（docs/15 §6，H3）。
+"""混合会话文件态存储（docs/01 §6，H3）。
 
 零 DDL：每个会话一个 JSON（``hybrid-sessions/hsess-<12hex>.json``），信封里
 同时装计划载荷与 SessionCheckpoint 游标。编排器每推进一步就整体原子覆写，

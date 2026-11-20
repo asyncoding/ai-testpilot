@@ -1,4 +1,4 @@
-"""export-cases-worker：case-export-v1 结构化用例集导出 CLI（docs/12 E1）。
+"""export-cases-worker：case-export-v1 结构化用例集导出 CLI（docs/01 E1）。
 
 从 profile store 读需求骨架 / 测试点 / 正式用例 / oracle 挖掘草稿，经
 ``core.case_export`` 纯函数组装版本化 JSON 用例集，默认落盘

@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from .attribution import ATTRIBUTION_RULE_VERSION, FailureEvidence, attribute_failure
 from .enums import FailureCategory
 
-#: 门禁阈值（docs/07 §10 / docs/06 §3.3 场景③）。
+#: 门禁阈值（docs/01 §10 / docs/06 §3.3 场景③）。
 ACCURACY_GATE = 0.7
 REAL_DEFECT_RECALL_GATE = 0.95
 MISLEADING_RATE_GATE = 0.02

@@ -1,4 +1,4 @@
-"""scan-automation-worker：automation-map-v1 自动化身份映射 CLI（docs/12 E3）。
+"""scan-automation-worker：automation-map-v1 自动化身份映射 CLI（docs/01 E3）。
 
 扫描语料仓工作区（人工已切到演示分支）的 Swift 测试，按
 ``// testpilot-case: <TC-ID>`` 标记建立「用例 ↔ Xcode 测试方法」绑定，

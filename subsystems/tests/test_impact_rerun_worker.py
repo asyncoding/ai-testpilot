@@ -1,4 +1,4 @@
-"""impact-rerun-worker 集成测试（docs/12 E4，hermetic）。
+"""impact-rerun-worker 集成测试（docs/01 E4，hermetic）。
 
 tmp 真 sqlite（store + SqliteQueue）+ 合成语料 + fake scm + 落盘 automation-map：
 钉死 analyze_impact→map 鲜度守卫→only_testing 翻译→submit_execution 全链、

@@ -1,4 +1,4 @@
-"""docs/16 §4.3 C2 知识分流红证（2026-11-16，hostless 纯函数）。
+"""docs/01 §4.3 C2 知识分流红证（2026-11-16，hostless 纯函数）。
 
 红证矩阵中 C2 负责的行：
 - 词表纯函数：段首标记/机制夹注/机制句式命中，词表外文本不漂移，显式人审标签守卫；
@@ -119,7 +119,7 @@ def test_classify_explicit_review_tag_always_assertion_even_with_context_words()
     assert classify_bullet_role(tagged2) == "assertion"
 
 
-# ── 解析器：TC-A1 同形夹具（docs/16 §4.3 红证：2 条 context，7 条真断言不减少） ──
+# ── 解析器：TC-A1 同形夹具（docs/01 §4.3 红证：2 条 context，7 条真断言不减少） ──
 
 def test_tc_a1_shaped_fixture_splits_two_context_from_seven_assertions():
     case, dead = _parse_one(_narrative([

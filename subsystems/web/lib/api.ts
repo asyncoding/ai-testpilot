@@ -210,7 +210,7 @@ export function editGovernance(
 export const knowledgeInventoryExportUrl =
   "/api/knowledge/inventory-export";
 
-// ── H2 人工闸门（docs/15 §7）────────────────────────────────────────────────
+// ── H2 人工闸门（docs/01 §7）────────────────────────────────────────────────
 
 export function listGates(status?: string): Promise<{ gates: GateView[] }> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : "";

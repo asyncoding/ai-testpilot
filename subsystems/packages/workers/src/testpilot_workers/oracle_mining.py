@@ -5,7 +5,7 @@
 1. 影响面检索（相似用例/事故/符号），证据 URN 构成模型白名单的一部分；
 2. core 确定性三源先挖（需求 AC / 自身与相似用例现有断言 / 事故义务句），
    无模型也产出完整草稿；代码符号只作锚点，不编造 expectation；
-3. **模型只补 oracle_missing 用例**（预算守卫，docs/07 §5.4），core 白名单逐行
+3. **模型只补 oracle_missing 用例**（预算守卫，docs/01 §5.4），core 白名单逐行
    校验：幻觉行进 dead_letters（source=oracle-mine），绝不入库；
 4. 草稿落 oracle_suggestions 表（schema v11，status=pending，不回写正式
    test_cases.oracles，S2.5 HITL 审批才转正）；按用例整案替换防幽灵；
@@ -207,7 +207,7 @@ async def run_oracle_mining(container: Any, *, full: bool = False) -> dict[str, 
             report["retrieval_degraded"] += retrieval_degraded
             spine = mine_deterministic(case, skeleton, evidence, related)
 
-            # 预算守卫：模型只补 oracle_missing 用例（docs/07 §5.4）
+            # 预算守卫：模型只补 oracle_missing 用例（docs/01 §5.4）
             if model is not None and case.oracle_missing:
                 report["model_calls"] += 1
                 result, degraded = await _mine_with_model(

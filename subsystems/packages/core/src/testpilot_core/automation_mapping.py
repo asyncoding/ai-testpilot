@@ -1,10 +1,10 @@
-"""automation-map-v1 自动化身份映射纯函数（docs/12 §3.3，切片 E3）。
+"""automation-map-v1 自动化身份映射纯函数（docs/01 §3.3，切片 E3）。
 
 零 IO、零三方（仅 pydantic + 标准库）：吃 ``{仓库相对路径: Swift 文本}`` 与
 活跃用例 ID 集，产出「TC 用例 ↔ Swift 测试方法」绑定、未链接测试、未映射
 用例与扫描警告，供 worker 落盘 automation-map-v1。
 
-口径（docs/12 §3.2/§3.3）：
+口径（docs/01 §3.2/§3.3）：
 
 - 标记只认行首空白后独占一行的 ``// testpilot-case: <TC-ID>``；标记挂在它
   下方最近的 ``func test...`` 方法上，遇 class 声明清空悬挂标记；
@@ -13,7 +13,7 @@
   其余目录的 swift 文件不视为测试文件；
 - 未知 TC 标记 / 悬空 manual 绑定 / 非法 only-testing 形态 → ``AutomationMapError``
   fail-closed（worker 映射 exit 2，不产出有效绑定）；
-- 同一 TC 出现在多个方法是 docs/12 §3.3 允许的一对多，但产生警告（worker exit 3）
+- 同一 TC 出现在多个方法是 docs/01 §3.3 允许的一对多，但产生警告（worker exit 3）
   催人审；exploratory 用例不进自动化集，出现标记同样警告并剔除绑定。
 """
 

@@ -1,10 +1,10 @@
-"""impact-execution：影响面分析 → only-testing 选择集纯函数（docs/12 E4 切片）。
+"""impact-execution：影响面分析 → only-testing 选择集纯函数（docs/01 E4 切片）。
 
 零 IO、零三方（仅 pydantic + 标准库）：吃 :class:`~testpilot_core.impact.ImpactAnalysis`
 与 automation-map-v1 的 bindings，产出可直接交给 execution_service 的
 ``-only-testing`` 选择集、未映射清单、幂等键与重跑配额键。
 
-纪律（docs/12 §4 E4）：
+纪律（docs/01 §4 E4）：
 
 - 只有 ``runnable`` 分类的用例进自动选择；``no_automation``/``conflict_update``
   只报告不自动选（冲突用例的标记可能已失效，须人工更新后再纳入）；
@@ -76,7 +76,7 @@ def selection_digest(only_testing_ids: Sequence[str]) -> str:
 
 
 def impact_idempotency_key(head_commit: str, only_testing_ids: Sequence[str]) -> str:
-    """docs/12 契约：``impact:<head短sha>:<排序后ID集 hash>``。"""
+    """docs/01 契约：``impact:<head短sha>:<排序后ID集 hash>``。"""
     return f"impact:{head_short(head_commit)}:{selection_digest(only_testing_ids)}"
 
 

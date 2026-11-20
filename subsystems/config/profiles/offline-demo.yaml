@@ -1,4 +1,4 @@
-# offline-demo：无网/无 Xcode 完整演示（docs/07 §9）
+# offline-demo：无网/无 Xcode 完整演示（docs/01 §9）
 # 页面/输出须标注"证据来自录制夹具"。路径相对 subsystems/ 解析。
 profile: offline-demo
 

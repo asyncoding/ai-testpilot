@@ -1,14 +1,14 @@
-// device_hub_ax_cli.swift — Device Hub AX 语义刺激生产 CLI（docs/15 §3/§9，H3）
+// device_hub_ax_cli.swift — Device Hub AX 语义刺激生产 CLI（docs/01 §3/§9，H3）
 //
 // 与 out/eval/device-hub-stimulus-probe/dh_action.swift（取证探针，gitignored）的区别：
-// 本文件是入库生产工具，只暴露真机已验能力圈内的四个动词（docs/14 附录 B.4，
+// 本文件是入库生产工具，只暴露真机已验能力圈内的四个动词（docs/archive/04（EVD-20261113-02） 附录 B.4，
 // E24–E30）：readiness / home / rotate-left / screenshot。HID/CGEvent 合成输入
 // 已证在模拟器与真机均惰性，本工具不提供任何 HID 动词。
 //
 // 纪律：
 // - 只走 AXPress 语义通道；元素缺失/禁用/窗口零尺寸一律非零退出（fail-loud），
 //   绝不打印成功假装完成（AX err=0 不等于设备侧生效，效果由编排层 devicectl
-//   截图前后对照判读，见 docs/15 §9.4）；
+//   截图前后对照判读，见 docs/01 §9.4）；
 // - 轮询替盲等：pollUntil 在 deadline 内反复探针，不用固定 Thread.sleep 猜转场；
 // - stdout 最后一行输出单个 JSON 对象供适配器解析，诊断信息走 stderr；
 // - Mac 锁屏（CGSSessionScreenIsLocked=1）是硬前置违背，readiness 直接 exit 6。
@@ -27,7 +27,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 
-// MARK: - 进程定位（libproc；NSWorkspace/System Events 对 DeviceHub 关联损坏，docs/14 E16）
+// MARK: - 进程定位（libproc；NSWorkspace/System Events 对 DeviceHub 关联损坏，docs/archive/04（EVD-20261113-02） E16）
 
 func runningPid() -> pid_t? {
     let size = Int(proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0))
@@ -104,7 +104,7 @@ func frame(of element: AXUIElement) -> (CGPoint, CGSize) {
 }
 
 /// 条件轮询：deadline 秒内反复执行 probe，首个非 nil 结果返回；超时 nil。
-/// 间隔 usleep 只是轮询节拍，不是对转场时长的盲猜（docs/15 §9.1）。
+/// 间隔 usleep 只是轮询节拍，不是对转场时长的盲猜（docs/01 §9.1）。
 func pollUntil<T>(deadline seconds: Double = 5.0, interval: Double = 0.2,
                   _ probe: () -> T?) -> T? {
     let start = Date()
@@ -132,7 +132,7 @@ func findEnabledButton(description: String) -> AXUIElement? {
 }
 
 func screenIsLocked() -> Bool {
-    // 私有会话字典但字段稳定：docs/14 E24 实证锁屏时窗口零尺寸、AX 子树脱物化
+    // 私有会话字典但字段稳定：docs/archive/04（EVD-20261113-02） E24 实证锁屏时窗口零尺寸、AX 子树脱物化
     guard let info = CGSessionCopyCurrentDictionary() as? [String: Any] else {
         return false
     }
@@ -158,7 +158,7 @@ func materializedWindows() -> [[String: Any]] {
 }
 
 /// 置前 DH 窗口并轮询等待工具条子树物化。
-/// 实验实证（dh_action.swift activate，docs/14 E18 旁证）：DH 非前台时
+/// 实验实证（dh_action.swift activate，docs/archive/04（EVD-20261113-02） E18 旁证）：DH 非前台时
 /// frontmost=0、工具条 AX 子树脱物化（只剩 Close 按钮），AXPress 无目标；
 /// AX 置前后物化是异步的，必须轮询 Home 按钮出现而不是盲睡固定时长。
 @discardableResult
@@ -219,7 +219,7 @@ case "readiness":
         fail(.trustOrLock, reason: "进程未获得辅助功能（AX）授权")
     }
     if screenIsLocked() {
-        fail(.trustOrLock, reason: "Mac 会话处于锁屏态，AX 窗口子树已脱物化（docs/14 E24）",
+        fail(.trustOrLock, reason: "Mac 会话处于锁屏态，AX 窗口子树已脱物化（docs/archive/04（EVD-20261113-02） E24）",
              extra: readinessReport())
     }
     if !ensureFrontmost() {

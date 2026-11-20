@@ -1,4 +1,4 @@
-"""hybrid_runner 分段编排器 hermetic 测试（docs/15 §5/§6，H3）。
+"""hybrid_runner 分段编排器 hermetic 测试（docs/01 §5/§6，H3）。
 
 零真机/零 Web：真实 FileHybridSessionStore + FileGateStore 落 tmp_path，
 DH AX/devicectl/子 run 全假件。覆盖——
@@ -466,7 +466,7 @@ async def test_action_failure_abort_vs_block_for_human(tmp_path):
 
 
 async def test_adapter_unavailable_is_blocked_not_failed(tmp_path):
-    # 基础设施缺席与产品缺陷严格区分（docs/15 §9）
+    # 基础设施缺席与产品缺陷严格区分（docs/01 §9）
     steps = [PlanStep(
         step_id="s2", actor=StepActor.AUTO_DEVICECTL, action="screenshot",
         params={"bundle_id": _BUNDLE}, idempotency_key="k2")]

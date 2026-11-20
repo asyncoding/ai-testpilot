@@ -1,4 +1,4 @@
-"""hybrid-plan-v1 混合执行计划纯函数（docs/15，H1 切片）。
+"""hybrid-plan-v1 混合执行计划纯函数（docs/01，H1 切片）。
 
 零 IO、零三方（仅 pydantic + 标准库）：把一条 TestCase 的自动化+人工混合编排
 建模为**有序步骤列表**，每步声明执行方（actor）、动作、结构化前置条件、
@@ -43,7 +43,7 @@ _ACTIONS_BY_ACTOR: dict[StepActor, frozenset[str]] = {
     StepActor.HUMAN_VERDICT: frozenset({"sensory_check", "other"}),
 }
 
-# 结构化前置条件种类（probe 语义见 docs/15 §4，运行期探针 H3 实现）。
+# 结构化前置条件种类（probe 语义见 docs/01 §4，运行期探针 H3 实现）。
 PRECONDITION_KINDS = frozenset({
     "device_unlocked",            # DH 窗口 frame 非零 + 锁屏键缺席（E24）
     "session_window_materialized",  # DH 会话窗口已物化、工具条可枚举
@@ -55,7 +55,7 @@ PRECONDITION_KINDS = frozenset({
 
 # 前置不满足时允许的修复动作闭集；修复本身也要在能力圈内。
 REPAIR_VERBS = frozenset({
-    "dh_home",                 # DH AX 回主屏（真机已验，docs/14 E25）
+    "dh_home",                 # DH AX 回主屏（真机已验，docs/archive/04（EVD-20261113-02） E25）
     "dh_rotate_left",          # DH AX 旋转（调用方负责转满复原，E27）
     "devicectl_terminate",     # devicectl 终止 App 进程
     "app_launch_purge_args",   # 段内 xcodebuild 带 --ak-purge-dates 等清场参数

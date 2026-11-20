@@ -1,8 +1,8 @@
-"""PNG 尺寸纯函数探针（docs/15 §4 竖屏前置，H3）。
+"""PNG 尺寸纯函数探针（docs/01 §4 竖屏前置，H3）。
 
 零 IO、零三方：只解析 PNG 首块 IHDR 的宽高（字节 16–23，大端 uint32）。
 devicectl 截图产物是 PNG；竖屏判定 ``height > width``，方向证据来自图片
-本身而非按压次数（docs/14 E27：iPhone 不渲染 portraitUpsideDown）。
+本身而非按压次数（docs/archive/04（EVD-20261113-02） E27：iPhone 不渲染 portraitUpsideDown）。
 """
 
 from __future__ import annotations

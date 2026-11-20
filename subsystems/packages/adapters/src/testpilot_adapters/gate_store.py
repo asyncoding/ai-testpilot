@@ -1,4 +1,4 @@
-"""文件态人工闸门存储（docs/15 §7，H2）。
+"""文件态人工闸门存储（docs/01 §7，H2）。
 
 零 DDL：每条闸门一个 JSON（``gates/<gate_id>.json``），单文件承载完整
 生命周期（含响应裁决与续期痕迹）。gate_id 由 core 的 ``gate_id_for`` 哈希

@@ -86,10 +86,10 @@ class ReviewQueueItem(BaseModel):
     module: str
     exploratory: bool
     oracle_missing: bool
-    # docs/16 §4.5：审批页要展示操作步骤/前置；数据本就在 raw_json，载荷携出零 SQL 改动
+    # docs/01 §4.5：审批页要展示操作步骤/前置；数据本就在 raw_json，载荷携出零 SQL 改动
     steps: list[str] = Field(default_factory=list)
     preconditions: list[str] = Field(default_factory=list)
-    # docs/16 §4.3 C2：背景/平台约束只读展示，不进草稿与断言列表（老载荷缺列默认空）
+    # docs/01 §4.3 C2：背景/平台约束只读展示，不进草稿与断言列表（老载荷缺列默认空）
     context_notes: list[str] = Field(default_factory=list)
     suggestions: list[SuggestionView] = Field(default_factory=list)
 
@@ -271,7 +271,7 @@ def render_case_markdown(
     date_part = decided_at.date().isoformat()
     lines.append(f"**预期**（人审回写 reviewer={reviewed_by} date={date_part}）：")
     for oracle in oracles:
-        # docs/16 §4.6：仅锚定断言输出「｜步骤N」段；None 保持旧字节风格，round-trip 无损
+        # docs/01 §4.6：仅锚定断言输出「｜步骤N」段；None 保持旧字节风格，round-trip 无损
         label = EXPLICIT_TYPE_LABELS[oracle.type]
         if oracle.step_id is not None:
             label += f"｜步骤{oracle.step_id}"
@@ -380,7 +380,7 @@ def plan_case_decision(
             expectation=revised_expectation,
             source_refs=list(mined.source_refs),  # 来源 URN 人审不可改，追溯链不断
             confidence=confirmed_confidence(mined.confidence),
-            # docs/16：人审可改类型/文本，锚点不在可改字段内，随草稿原样透传
+            # docs/01：人审可改类型/文本，锚点不在可改字段内，随草稿原样透传
             step_id=mined.step_id,
         ))
         updates.append(SuggestionUpdate(

@@ -7,7 +7,7 @@ workers 层只做读库与 ISO 时间解析，样本配对/分位数/门禁判�
 
 - ``intake``：events 表 occurred_at→received_at，事件入库即可检索的摄入段；
 - ``end_to_end``：event-reindex 批次按 report_json.event_id 回配源事件，
-  push→变更重新可检索的端到端段（docs/07 §10 门禁①的头条口径）。
+  push→变更重新可检索的端到端段（docs/01 §10 门禁①的头条口径）。
 
 任一段无样本都如实给 None + gate_passed=False，不造 0 秒假成绩。
 """

@@ -1,4 +1,4 @@
-"""统一领域模型（docs/07 §4，docs/08 各 FR 的数据契约）。
+"""统一领域模型（docs/01 §4，docs/08 各 FR 的数据契约）。
 
 设计纪律：
 - 所有外部资源带 source_system + 外部 id + version，URN 由 urn.make_urn 生成；
@@ -126,7 +126,7 @@ class Entity(BaseModel):
 
 
 class Relation(BaseModel):
-    """实体关系，必须带 confidence 与证据（docs/00 §3.1）。"""
+    """实体关系，必须带 confidence 与证据（docs/01 §3.1）。"""
 
     urn: str
     source_urn: str
@@ -144,7 +144,7 @@ class AcceptanceCriterion(BaseModel):
 
 
 class RequirementSkeleton(BaseModel):
-    """自由格式需求抽出的固定骨架（docs/00 §3.2）。"""
+    """自由格式需求抽出的固定骨架（docs/01 §3.2）。"""
 
     source_urn: str
     features: list[str]
@@ -172,7 +172,7 @@ class Oracle(BaseModel):
     expectation: str
     source_refs: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
-    # docs/16 步骤锚点（2026-11-15）：1-based 对齐 TestCase.steps 序号；
+    # docs/01 步骤锚点（2026-11-15）：1-based 对齐 TestCase.steps 序号；
     # None=用例级（全程）断言。零 DDL：随 raw_json 落库，老数据反序列化即 None。
     step_id: int | None = None
 
@@ -184,7 +184,7 @@ class TestCase(BaseModel):
     preconditions: list[str] = Field(default_factory=list)
     steps: list[str]
     oracles: list[Oracle] = Field(default_factory=list)
-    # docs/16 §4.3 C2 知识分流（2026-11-16）：不可判定真假的背景/平台约束/机制指针
+    # docs/01 §4.3 C2 知识分流（2026-11-16）：不可判定真假的背景/平台约束/机制指针
     # 与断言分桶；不进 oracle_suggestions、不参与 exploratory、不进 v1 导出 oracles[]。
     # 零 DDL：随 raw_json 落库，老数据反序列化即 []。
     context_notes: list[str] = Field(default_factory=list)
@@ -215,7 +215,7 @@ class TestCaseDraft(BaseModel):
 # ── 代码 ──────────────────────────────────────────────────────────────────
 
 class CodeSymbol(BaseModel):
-    """稳定符号 ID，不绑行号（docs/00 §4.2）；行范围随版本变化。"""
+    """稳定符号 ID，不绑行号（docs/01 §4.2）；行范围随版本变化。"""
 
     urn: str
     language: str
@@ -321,10 +321,10 @@ class TestExecutionRequest(BaseModel):
     build_id: str | None = None
     triggered_by: str = "agent"
     daily_budget_key: str | None = None  # 重跑配额账本 key
-    # H4（docs/15 §6.2）：混合执行探针产出的 App 启动参数（如 --ak-purge-dates）。
+    # H4（docs/01 §6.2）：混合执行探针产出的 App 启动参数（如 --ak-purge-dates）。
     # 仅作账本追溯——xcodebuild CLI 没有 launch-argument 旗标（xcodebuild -help 实证），
     # 参数的真实生效由生成的 Swift 测试经 XCUIApplication.launchArguments 实现
-    # （docs/12 §3.2 生成约定），xcode_runner 拼装 argv 时不消费本字段。
+    # （docs/01 §3.2 生成约定），xcode_runner 拼装 argv 时不消费本字段。
     # 随 request_json/raw_json 持久化，schema v15 零 DDL。
     launch_arguments: list[str] = Field(default_factory=list)
 
@@ -411,7 +411,7 @@ class CommentDraft(BaseModel):
 # ── 证据 ──────────────────────────────────────────────────────────────────
 
 class Evidence(BaseModel):
-    """每条事实性结论必须能反查到证据（docs/00 §0、docs/06 护栏）。"""
+    """每条事实性结论必须能反查到证据（docs/01 §0、docs/06 护栏）。"""
 
     urn: str
     source_system: str

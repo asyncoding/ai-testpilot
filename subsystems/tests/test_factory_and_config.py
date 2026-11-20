@@ -412,7 +412,7 @@ def test_unknown_runner_and_environment_types_rejected(tmp_path):
         build_container(config, SUBSYSTEMS)
 
 
-# ── E5（docs/12）：ios-local-poc-xcode 真实执行 profile 装配回归 ───────────────
+# ── E5（docs/01）：ios-local-poc-xcode 真实执行 profile 装配回归 ───────────────
 
 def test_xcode_profile_wires_real_execution_stack_and_keeps_recorded_profile_intact(tmp_path):
     """新 profile 四切换（runner/environment/logs/data_dir）落位；原 recorded profile 零污染。"""
@@ -524,7 +524,7 @@ def test_tree_sitter_setting_registers_optional_chunker(tmp_path):
         container.get("store").close()
 
 
-# ── 切片一（docs/14，2026-11-13）：真机 profile 装配回归（无新基建，schema v15 零变更）──
+# ── 切片一（docs/archive/04（EVD-20261113-02），2026-11-13）：真机 profile 装配回归（无新基建，schema v15 零变更）──
 
 def test_device_profile_wires_real_device_stack(tmp_path):
     """ios-local-poc-device 三切换落位：runner target=device / ios-device / os-log-device。"""

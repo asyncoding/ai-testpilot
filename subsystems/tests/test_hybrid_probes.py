@@ -1,4 +1,4 @@
-"""hybrid_probes hermetic 测试（docs/15 §4，H3）。
+"""hybrid_probes hermetic 测试（docs/01 §4，H3）。
 
 零真机：FakeDhAx/FakeDevicectl 脚本化探针证据，钉死——
 ① 三态语义（satisfied/unsatisfied/unknown）与能力圈边界（两个恒 unknown）；

@@ -1,4 +1,4 @@
-"""png_probe 纯函数 hostless 测试（docs/15 §4，H3）。
+"""png_probe 纯函数 hostless 测试（docs/01 §4，H3）。
 
 红证纪律：合法样本用 struct 现造最小 PNG 字节（签名+IHDR），再逐字节破坏，
 确认非 PNG/截断/IHDR 形态异常全部 fail-loud，而不是默默给出方向结论。

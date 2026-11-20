@@ -1,4 +1,4 @@
-"""SQLite 队列测试：幂等去重、领取、ack/fail（docs/07 §3 QueuePort）。"""
+"""SQLite 队列测试：幂等去重、领取、ack/fail（docs/01 §3 QueuePort）。"""
 
 import pytest
 

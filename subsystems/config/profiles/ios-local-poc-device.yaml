@@ -13,7 +13,7 @@
 #   5) 租约/超时按真机分钟级冷启动放宽。
 # 其余适配器（git/docs/cases/requirements/检索/模型/队列/归因）与 xcode profile 一字不差。
 # 前置：真机已配对且 devicectl list devices 表态 connected；演示分支 demo/agent-generated-tests
-# 已在语料仓工作区 checkout（docs/12 附录 B）；签名在 Xcode 工程内预先配置好。
+# 已在语料仓工作区 checkout（docs/01 附录 B）；签名在 Xcode 工程内预先配置好。
 profile: ios-local-poc-device
 
 project:

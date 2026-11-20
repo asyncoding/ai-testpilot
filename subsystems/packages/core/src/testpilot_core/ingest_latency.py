@@ -1,4 +1,4 @@
-"""摄入延迟度量纯逻辑（docs/08 FR-FRS-001 AC1 / docs/07 §10 门禁①，S4.4）。
+"""摄入延迟度量纯逻辑（docs/08 FR-FRS-001 AC1 / docs/01 §10 门禁①，S4.4）。
 
 零 IO、零三方依赖（import-lint 守门）：吃 ``(occurred_at, searchable_at)``
 样本对算 P50/P95/max 与门禁结论，不接触挂钟——时间全部由入参带入，合成时钟
@@ -24,7 +24,7 @@ from typing import Sequence
 
 from pydantic import BaseModel, Field
 
-# docs/07 §10 S4 门禁①：摄入延迟 P95 < 5 分钟
+# docs/01 §10 S4 门禁①：摄入延迟 P95 < 5 分钟
 DEFAULT_GATE_SECONDS = 300.0
 # event-reindex 批次的 trigger 字面值（workers/freshness.py 落账口径）
 EVENT_REINDEX_TRIGGER = "event-reindex"

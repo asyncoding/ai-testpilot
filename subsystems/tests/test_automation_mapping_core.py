@@ -1,4 +1,4 @@
-"""automation-map-v1 映射纯函数 hostless 测试（docs/12 §3.3 / E3）。
+"""automation-map-v1 映射纯函数 hostless 测试（docs/01 §3.3 / E3）。
 
 零 IO：手工构造 Swift 文件字典与用例 ID 集，钉死——
 标记绑定（一方法多 TC / 一 TC 多方法）、未链接测试、未映射用例、

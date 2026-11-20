@@ -132,7 +132,7 @@ def find_device(entries: list[DeviceInventoryEntry], udid: str) -> DeviceInvento
     return None
 
 
-# ── H3 混合执行：process/capture 控制面 argv 纯函数（docs/15 §3/§4）──────────
+# ── H3 混合执行：process/capture 控制面 argv 纯函数（docs/01 §3/§4）──────────
 #
 # 本机取证（Xcode 27.0，2026-11-13/14，真机 iPhone 16 Pro）：
 # - 截图：``devicectl device capture screenshot --device <udid> --destination <path>``，
@@ -141,7 +141,7 @@ def find_device(entries: list[DeviceInventoryEntry], udid: str) -> DeviceInvento
 #   <bundle-id> [args...]``，位置参数透传给 App（对应段内 purge 启动参数）；
 # - 终止：``devicectl device process terminate --device <udid> --pid <pid> [--kill]``，
 #   注意按 **PID** 终止而非 bundle id；devicectl 词汇表无进程清单动词，
-#   app_not_running 探针主机侧只能判 unknown（docs/15 §4），pid 由计划参数显式带入。
+#   app_not_running 探针主机侧只能判 unknown（docs/01 §4），pid 由计划参数显式带入。
 
 _BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{1,}$")
 

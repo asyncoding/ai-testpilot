@@ -1,4 +1,4 @@
-"""DhAxAdapter 适配器 hermetic 测试（docs/15 §3/§9，H3）。
+"""DhAxAdapter 适配器 hermetic 测试（docs/01 §3/§9，H3）。
 
 零真机：FakeExecutor 脚本化返回，钉死四件事——
 ① argv 列表契约（xcrun swift <cli> <verb>，永不 shell）；

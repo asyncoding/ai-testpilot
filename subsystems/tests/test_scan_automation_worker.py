@@ -1,4 +1,4 @@
-"""scan-automation-worker 集成测试（docs/12 E3，hermetic）。
+"""scan-automation-worker 集成测试（docs/01 E3，hermetic）。
 
 tmp 语料仓（Swift 文件）+ tmp SQLite store（活跃/探索性用例）+ 假容器：
 钉死 map 落盘形状、raw_json.automation 投影（零 schema 变更）、重扫人审

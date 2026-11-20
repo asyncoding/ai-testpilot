@@ -1,4 +1,4 @@
-# ios-local-poc-xcode：Xcode 真实执行链路专用 profile（docs/12 E5，2026-11-13）
+# ios-local-poc-xcode：Xcode 真实执行链路专用 profile（docs/01 E5，2026-11-13）
 # 与 ios-local-poc 的差异组：
 #   1) runner: recorded → xcode（真实 xcodebuild，经 SubprocessExecutor 永不 shell）；
 #   2) environment: stub → ios-simulator（simctl 设备池，先租后跑，udid 透传 labels）；
@@ -17,7 +17,7 @@ project:
   # 真实被测仓在另一个仓库（docs/03），不拷贝进本仓；路径走环境变量覆盖，禁止写死：
   #   export TESTPILOT_REPO_PATH=~/Documents/Code/app-calendar-alarm
   repo_path: ../../app-calendar-alarm
-  # 演示时人工在语料仓工作区 checkout demo/agent-generated-tests（docs/12 附录 B）；
+  # 演示时人工在语料仓工作区 checkout demo/agent-generated-tests（docs/01 附录 B）；
   # map 鲜度以 head_commit 为锚，default_branch 保持主线名供 docs/search 分支标签使用。
   default_branch: alarmkit-spike
   tech_stack: ios

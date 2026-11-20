@@ -1,4 +1,4 @@
-"""testpilot-hybrid：混合分段会话驱动 CLI（H4，docs/15 §5/§8）。
+"""testpilot-hybrid：混合分段会话驱动 CLI（H4，docs/01 §5/§8）。
 
 把 H3 的 hybrid_runner 函数面收敛成五个可在独立进程调用的子命令，供锁屏 E2E
 runbook 人工驱动（自动步连环推进、人工步挂闸门、/gates 轮询裁决后续跑）：

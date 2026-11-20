@@ -1,4 +1,4 @@
-"""ChildRunPort 生产实现：混合 xcodebuild 段接入 execution_service 队列（H4，docs/15 §6.2）。
+"""ChildRunPort 生产实现：混合 xcodebuild 段接入 execution_service 队列（H4，docs/01 §6.2）。
 
 H3 的混合编排器只定义了 :class:`~testpilot_workers.hybrid_runner.ChildRunPort` 协议并用
 假件测试，本模块给真实接线，语义纪律：
@@ -6,7 +6,7 @@ H3 的混合编排器只定义了 :class:`~testpilot_workers.hybrid_runner.Child
 - **一套队列不造第二套**：子 run 就是普通 :class:`TestExecutionRequest`，复用
   execution_service 的先账本后入队、幂等重放、五态状态机、环境租约与重跑配额；
   幂等键加 ``hybrid:`` 命名空间前缀，与 impact-rerun 的 ``impact:`` 键物理隔离。
-- **提交后必须等到终态**：docs/15 §8 定案「s1 子 run 结束才启动后续采集/人工步」，
+- **提交后必须等到终态**：docs/01 §8 定案「s1 子 run 结束才启动后续采集/人工步」，
   只入队就返回会让会话在测试还没跑完时越过该段。轮询 run 账本（不 sleep 死等，
   间隔可注入），崩溃续跑时 submit_execution 重放同一 run_id，等待循环自然接住。
 - **失败分型不污染归因**：子 run ``failed`` 是产品失败，抛 :class:`ChildRunFailedError`
@@ -14,7 +14,7 @@ H3 的混合编排器只定义了 :class:`~testpilot_workers.hybrid_runner.Child
   抛 :class:`ChildRunUnavailableError`（AdapterUnavailableError 子类），会话转 blocked。
 - **launch_arguments 只追溯不穿越**：xcodebuild CLI 无启动参数旗标（``xcodebuild -help``
   实证），探针产出的 ``--ak-*`` 参数由生成的 Swift 测试经
-  ``XCUIApplication.launchArguments`` 落地（docs/12 §3.2）；本端口把参数原样写进
+  ``XCUIApplication.launchArguments`` 落地（docs/01 §3.2）；本端口把参数原样写进
   TestExecutionRequest 落 request_json 留痕，xcode_runner 的 argv 不消费它。
 """
 
@@ -39,7 +39,7 @@ _DEFAULT_POLL_INTERVAL_S = 2.0
 # 等待超时的 runbook 提示：最常见原因是 runner worker 进程没起，队列无人排空。
 _DRAIN_HINT = (
     "混合子 run 等待终态超时；若 run 停在 queued，检查 runner worker 是否在跑"
-    "（testpilot-runner worker），排障见 docs/03 §3.6 与 docs/15 §8"
+    "（testpilot-runner worker），排障见 docs/03 §3.6 与 docs/01 §10.8"
 )
 _TERMINAL_FAIL = frozenset({
     RunStatus.ERROR, RunStatus.TIMEOUT, RunStatus.CANCELED,

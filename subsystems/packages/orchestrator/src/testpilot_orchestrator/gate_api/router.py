@@ -1,4 +1,4 @@
-"""/api/gates/* 路由：人工闸门挂单/队列/裁决/续期/放弃（docs/15 §7，H2）。
+"""/api/gates/* 路由：人工闸门挂单/队列/裁决/续期/放弃（docs/01 §7，H2）。
 
 薄 HTTP 包装，纪律同 approval_api：状态语义在 core.hybrid_plan 纯函数，
 账本动作在 workers.gate_service，本层只做 HTTP 模型转换与容器取接。

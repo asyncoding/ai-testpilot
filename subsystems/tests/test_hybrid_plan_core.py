@@ -1,4 +1,4 @@
-"""hybrid-plan-v1 混合执行计划纯函数 hostless 测试（docs/15，H1）。
+"""hybrid-plan-v1 混合执行计划纯函数 hostless 测试（docs/01，H1）。
 
 零 IO、零容器：手工构造 core 模型，钉死四组契约——
 ① 计划校验闭集（actor/动作/前置/修复/裁决单，表外字面量响亮失败）；

@@ -1,4 +1,4 @@
-"""impact-execution 纯函数 hostless 测试（docs/12 §4 E4）。
+"""impact-execution 纯函数 hostless 测试（docs/01 §4 E4）。
 
 零 IO：手工构造 ImpactAnalysis 与 map bindings，钉死——
 runnable 部分映射翻译、OID 去重、三分类分流、空选择 fail-closed、

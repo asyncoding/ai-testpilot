@@ -1,4 +1,4 @@
-"""六类结构化前置探针与 repair 执行（docs/15 §4，H3）。
+"""六类结构化前置探针与 repair 执行（docs/01 §4，H3）。
 
 探针只回答三态：``satisfied`` / ``unsatisfied`` / ``unknown``。unknown 是
 诚实的能力圈边界，不是失败——devicectl 词汇表没有进程清单、通知授权归属
@@ -9,7 +9,7 @@
 
 - device_unlocked / session_window_materialized：DhAxAdapter.readiness()
   的 screen_locked/buttons/windows 报告；Mac 锁屏（exit 6）或 AX 树脱物化
-  （exit 4，docs/14 E31）时给不出结论 → unknown/unsatisfied；
+  （exit 4，docs/archive/04（EVD-20261113-02） E31）时给不出结论 → unknown/unsatisfied；
 - portrait_orientation：devicectl 截图 + core.png_probe 读像素宽高，
   方向只认截图本身（E27：按压次数不算证据）；
 - app_not_running：恒 unknown。devicectl 只能按显式 PID 终止、无进程清单

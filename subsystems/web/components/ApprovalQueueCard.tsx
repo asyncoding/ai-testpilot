@@ -175,7 +175,7 @@ function CaseStepsBlock({
   preconditions: string[];
   steps: string[];
 }) {
-  // docs/16 §4.5：审批前先看到「怎么操作」，断言分组的步骤序号才有人脑对齐基准；
+  // docs/01 §4.5：审批前先看到「怎么操作」，断言分组的步骤序号才有人脑对齐基准；
   // 老后端载荷缺这两列时整块不渲染，不回退成占位空框。
   if (preconditions.length === 0 && steps.length === 0) return null;
   return (
@@ -205,7 +205,7 @@ function CaseStepsBlock({
 }
 
 function CaseContextBlock({ notes }: { notes: string[] }) {
-  // docs/16 §4.3 C2：知识/平台约束与断言分桶，只读呈现且明示不可作为断言依据；
+  // docs/01 §4.3 C2：知识/平台约束与断言分桶，只读呈现且明示不可作为断言依据；
   // 这些条目不会出现在下方草稿列表，也不进导出 oracles[]。
   if (notes.length === 0) return null;
   return (

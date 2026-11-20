@@ -1,4 +1,4 @@
-"""testpilot-hybrid 驱动 CLI 的 hostless 测试（H4.2，docs/15 §8）。
+"""testpilot-hybrid 驱动 CLI 的 hostless 测试（H4.2，docs/01 §8）。
 
 零真机/零独立进程：monkeypatch 掉 hybrid_cli.bootstrap 返回 tmp_path 上的
 hermetic 容器（真 FileGateStore/FileHybridSessionStore + 假 dh/dev/子 run），

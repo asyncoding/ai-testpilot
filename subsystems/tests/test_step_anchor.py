@@ -1,4 +1,4 @@
-"""docs/16 步骤锚点 step_id 全链路红证（P0+P1 合并切片，hostless 纯函数）。
+"""docs/01 步骤锚点 step_id 全链路红证（P0+P1 合并切片，hostless 纯函数）。
 
 覆盖红证矩阵中本切片负责的行：
 - 解析器：显式「步骤 N / Step N」锚定、嵌套继承、越界死信、歧义死信、
@@ -64,7 +64,7 @@ def _parse_one(text: str):
     return result.cases[0], result.dead_letters
 
 
-# ── 解析器：显式锚定（docs/16 §4.2 规则 1） ─────────────────────────────────
+# ── 解析器：显式锚定（docs/01 §4.2 规则 1） ─────────────────────────────────
 
 def test_explicit_step_anchor_forms_all_bind():
     case, dead = _parse_one(_narrative([
@@ -189,7 +189,7 @@ def test_extract_step_anchor_unit_contract():
     assert anchor is None and "多个步骤" in note
 
 
-# ── 显式标签：【类型｜步骤N】（docs/16 §4.6） ───────────────────────────────
+# ── 显式标签：【类型｜步骤N】（docs/01 §4.6） ───────────────────────────────
 
 def test_split_explicit_tag_parses_anchor_full_and_half_width():
     assert split_explicit_tag("【UI 断言｜步骤3】横幅消失") == (
@@ -219,7 +219,7 @@ def test_tag_anchor_out_of_range_also_dead_letters():
     assert len(dead) == 1 and "越界" in dead[0].error
 
 
-# ── round-trip：渲染→重解析三字段无损（docs/16 §4.6） ───────────────────────
+# ── round-trip：渲染→重解析三字段无损（docs/01 §4.6） ───────────────────────
 
 def test_render_parse_round_trip_preserves_step_id_type_text():
     case = TestCase(
@@ -265,7 +265,7 @@ def test_render_without_anchors_keeps_legacy_byte_style():
     assert "｜" not in md and "步骤" not in md.split("**预期**", 1)[1]
 
 
-# ── 挖掘透传与 URN 稳定（docs/16 §4.4） ─────────────────────────────────────
+# ── 挖掘透传与 URN 稳定（docs/01 §4.4） ─────────────────────────────────────
 
 def _mining_case(**overrides) -> TestCase:
     base = dict(
@@ -368,7 +368,7 @@ def test_schema_and_prompt_carry_step_contract():
     assert "step_id" in system and "null" in system and "越界" in system
 
 
-# ── 审批队列载荷与人审透传（docs/16 §4.5/§4.6） ──────────────────────────────
+# ── 审批队列载荷与人审透传（docs/01 §4.5/§4.6） ──────────────────────────────
 
 def test_review_queue_carries_steps_and_preconditions():
     case = _mining_case(preconditions=["闹钟权限已授予"],

@@ -1,8 +1,8 @@
-"""Device Hub AX 语义刺激适配器（docs/15 §3，H3）。
+"""Device Hub AX 语义刺激适配器（docs/01 §3，H3）。
 
 进程出口唯一走注入的 ProcessExecutor（argv 列表，永不 shell），调用入库的
 ``scripts/device_hub_ax_cli.swift`` 四动词：readiness/home/rotate-left/screenshot。
-真机证据（docs/14 附录 B.4，E24–E31）：
+真机证据（docs/archive/04（EVD-20261113-02） 附录 B.4，E24–E31）：
 
 - AXPress 语义通道在真机有效，HID/CGEvent 合成输入惰性——本适配器不暴露 HID；
 - Mac 锁屏/工具条脱物化/元素缺失时 CLI 非零退出，本适配器 fail-loud，

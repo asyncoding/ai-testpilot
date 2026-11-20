@@ -1,4 +1,4 @@
-"""FileGateStore 文件态闸门存储 hermetic 测试（docs/15 §7，H2）。
+"""FileGateStore 文件态闸门存储 hermetic 测试（docs/01 §7，H2）。
 
 tmp_path 隔离：原子写、排序、gate_id 路径穿越守卫、崩溃重建读回完整生命周期。
 """

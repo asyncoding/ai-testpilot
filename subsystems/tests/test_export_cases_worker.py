@@ -1,4 +1,4 @@
-"""export-cases-worker 与 SQLite 存储集成测试（docs/12 E1，hermetic）。
+"""export-cases-worker 与 SQLite 存储集成测试（docs/01 E1，hermetic）。
 
 tmp_path 临时库上播种需求骨架/测试点/正式用例/oracle 草稿，跑 ``run_export``：
 钉死默认落盘路径、--out 两种形态、空库 exit 2 不产空壳、同内容两次导出

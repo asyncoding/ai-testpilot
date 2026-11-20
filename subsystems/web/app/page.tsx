@@ -71,7 +71,7 @@ export default function Home() {
         {" · "}
         <Link href="/knowledge">知识管理（FR-UI-004）→</Link>
         {" · "}
-        <Link href="/gates">人工闸门（docs/15 混合执行）→</Link>
+        <Link href="/gates">人工闸门（docs/01 混合执行）→</Link>
       </nav>
 
       <Banner config={config} />

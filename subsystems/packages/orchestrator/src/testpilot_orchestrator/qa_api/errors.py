@@ -93,7 +93,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     app.add_exception_handler(BadCaseError, bad_case_handler)
 
-    # H2（docs/15）：混合计划/人工闸门语义错误（闭集外动作、过期响应、
+    # H2（docs/01）：混合计划/人工闸门语义错误（闭集外动作、过期响应、
     # 空证据裁决、非法状态迁移）同为 ValueError 子类，映射 422。
     async def hybrid_plan_handler(
         _request: Request, exc: HybridPlanError

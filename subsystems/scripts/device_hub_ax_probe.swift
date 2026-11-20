@@ -1,7 +1,7 @@
 // device_hub_ax_probe.swift — Device Hub 菜单/工具条刺激动作的 AX 可达性探针
 //
 // 人工手动探针，永不进 verify_s0（与 device_chain_probe.py 同级纪律）。
-// 背景与结论见 docs/14 附录 B、out/eval/device-hub-stimulus-probe/。
+// 背景与结论见 docs/archive/04（EVD-20261113-02） 附录 B、out/eval/device-hub-stimulus-probe/。
 //
 // 用法：
 //   xcrun swift scripts/device_hub_ax_probe.swift                 # 只读诊断（默认，零副作用）
@@ -191,7 +191,7 @@ if let cb = checkBox {
     } else {
         print("    Capture Keyboard \(String(describing: before)) → \(String(describing: after))，未翻转：")
         print("    设备会话可能已关闭（模拟器需 Start 到可交互态/真机需 connected）。请在会话活跃时重跑，")
-        print("    会话活跃仍不翻转才是异常；2026-11-13 活跃会话下实测可稳定翻转（docs/14 附录 B E19）。")
+        print("    会话活跃仍不翻转才是异常；2026-11-13 活跃会话下实测可稳定翻转（docs/archive/04（EVD-20261113-02） 附录 B E19）。")
     }
 } else {
     print("    未找到 Capture Keyboard（设备流视图未初始化？）")
@@ -217,5 +217,5 @@ if let home = homeButton {
     print("    AXPress Home 返回 err=\(err.rawValue)（注意：err=0 仅代表 AX 调用被接受，")
     print("    不代表设备侧动作生效——必须用 simctl io screenshot 或真机录屏做前后对照判读）")
 }
-print("\n取证完成。判读口径见 docs/14 附录 B：本地控件翻转而设备动词无效果，即为合成输入隔离墙复现。")
+print("\n取证完成。判读口径见 docs/archive/04（EVD-20261113-02） 附录 B：本地控件翻转而设备动词无效果，即为合成输入隔离墙复现。")
 exit(0)

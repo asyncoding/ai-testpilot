@@ -1,4 +1,4 @@
-"""/api/gates 人工闸门 HTTP 端到端测试（docs/15 §7，H2）。
+"""/api/gates 人工闸门 HTTP 端到端测试（docs/01 §7，H2）。
 
 hermetic：offline-demo profile + tmp data_dir，TestClient 不起端口；
 过期路径用 gate_service 的 now 注入显式推时间，不依赖真实 sleep。

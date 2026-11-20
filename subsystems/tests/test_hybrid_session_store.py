@@ -1,4 +1,4 @@
-"""FileHybridSessionStore 测试（docs/15 §6，H3）：原子写、往返、穿越守卫、排序。"""
+"""FileHybridSessionStore 测试（docs/01 §6，H3）：原子写、往返、穿越守卫、排序。"""
 
 from __future__ import annotations
 

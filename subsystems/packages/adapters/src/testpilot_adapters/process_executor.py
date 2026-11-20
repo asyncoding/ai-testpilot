@@ -114,7 +114,7 @@ class SubprocessExecutor:
         ws-run 的闸门驱动走这里：结构跑（--structural）零提问、全自动，是本入口
         的受支持形态；人工模式下 input() 可读继承来的终端 stdin，但提示语随
         stdout 入管，全 TTY 人工会话应直接在独立终端运行 testpilot-ws-gate-driver
-        （docs/15 已写死这条边界）。out/err 保持 PIPE 是为沿用 communicate 排空
+        （docs/01 已写死这条边界）。out/err 保持 PIPE 是为沿用 communicate 排空
         纪律，防止驱动日志撑爆管道缓冲反压协议帧。
         """
         try:

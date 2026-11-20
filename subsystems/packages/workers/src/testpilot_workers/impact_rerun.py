@@ -1,4 +1,4 @@
-"""impact-rerun-worker：影响面 → 映射 → 选择执行一键接线 CLI（docs/12 E4）。
+"""impact-rerun-worker：影响面 → 映射 → 选择执行一键接线 CLI（docs/01 E4）。
 
 把既有 S4.3 影响面分析与 S3.1 执行队列两段能力焊起来：
 

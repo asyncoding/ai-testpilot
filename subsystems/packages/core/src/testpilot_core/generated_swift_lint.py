@@ -1,4 +1,4 @@
-"""AgentGenerated Swift 静态红线扫描纯函数（docs/15 §9、docs/12 UI 分支规则，H5）。
+"""AgentGenerated Swift 静态红线扫描纯函数（docs/01 §9、docs/01 UI 分支规则，H5）。
 
 零 IO、零三方：只吃文件相对路径 + 文本，产出结构化违规列表，全部判定可在
 hostless 测试里红证（植入违规必红、回退转绿）。两条红线：

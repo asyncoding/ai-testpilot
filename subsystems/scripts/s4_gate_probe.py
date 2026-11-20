@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """S4 四门禁总验探针（A24）：事件驱动保鲜/影响/CI 闭环纵切的收口门禁。
 
-对应 docs/07 §10 的四条 S4 POC 门禁，一条探针全部跑齐：
+对应 docs/01 §10 的四条 S4 POC 门禁，一条探针全部跑齐：
   ① 摄入延迟 P95 < 5min——两段口径同验：intake（occurred_at→received_at）
      与 end-to-end（CommitPushed occurred_at→event-reindex 批次 finished_at，
      按 report_json.event_id 回配）；合成时钟 20 样本，不碰挂钟；
@@ -86,7 +86,7 @@ from testpilot_workers.pipeline_loop import handle_pipeline_finished  # noqa: E4
 SUBSYSTEMS = Path(__file__).resolve().parents[1]
 EVAL_DIR = SUBSYSTEMS / "out" / "eval"
 
-# docs/07 §10 S4 门禁③：高价值 reindex < 10 分钟（core 无该常量——阈值是门禁
+# docs/01 §10 S4 门禁③：高价值 reindex < 10 分钟（core 无该常量——阈值是门禁
 # 口径而非引擎参数，钉在探针与文档侧，避免把演示门限混进库代码）
 REINDEX_GATE_SECONDS = 600.0
 # 门①合成样本量：P95 索引 round((n-1)*0.95)=18，末两条拨到 240s 验证高位取数

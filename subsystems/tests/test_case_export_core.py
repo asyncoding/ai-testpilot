@@ -1,4 +1,4 @@
-"""case-export-v1 导出纯函数 hostless 测试（docs/12 §3.1 / E1）。
+"""case-export-v1 导出纯函数 hostless 测试（docs/01 §3.1 / E1）。
 
 零 IO、零容器：直接手工构造 core 模型，钉死契约规则——
 cancelled 只进 excluded、探索性打标、空库响亮失败、内容 hash 跨时间戳稳定、
@@ -136,7 +136,7 @@ def test_requirement_testpoint_serialization_uses_source_fields():
 
 
 def test_cancelled_case_never_enters_cases_but_is_listed_in_excluded():
-    """红证（docs/12 E1）：cancelled 混入 cases 的实现必须让本测试变红。"""
+    """红证（docs/01 E1）：cancelled 混入 cases 的实现必须让本测试变红。"""
     payload = _build()
     exported_ids = {c["external_id"] for c in payload["cases"]}
     assert "TC-C3" not in exported_ids

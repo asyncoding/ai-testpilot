@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """S3.5 S3 五门禁总验探针（A23）：执行与失败归因纵切的收口门禁。
 
-对应 docs/07 §10 / docs/06 §3.3 场景③ 的五条 POC 门禁，一条探针全部跑齐：
+对应 docs/01 §10 / docs/06 §3.3 场景③ 的五条 POC 门禁，一条探针全部跑齐：
   ① 执行成功率 ≥.95——runner 任务成功产出结构化 TestRun 的比例（基础设施口径，
      非用例通过率）；error/timeout/canceled 单列，不混进成功率分母；
   ② 归因准确率 ≥.7 且真缺陷 recall ≥.95、误误导率 ≤.02（40 例封存盲标矩阵）；
@@ -473,7 +473,7 @@ def main() -> int:
     # ── 执行段（门①④⑤，生产装配 + 临时库）──────────────────────────────────
     evidence = asyncio.run(_execution_story(check))
 
-    # ── 五门禁汇总表（docs/07 §10 顺序与口径）────────────────────────────────
+    # ── 五门禁汇总表（docs/01 §10 顺序与口径）────────────────────────────────
     exec_ev = evidence["execution"]
     exc_ev = evidence["exception_outcomes"]
     gates = [
