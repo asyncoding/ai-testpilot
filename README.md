@@ -50,7 +50,7 @@ uv run uvicorn testpilot_orchestrator.app:app --port 8765
 ```
 
 从零到两个完整演示场景的分步操作、四个 profile 选择、20 个 CLI 与故障排查表，见
-[docs/13 系统使用说明书](13-系统使用说明书（克隆到使用全流程）.md)。
+[docs/13 系统使用说明书](docs/13-系统使用说明书（克隆到使用全流程）.md)。
 
 ## 语料仓边界（两条接入路径）
 
@@ -71,7 +71,7 @@ uv run uvicorn testpilot_orchestrator.app:app --port 8765
 | [06 核心评测指标体系](docs/06-核心评测指标体系.md)                  | 检索/生成/执行/归因各层指标定义与阈值                                                               |
 | [08 需求说明书](docs/08-需求说明书.md)                        | SRS：功能/非功能需求与验收标准                                                                  |
 | [09 术语表（人话版）](docs/09-术语表（人话版）.md)                  | 全系统术语对照                                                                            |
-| [13 系统使用说明书](13-系统使用说明书（克隆到使用全流程）.md)               | 克隆到使用全流程、CLI/API 参考、排障表；附录 A 外部 Agent prompt、附录 B 演示分支 git runbook、附录 C 偏差回流 AR 流程 |
+| [13 系统使用说明书](docs/13-系统使用说明书（克隆到使用全流程）.md)               | 克隆到使用全流程、CLI/API 参考、排障表；附录 A 外部 Agent prompt、附录 B 演示分支 git runbook、附录 C 偏差回流 AR 流程 |
 | [17 核心文档规范化方案](docs/17-核心文档规范化方案.md)                | 用例/需求文档模板、lint 探针与分批迁移计划                                                           |
 | [archive 历史证据归档](docs/archive/README.md)            | 事故踩坑（INC）/探针校准（CAL）/方案演进（ADR）/真机台账（EVD）/评测快照（BASE）五类追加式台账                          |
 
