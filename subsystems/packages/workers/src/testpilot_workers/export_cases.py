@@ -24,6 +24,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from testpilot_core.case_export import (
+    DEFAULT_TEST_TARGET,
+    DEFAULT_UI_TEST_TARGET,
     CaseExportError,
     GenerationConvention,
     VersionQuadruple,
@@ -65,7 +67,8 @@ def run_export(
         oracle_suggestions=store.list_oracle_suggestions(),
         now=now,
         version=version,
-        convention=_build_convention(test_target, ui_test_target),
+        convention=_build_convention(
+            *_resolve_targets(container, test_target, ui_test_target)),
         include_exploratory=include_exploratory,
     )
 
@@ -89,17 +92,33 @@ def run_export(
     }
 
 
+def _resolve_targets(
+    container: Any, test_target: str | None, ui_test_target: str | None,
+) -> tuple[str, str]:
+    """target 名三层优先级：CLI 显式参数 > profile project.ios 配置
+    （unit_test_target/ui_test_target）> core legacy 常量。
+
+    测试假容器可能挂不含 ios 属性的 project（或裸 config），getattr 链
+    全程兜底，缺一层就往下落，最终回退常量，与通用化前行为逐字一致。
+    """
+    ios = getattr(getattr(getattr(container, "config", None),
+                          "project", None), "ios", None) or {}
+    return (
+        test_target or ios.get("unit_test_target") or DEFAULT_TEST_TARGET,
+        ui_test_target or ios.get("ui_test_target") or DEFAULT_UI_TEST_TARGET,
+    )
+
+
 def _build_convention(
-    test_target: str | None, ui_test_target: str | None,
+    test_target: str, ui_test_target: str,
 ) -> GenerationConvention:
-    if test_target is None and ui_test_target is None:
-        return default_generation_convention()
+    """两个 target 名已由 :func:`_resolve_targets` 解析为具体值，这里只组装。"""
     base = default_generation_convention()
     return GenerationConvention(
         marker_comment=base.marker_comment,
         naming=base.naming,
-        target_target=test_target or base.target_target,
-        ui_test_target=ui_test_target or base.ui_test_target,
+        target_target=test_target,
+        ui_test_target=ui_test_target,
         detail_doc=base.detail_doc,
     )
 
@@ -124,9 +143,11 @@ def main() -> None:
     parser.add_argument("--prompt-version", default="", help="版本四元组：prompt 版本")
     parser.add_argument("--params-version", default="", help="版本四元组：参数版本")
     parser.add_argument("--test-target", default=None,
-                        help="覆盖生成约定中的单元测试 target（默认 AlarmKitSpikeTests）")
+                        help="覆盖生成约定中的单元测试 target；缺省取 profile "
+                             "project.ios.unit_test_target，再缺省回退内置常量")
     parser.add_argument("--ui-test-target", default=None,
-                        help="覆盖生成约定中的 UI 测试 target")
+                        help="覆盖生成约定中的 UI 测试 target；缺省取 profile "
+                             "project.ios.ui_test_target，再缺省回退内置常量")
     parser.add_argument("--source-branch", default=None,
                         help="覆盖来源分支（默认取 profile project.default_branch）")
     args = parser.parse_args()
@@ -155,11 +176,13 @@ def main() -> None:
 
 # 测试侧构造最小假容器的便捷构造器（与 test_testpoint_worker 的 SimpleNamespace 同口径）。
 def make_fake_container(store: Any, *, profile: str, project: str,
-                        data_dir: Path, default_branch: str = "main") -> SimpleNamespace:
+                        data_dir: Path, default_branch: str = "main",
+                        ios_config: dict | None = None) -> SimpleNamespace:
     config = SimpleNamespace(
         profile=profile,
         project=SimpleNamespace(
-            name=project, default_branch=default_branch),
+            name=project, default_branch=default_branch,
+            ios=dict(ios_config or {})),
     )
     container = SimpleNamespace(config=config, data_dir=data_dir,
                                 adapters={"store": store})
