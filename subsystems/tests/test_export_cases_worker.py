@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -148,6 +149,42 @@ def test_exclude_exploratory_partition(tmp_path):
     export_file = next((tmp_path / "work" / "exports").glob("*.json"))
     payload = json.loads(export_file.read_text(encoding="utf-8"))
     assert [c["external_id"] for c in payload["cases"]] == ["TC-A1"]
+
+
+def _export_payload(summary):
+    return json.loads(Path(summary["path"]).read_text(encoding="utf-8"))
+
+
+def test_export_convention_falls_back_to_profile_ios_targets(tmp_path):
+    """通用化（2026-11-22）：CLI 未给 target 时回退 profile project.ios
+    的 unit_test_target/ui_test_target，再回退 core 常量。红证：不读
+    profile 时导出物里仍是 AlarmKitSpikeTests 默认值。"""
+    store = _seed_store(tmp_path)
+    container = make_fake_container(
+        store, profile="ios-local-poc-xcode", project="DemoApp",
+        data_dir=tmp_path / "work",
+        ios_config={"unit_test_target": "ProfileTests",
+                    "ui_test_target": "ProfileUITests"})
+    summary = run_export(container, now=_T0)
+    convention = _export_payload(summary)["generation_convention"]
+    assert convention["target_target"] == "ProfileTests"
+    assert convention["ui_test_target"] == "ProfileUITests"
+
+
+def test_export_cli_targets_override_profile_ios(tmp_path):
+    """优先级第一层：CLI 显式 target 压过 profile 配置（回归锁）。"""
+    store = _seed_store(tmp_path)
+    container = make_fake_container(
+        store, profile="ios-local-poc-xcode", project="DemoApp",
+        data_dir=tmp_path / "work2",
+        ios_config={"unit_test_target": "ProfileTests",
+                    "ui_test_target": "ProfileUITests"})
+    summary = run_export(
+        container, now=_T0,
+        test_target="CliTests", ui_test_target="CliUITests")
+    convention = _export_payload(summary)["generation_convention"]
+    assert convention["target_target"] == "CliTests"
+    assert convention["ui_test_target"] == "CliUITests"
 
 
 def test_missing_store_adapter_is_runtime_error(tmp_path):
