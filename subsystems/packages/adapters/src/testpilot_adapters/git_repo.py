@@ -260,6 +260,17 @@ class GitCodeRepository:
     async def head_sha(self, repo: RepoRef | None = None) -> str:
         return await self._resolve("HEAD")
 
+    async def resolve_commit(self, rev: str) -> str:
+        """端口方法：任意 rev → 40 位完整 sha（短 sha/HEAD/分支名经 rev-parse）。
+
+        空串与空树魔法 sha 直通：空树是 tree 不是 commit，``^{commit}`` 解析
+        必然失败，而 get_change_set 历来把空基线当空树处理，这里保持同口径。
+        """
+        rev = (rev or "").strip()
+        if not rev or rev == _EMPTY_TREE:
+            return _EMPTY_TREE
+        return await self._resolve(rev)
+
     async def _show(self, sha: str, path: str) -> str | None:
         """读 blob；commit 下路径不存在返回 None；其他故障抛 AdapterUnavailableError。"""
         res = await self._exec(["show", f"{sha}:{path}"])

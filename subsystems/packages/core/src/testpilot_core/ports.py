@@ -34,6 +34,15 @@ class CodeRepositoryPort(Protocol):
         """解析默认分支 HEAD 的完整 sha（ingestion 写 valid_from 用）。"""
         ...
 
+    async def resolve_commit(self, rev: str) -> str:
+        """任意 rev（短 sha/分支名/HEAD/全 sha）归一为 40 位完整 commit sha。
+
+        鲜度守卫、幂等身份等字面比较场景必须先过这一步，禁止把用户原始输入
+        直接与库内全 sha 比对；不可解析的 rev 抛 AdapterUnavailableError。
+        空串/空树魔法 sha 按根提交区间口径直通（实现与 get_change_set 对齐）。
+        """
+        ...
+
     async def get_change_set(self, repo: RepoRef, base: str, head: str) -> ChangeSet: ...
 
     async def get_symbol_at_commit(

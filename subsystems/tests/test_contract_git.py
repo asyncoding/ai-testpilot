@@ -120,6 +120,30 @@ async def test_unknown_revision_is_unavailable(adapters):
         await recorded.read_file_at_commit(repo, "README.md", "v9.9-tag")
 
 
+async def test_resolve_commit_contract_identical(adapters):
+    """resolve_commit 双适配器同构：HEAD/全 sha 归一一致，坏引用同错误类型，
+    空树魔法 sha 两侧都直通（根提交区间语义）。"""
+    real, recorded, _repo, _root, head = adapters
+    assert await real.resolve_commit("HEAD") == head
+    assert await recorded.resolve_commit("HEAD") == head
+    assert await real.resolve_commit(head) == head
+    assert await recorded.resolve_commit(head) == head
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    assert await real.resolve_commit(empty_tree) == empty_tree
+    assert await recorded.resolve_commit(empty_tree) == empty_tree
+    with pytest.raises(AdapterUnavailableError):
+        await real.resolve_commit("v9.9-tag")
+    with pytest.raises(AdapterUnavailableError, match="无法解析版本引用"):
+        await recorded.resolve_commit("v9.9-tag")
+
+
+async def test_recorded_resolve_commit_role_names(adapters):
+    """录制适配器的角色名（root/head）是夹具专属别名，解析到 meta 固定 sha。"""
+    _real, recorded, _repo, root, head = adapters
+    assert await recorded.resolve_commit("root") == root
+    assert await recorded.resolve_commit("head") == head
+
+
 async def test_missing_fixtures_dir_is_unavailable(tmp_path: Path):
     repo = RepoRef(project="demo", repo_path="/tmp/demo-repo")
     rec = RecordedGitRepository(repo, tmp_path / "no-such-fixtures")
