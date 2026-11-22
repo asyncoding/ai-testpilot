@@ -62,8 +62,17 @@ async def run_impact_rerun(
 ) -> dict[str, Any]:
     """分析→映射→提交的完整编排；任何硬错误抛 ValueError/RuntimeError/FileNotFoundError。"""
     store = container.get("store")
+    scm = container.get("scm")
     if store is None:
         raise RuntimeError("容器未装配 store，无法做影响面选择执行")
+    if scm is None:
+        raise RuntimeError("容器未装配 scm，无法做影响面选择执行")
+
+    # 0) rev 归一必须先于一切字面比较：map.head_commit 是 40 位全 sha，
+    #    用户贴短 sha/分支名时先在这里展开，鲜度守卫与幂等身份才不会误判
+    #    （analyze_impact 内部对全 sha 是直通幂等的，重复解析无副作用）。
+    base_commit = await scm.resolve_commit(base_commit)
+    head_commit = await scm.resolve_commit(head_commit)
 
     # 1) 影响面三分类（既有只读服务，内部要求 scm/repo 齐备）
     analysis = await analyze_impact(
@@ -120,8 +129,10 @@ async def run_impact_rerun(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="TestPilot 影响面选择执行 worker（impact → automation-map → 执行队列）")
-    parser.add_argument("--base", required=True, help="基线 commit sha（或空树 sha）")
-    parser.add_argument("--head", required=True, help="目标 commit sha（须等于 map.head_commit）")
+    parser.add_argument("--base", required=True,
+                        help="基线 commit（全/短 sha、分支名或 HEAD；空树 sha 表示根提交区间）")
+    parser.add_argument("--head", required=True,
+                        help="目标 commit（全/短 sha、分支名或 HEAD；归一后须等于 map.head_commit）")
     parser.add_argument("--requirement", action="append", default=[],
                         help="需求 URN 入口，可重复")
     parser.add_argument("--dry-run", action="store_true",

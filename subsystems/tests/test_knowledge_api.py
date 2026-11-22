@@ -187,6 +187,10 @@ class _FakeImpactScm:
     async def head_sha(self, repo):
         return _HEAD
 
+    async def resolve_commit(self, rev):
+        # 测试只用全 sha：身份直通（analyze_impact 入口归一化的夹具基线）
+        return rev
+
     async def get_change_set(self, repo, base, head):
         return self._cs
 

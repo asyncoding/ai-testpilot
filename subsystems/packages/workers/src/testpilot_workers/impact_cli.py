@@ -11,6 +11,8 @@ import argparse
 import json
 import sys
 
+from testpilot_core.errors import AdapterUnavailableError
+
 from ._bootstrap import bootstrap
 from .impact_service import (
     analyze_impact,
@@ -63,8 +65,10 @@ async def _run(args: argparse.Namespace) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="TestPilot 影响面分析 / MR 摘要 / 推荐精度回算 worker")
-    parser.add_argument("--base", required=True, help="基线 commit sha（或空树 sha）")
-    parser.add_argument("--head", required=True, help="目标 commit sha")
+    parser.add_argument("--base", required=True,
+                        help="基线 commit（全/短 sha、分支名或 HEAD；空树 sha 表示根提交区间）")
+    parser.add_argument("--head", required=True,
+                        help="目标 commit（全/短 sha、分支名或 HEAD，入口自动归一为全 sha）")
     parser.add_argument("--requirement", action="append", default=[],
                         help="需求 URN 入口，可重复")
     parser.add_argument("--run-id", default="",
@@ -81,6 +85,10 @@ def main() -> None:
         import asyncio
 
         payload = asyncio.run(_run(args))
+    except AdapterUnavailableError as exc:
+        # rev 解析失败/git 不可达等外部依赖错误，与 impact-rerun 同口径收口 exit 2
+        print(f"[impact-worker] 分析被拒: {exc}", file=sys.stderr)
+        sys.exit(2)
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"[impact-worker] 分析被拒: {exc}", file=sys.stderr)
         sys.exit(2)

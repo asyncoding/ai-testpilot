@@ -92,12 +92,26 @@ def _validates(case_urn: str, requirement_urn: str) -> CaseRelation:
 class _FakeScm:
     def __init__(self, change_set: ChangeSet):
         self._cs = change_set
+        self.resolve_calls: list[str] = []
 
     async def head_sha(self, repo):
         return HEAD
 
+    async def resolve_commit(self, rev: str) -> str:
+        # 默认身份实现：全 sha 直通（analyze/build_mr 归一化的夹具基线）
+        self.resolve_calls.append(rev)
+        return rev
+
     async def get_change_set(self, repo, base, head):
         return self._cs
+
+
+class _ShortRevScm(_FakeScm):
+    """模拟真实 git 适配器：短 sha 展开为夹具里的 40 位全 sha。"""
+
+    async def resolve_commit(self, rev: str) -> str:
+        self.resolve_calls.append(rev)
+        return {BASE[:8]: BASE, HEAD[:8]: HEAD, BASE: BASE, HEAD: HEAD}[rev]
 
 
 class _FakeTickets:
@@ -326,6 +340,28 @@ async def test_analyze_without_scm_raises(tmp_path):
     container.adapters.pop("scm")
     with pytest.raises(RuntimeError, match="scm/repo"):
         await analyze_impact(container, base_commit=BASE, head_commit=HEAD)
+
+
+async def test_analyze_and_mr_summary_normalize_short_revs(tmp_path):
+    """短 sha 在服务入口归一：ImpactAnalysis/ChangeSet 下游只见 40 位全 sha，
+    testpilot-impact 与 Web /impact 的输出身份不随用户输入长短漂移。"""
+    store = bootstrap_store(tmp_path / "data")
+    _seed_index(store)
+    _seed_cases_and_relations(store)
+    scm = _ShortRevScm(_change_set())
+    container = _Container(store, scm)
+
+    analysis = await analyze_impact(
+        container, base_commit=BASE[:8], head_commit=HEAD[:8])
+    assert analysis.base_commit == BASE
+    assert analysis.head_commit == HEAD
+    assert scm.resolve_calls[:2] == [BASE[:8], HEAD[:8]]
+
+    summary = await build_mr_summary(
+        container, base_commit=BASE[:8], head_commit=HEAD[:8])
+    # MR 摘要同样先归一再取 diff（summary 内 ChangeSet 身份是全 sha）
+    assert scm.resolve_calls[2:4] == [BASE[:8], HEAD[:8]]
+    assert summary.summary.head_commit == HEAD
 
 
 # ── MR 摘要：确定性脊柱 + 白名单补点 ─────────────────────────────────────────
