@@ -226,7 +226,8 @@ def make_nodes(deps: QaDeps) -> dict[str, Callable]:
                 "limit": deps.params.retrieval_limit,
             }
             flags = list(state.get("degraded_flags") or [])
-            # 能力探测：HybridSearchAdapter.search 有 kinds 形参，FtsSearchAdapter 没有
+            # 能力探测：Hybrid/FTS 两个内置适配器都有 kinds 形参（FTS 于 2026-11-21
+            # 关系构建切片补齐）；探测保留是为外来/老版本适配器留显式降级标记
             search_params = inspect.signature(deps.search.search).parameters
             supports_kinds = "kinds" in search_params
             if state["intent"] == QaIntent.CODE.value:
