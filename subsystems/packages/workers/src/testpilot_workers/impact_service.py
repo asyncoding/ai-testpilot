@@ -68,12 +68,15 @@ async def analyze_impact(
         # rename 目标以库内 renamed_to 关系为准（resolve_change_symbols 内部补），
         # 配对逻辑只服务 MR 摘要，影响链分类不需要再跑一次
         changed_symbols, unresolved = resolve_change_symbols(store, change_set)
+        # 影响面是机器回归选择消费者（FR-ING-004 允许低置信素材的自动化用途）：
+        # 显式取低置信关系，检索挂链(0.50)/calls 传播(0.45/0.40)才能进入影响链；
+        # 知识浏览 API 的 list_case_relations() 默认藏低置信口径不变。
         return build_impact_analysis(
             base_commit=base_commit,
             head_commit=head_commit,
             changed_symbols=changed_symbols,
             unresolved_symbols=unresolved,
-            relations=store.list_case_relations(),
+            relations=store.list_case_relations(include_low=True),
             cases=store.list_test_cases(),
             issues=await _load_issues(container),
             requirement_urns=requirement_urns or [],

@@ -291,6 +291,35 @@ async def test_missing_tickets_adapter_returns_empty_defects(tmp_path):
     assert analysis.cases  # 主路径不受票源缺省影响
 
 
+async def test_low_confidence_retrieval_relations_reach_impact_chain(tmp_path):
+    """切片 A/B 闸门（D1 修复的最后一公里）：检索挂链 0.50 / calls 传播
+    0.45/0.40 都低于 LOW_CONFIDENCE_THRESHOLD，知识浏览口默认藏起；但影响面
+    是机器回归选择消费者，analyze_impact 必须显式取低置信关系，否则真实库
+    符号关系从 0 涨到 N 后影响链仍然是 0 用例。"""
+    store = bootstrap_store(tmp_path / "data")
+    _seed_index(store)
+    case_low = make_urn("fs-cases", "case", "TC-LOW")
+    store.upsert_test_case(
+        "urn:testpilot:fs-cases:document:synthetic-cases",
+        _case(case_low), content_hash="hc-low",
+    )
+    # 仅挂一条低置信检索关系（retrieval_link 口径 0.50），无任何高置信关系
+    store.replace_case_relations(RELATION_SCOPE_URN, [
+        _refs(case_low, MOD_URN, confidence=0.50),
+    ])
+    # 浏览口默认确实藏低置信：先证明夹具本身处于低置信状态
+    assert store.list_case_relations() == []
+    assert len(store.list_case_relations(include_low=True)) == 1
+
+    container = _Container(store, _FakeScm(_change_set()))
+    analysis = await analyze_impact(
+        container, base_commit=BASE, head_commit=HEAD)
+
+    buckets = {c.external_id: c.classification for c in analysis.cases}
+    assert buckets == {"TC-LOW": "runnable"}
+    assert analysis.recommended_case_urns == [case_low]
+
+
 async def test_analyze_without_scm_raises(tmp_path):
     store = bootstrap_store(tmp_path / "data")
     container = _Container(store, _FakeScm(_change_set()))
