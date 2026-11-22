@@ -299,7 +299,7 @@ def main() -> int:
         reopened = bootstrap_store(config.paths["data_dir"])
         try:
             reopened_n = reopened.count_case_relations()
-            reopened_hash = reopened.get_meta("case-relations-hash:v1")
+            reopened_hash = reopened.get_meta("case-relations-hash:v2")
         finally:
             reopened.close()
         check("⑩ 重开库关系与指纹持久化无损",
