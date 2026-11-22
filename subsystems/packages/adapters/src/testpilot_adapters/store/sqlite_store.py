@@ -14,6 +14,7 @@ from testpilot_core.approval import CaseDecisionPlan
 from testpilot_core.badcase import BadCase
 from testpilot_core.case_relations import (
     RELATION_SCOPE_URN,
+    CallsEdge,
     CaseRelation,
     EvidenceRow,
     ensure_relation_scope,
@@ -852,6 +853,21 @@ class Store:
             (symbol_urn,),
         ).fetchone()
         return int(row["n"])
+
+    def list_calls_edges(self) -> list[CallsEdge]:
+        """全量 calls 边（caller→callee，摄入管线词法产物，doc_urn 为真实文档）。
+
+        供 case-relations 路径⑥调用图传播：只读 kind='calls'，不碰 case-relations
+        scope。去重 + 全排序，保证同库态下输出字节级稳定（BFS 输入序无关有单测
+        锁定，排序是双保险）。
+        """
+        rows = self.conn.execute(
+            """SELECT DISTINCT source_urn, target_urn FROM relations
+               WHERE kind='calls'
+               ORDER BY source_urn, target_urn"""
+        ).fetchall()
+        return [CallsEdge(source_urn=r["source_urn"], target_urn=r["target_urn"])
+                for r in rows]
 
     def list_doc_urns_for_symbol_urns(self, symbol_urns: list[str]) -> list[str]:
         if not symbol_urns:
