@@ -281,6 +281,59 @@ def _line_at(pos: int, source: str) -> int:
     return source.count("\n", 0, pos) + 1
 
 
+def mask_swift_comments(source: str) -> str:
+    """把注释内容（``//`` 行注释、``/* */`` 块注释，含 ``///`` doc 注释）替换为
+    等长空白，保留换行；**字符串字面量原样保留、串内的 // 与 /* 不当注释**。
+
+    与 :func:`_mask_swift` 的刻意差异：字符串是运行期行为（日志文案、持久化 key、
+    URL），改字符串必须仍算代码变更，所以这里不掩码字符串。专供 diffing 做
+    「注释-only 改动」识别（D3），不参与切块/配平，避免改动经过实战的切块路径。
+    """
+    out = list(source)
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        nxt = source[i + 1] if i + 1 < n else ""
+        if c == "/" and nxt == "/":
+            j = source.find("\n", i)
+            j = n if j == -1 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c == "/" and nxt == "*":
+            # Swift 块注释允许嵌套，沿用 _mask_swift 的 depth 计数口径
+            depth = 1
+            out[i] = out[i + 1] = " "
+            i += 2
+            while i < n and depth:
+                if source[i] == "/" and i + 1 < n and source[i + 1] == "*":
+                    depth += 1
+                    out[i] = out[i + 1] = " "
+                    i += 2
+                elif source[i] == "*" and i + 1 < n and source[i + 1] == "/":
+                    depth -= 1
+                    out[i] = out[i + 1] = " "
+                    i += 2
+                else:
+                    if source[i] != "\n":
+                        out[i] = " "
+                    i += 1
+        elif c == '"':
+            # 跳过整个字符串（含多行字符串与转义引号），串内注释符号不生效
+            i += 1
+            while i < n:
+                if source[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if source[i] == '"':
+                    i += 1
+                    break
+                i += 1
+        else:
+            i += 1
+    return "".join(out)
+
+
 def _match_body(masked: str, open_start: int) -> tuple[int, int] | None:
     """从 open_start（'{' 位置）配平，返回 (open, close)；配不平返回 None。"""
     depth = 0

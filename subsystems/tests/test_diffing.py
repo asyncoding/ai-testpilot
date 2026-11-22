@@ -108,6 +108,80 @@ def test_text_chunks_are_ignored_when_no_symbol_change():
     assert diff_symbol_sets(old, new) == []
 
 
+def test_comment_only_line_comment_change_is_not_modified():
+    # D3：仅 // 行注释变化（含 MARK 注释）不是代码变更，不许报 MODIFIED
+    old = [sym("S.foo()", text=(
+        "func foo() {\n"
+        "    // MARK: - old section\n"
+        "    runReconcile()\n"
+        "}\n"))]
+    new = [sym("S.foo()", text=(
+        "func foo() {\n"
+        "    // MARK: - new section name\n"
+        "    runReconcile()\n"
+        "}\n"))]
+    assert diff_symbol_sets(old, new) == []
+
+
+def test_comment_only_block_and_doc_comment_change_is_not_modified():
+    # D3：/* */ 块注释与 /// doc 注释的纯注释改动同样不报
+    old = [sym("S.foo()", text=(
+        "func foo() {\n"
+        "    /// 旧的说明\n"
+        "    /* 旧块注释 */ let v = 1\n"
+        "    bar(v)\n"
+        "}\n"))]
+    new = [sym("S.foo()", text=(
+        "func foo() {\n"
+        "    /// 新的说明，文字完全不同\n"
+        "    /* 新块注释，文字完全不同 */ let v = 1\n"
+        "    bar(v)\n"
+        "}\n"))]
+    assert diff_symbol_sets(old, new) == []
+
+
+def test_whitespace_only_change_is_not_modified():
+    # 缩进/空行/换行差异不是代码变更（注释掩码后再做空白归一）
+    old = [sym("S.foo()", text="func foo() {\n    bar()\n}\n")]
+    new = [sym("S.foo()", text="func foo() {\n        bar()\n\n}\n")]
+    assert diff_symbol_sets(old, new) == []
+
+
+def test_string_literal_change_still_modified():
+    # 红证护栏：只掩码注释，不掩码字符串——日志文案/key/URL 改动必须仍报 MODIFIED
+    old = [sym("S.foo()", text='func foo() {\n    UserDefaults.standard.set("old", forKey: "k")\n}\n')]
+    new = [sym("S.foo()", text='func foo() {\n    UserDefaults.standard.set("new", forKey: "k")\n}\n')]
+    assert as_map(diff_symbol_sets(old, new)) == {"S.foo()": ChangeType.MODIFIED}
+
+
+def test_code_change_alongside_comment_change_still_modified():
+    # 注释和代码同时改：代码差异不得被注释过滤吞掉
+    old = [sym("S.foo()", text=(
+        "func foo() {\n"
+        "    // old note\n"
+        "    return 1\n"
+        "}\n"))]
+    new = [sym("S.foo()", text=(
+        "func foo() {\n"
+        "    // new note\n"
+        "    return 2\n"
+        "}\n"))]
+    assert as_map(diff_symbol_sets(old, new)) == {"S.foo()": ChangeType.MODIFIED}
+
+
+def test_comment_only_change_on_one_symbol_leaves_other_intact():
+    # 多符号独立性：A 只改注释（不报），B 真改代码（报 MODIFIED）
+    old = [
+        sym("S.a()", text="func a() {\n // old\n x()\n}\n"),
+        sym("S.b()", text="func b() {\n return 1\n}\n"),
+    ]
+    new = [
+        sym("S.a()", text="func a() {\n // new\n x()\n}\n"),
+        sym("S.b()", text="func b() {\n return 2\n}\n"),
+    ]
+    assert as_map(diff_symbol_sets(old, new)) == {"S.b()": ChangeType.MODIFIED}
+
+
 def test_output_order_removed_then_added_is_stable():
     old = [sym(f"old{i}.m()") for i in range(3)]
     new = [sym(f"new{i}.m()") for i in range(3)]
