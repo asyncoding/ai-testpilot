@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from .chunking import RawChunk
+from .chunking import RawChunk, mask_swift_comments
 from .enums import ChangeType
 from .models import SymbolChange
 
@@ -19,6 +19,15 @@ from .models import SymbolChange
 def _base_id(chunk: RawChunk) -> str:
     """anchor → 跨版本稳定身份（剥 #L 行号后缀）。"""
     return chunk.anchor.split("#L", 1)[0]
+
+
+def _code_identity(text: str) -> str:
+    """注释掩码 + 空白归一后的代码身份串（D3）。
+
+    纯注释改动（含 ``///`` doc 注释、``MARK``）与纯格式改动（缩进/空行）归一后
+    身份不变，不再误报 MODIFIED；字符串字面量不在掩码范围，改文案/key/URL 仍报。
+    """
+    return " ".join(mask_swift_comments(text).split())
 
 
 def _index_by_identity(chunks: list[RawChunk]) -> dict[tuple[str, int], RawChunk]:
@@ -39,7 +48,9 @@ def diff_symbol_sets(old: list[RawChunk], new: list[RawChunk]) -> list[SymbolCha
     """两版本符号块对账。
 
     判定优先级：消失=removed / 新增=added → 签名变化=signature_changed
-    （文本通常也变，不再重复报 modified）→ 仅文本变化=modified → 无变化不报。
+    （文本通常也变，不再重复报 modified）→ 仅代码文本变化=modified → 无变化不报。
+    文本比对走 :func:`_code_identity`：注释（含 MARK/doc 注释）与空白差异先归一，
+    纯注释/纯格式改动不报 modified（D3），字符串字面量差异保留。
     输出顺序稳定：先按 old 声明序报 removed/变化，再按 new 声明序报 added；
     同一 (symbol_id, change_type) 去重。
     """
@@ -63,7 +74,7 @@ def diff_symbol_sets(old: list[RawChunk], new: list[RawChunk]) -> list[SymbolCha
             add(symbol_id, ChangeType.REMOVED)
         elif old_chunk.signature != new_chunk.signature:
             add(symbol_id, ChangeType.SIGNATURE_CHANGED)
-        elif old_chunk.text != new_chunk.text:
+        elif _code_identity(old_chunk.text) != _code_identity(new_chunk.text):
             add(symbol_id, ChangeType.MODIFIED)
 
     # new 声明序：added
