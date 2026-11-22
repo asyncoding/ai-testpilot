@@ -27,6 +27,13 @@ source_refs/fr_id）派生**闭集两类关系**，不引入任何新抽取：
 | oracle 草稿（确定性源）引用符号 URN | references_symbol | 0.70 | 是 |
 | 测试点 FR 邻接传递到符号 URN | references_symbol | 0.50 | 否 |
 | oracle 草稿（模型源）引用符号 URN | references_symbol | 0.50 | 否 |
+| ⑤ 用例文本混合检索命中符号（worker 投影） | references_symbol | 0.50 | 否 |
+| ⑥ calls 调用图传播（hop1/hop2） | references_symbol | 0.45/0.40 | 否 |
+
+路径⑤⑥是 D1 修复切片（2026-11-21）：检索与调用图遍历都在 worker/适配器侧
+完成，core 只吃投影后的确定性输入，零 IO 零模型依赖的纪律不变。两类新关系全部
+低于 LOW_CONFIDENCE_THRESHOLD——知识浏览默认藏起，仅供影响面等机器消费者使用，
+错误方向是过纳入（多跑回归），不会漏测。
 """
 
 from __future__ import annotations
@@ -41,7 +48,8 @@ from .urn import parse_urn
 
 RelationKind = Literal["case_validates_requirement", "case_references_symbol"]
 ProvenanceTag = Literal[
-    "fr_tag", "oracle_suggestion", "test_point_impact", "test_point_fr"
+    "fr_tag", "oracle_suggestion", "test_point_impact", "test_point_fr",
+    "retrieval_link", "calls_propagation",
 ]
 EvidenceStatus = Literal["resolved", "unresolved"]
 
@@ -59,6 +67,11 @@ _CONF_SUGGESTION_REQ_MODEL = 0.55
 _CONF_POINT_IMPACT_REQ = 0.60
 _CONF_SUGGESTION_SYMBOL_DETERMINISTIC = 0.70
 _CONF_LOW = 0.50
+# 路径⑤检索挂链：词法共现启发式，统一压低置信（FR-ING-004：不面向用户展示）
+_CONF_RETRIEVAL_LINK = 0.50
+# 路径⑥调用图传播：跳数越远关系越弱，逐跳降档，全程低置信
+_CONF_PROPAGATION_BY_HOP = {1: 0.45, 2: 0.40}
+DEFAULT_CALLS_MAX_HOPS = 2
 
 _REQUIREMENT_RESOURCE_TYPES = frozenset({"requirement", "requirement_rule"})
 _SYMBOL_RESOURCE_TYPE = "symbol"
@@ -102,6 +115,25 @@ class PointRef(BaseModel):
     source_refs: list[str] = Field(default_factory=list)
 
 
+class RetrievalSymbolRef(BaseModel):
+    """路径⑤检索挂链输入：worker 对用例文本跑混合检索后投影的符号命中。
+
+    core 不依赖检索适配器——查询整形、FTS/向量召回、RRF 排序都在 worker 侧
+    完成，这里只接收已固化的 (用例, 符号, 证据 chunk) 三元组做确定性挂链。
+    """
+
+    case_urn: str
+    symbol_urn: str
+    chunk_urn: str = ""
+
+
+class CallsEdge(BaseModel):
+    """calls 调用边输入（worker 从 relations 表 kind='calls' 投影）：caller→callee。"""
+
+    source_urn: str
+    target_urn: str
+
+
 class CaseRelationBuildResult(BaseModel):
     relations: list[CaseRelation] = Field(default_factory=list)
     cases_seen: int = 0
@@ -112,6 +144,9 @@ class CaseRelationBuildResult(BaseModel):
     unknown_fr_tags: list[str] = Field(default_factory=list)
     # 不符合 urn:testpilot 约定的引用，跳过并记账
     unparseable_refs: list[str] = Field(default_factory=list)
+    # 路径⑤/⑥产出计数（按最终关系的 provenance 成员统计，合并后仍可计数）
+    retrieval_link_count: int = 0
+    calls_propagated_count: int = 0
 
     @property
     def low_confidence_count(self) -> int:
@@ -223,6 +258,39 @@ class _Accumulator:
         ]
 
 
+def propagate_calls(
+    seeds: Sequence[str],
+    edges: Sequence[CallsEdge],
+    *,
+    max_hops: int = DEFAULT_CALLS_MAX_HOPS,
+) -> dict[str, int]:
+    """从种子符号沿 calls 出边（caller→callee）做有界 BFS。
+
+    返回 ``{到达符号: 最短跳数}``，只含跳数 ≥1 的节点（种子自身不返回）。
+    环安全：已访问节点不重复展开；``max_hops<1`` 时传播关闭返回空 dict。
+    纯函数零 IO，边的输入顺序不影响结果（按节点集合逐层扩张）。
+    """
+    if max_hops < 1:
+        return {}
+    adjacency: dict[str, set[str]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge.source_urn, set()).add(edge.target_urn)
+
+    distances: dict[str, int] = {}
+    frontier = set(seeds)
+    for hop in range(1, max_hops + 1):
+        next_frontier: set[str] = set()
+        for node in frontier:
+            for target in adjacency.get(node, ()):
+                if target not in distances and target not in seeds:
+                    distances[target] = hop
+                    next_frontier.add(target)
+        if not next_frontier:
+            break
+        frontier = next_frontier
+    return distances
+
+
 def build_case_relations(
     *,
     cases: Sequence[TestCase],
@@ -230,6 +298,9 @@ def build_case_relations(
     suggestions: Sequence[SuggestionRef],
     points: Sequence[PointRef],
     ambiguous_fr_tags: Sequence[str] = (),
+    retrieval_refs: Sequence[RetrievalSymbolRef] = (),
+    calls_edges: Sequence[CallsEdge] = (),
+    calls_max_hops: int = DEFAULT_CALLS_MAX_HOPS,
 ) -> CaseRelationBuildResult:
     """从 S2 既有产物派生用例关系闭集（纯函数，无 IO）。
 
@@ -240,6 +311,11 @@ def build_case_relations(
     acc = _Accumulator()
     unknown: set[str] = set()
     unparseable: set[str] = set()
+    # 路径⑥的传播种子：各路径产出的 case→符号直连目标并集（含②④⑤）
+    seed_symbols_by_case: dict[str, set[str]] = {}
+
+    def _seed(case_urn: str, symbol_urn: str) -> None:
+        seed_symbols_by_case.setdefault(case_urn, set()).add(symbol_urn)
 
     active_cases = [c for c in cases if c.lifecycle != "cancelled"]
     cases_cancelled = len(cases) - len(active_cases)
@@ -305,6 +381,7 @@ def build_case_relations(
                         evidence=[suggestion.urn, ref],
                         provenance="oracle_suggestion",
                     )
+                    _seed(case_urn, ref)
                 # 相似用例/文档/切块等引用只作草稿证据，不产生本闭集外的新关系
 
     # 路径③：测试点影响面反推（point 引用了用例 → 用例验证 point 的 FR，0.60）
@@ -341,14 +418,64 @@ def build_case_relations(
                         evidence=[point.urn, ref],
                         provenance="test_point_fr",
                     )
+                    _seed(case.urn, ref)
 
+    # 路径⑤：检索挂链（worker 投影的用例文本→符号命中，0.50 低置信）
+    # 取消/不存在用例的命中不派生；坏 URN 记 unparseable，绝不基于坏 URN 造关系
+    for ref in retrieval_refs:
+        if ref.case_urn not in case_urns:
+            continue
+        if classify_resource(ref.symbol_urn) != _SYMBOL_RESOURCE_TYPE:
+            unparseable.add(ref.symbol_urn)
+            continue
+        evidence = [u for u in (ref.chunk_urn, ref.symbol_urn) if u]
+        acc.add(
+            source_urn=ref.case_urn,
+            kind="case_references_symbol",
+            target_urn=ref.symbol_urn,
+            confidence=_CONF_RETRIEVAL_LINK,
+            evidence=evidence,
+            provenance="retrieval_link",
+        )
+        _seed(ref.case_urn, ref.symbol_urn)
+
+    # 路径⑥：calls 调用图传播。从每个用例的直连符号种子沿 caller→callee 出边
+    # 有界 BFS（默认 2 跳，环安全）；传播边置信按跳降档，与直连重合时由
+    # _Accumulator 取 max 置信并合并 provenance，不产生重复关系。
+    valid_edges: list[CallsEdge] = []
+    for edge in calls_edges:
+        if (classify_resource(edge.source_urn) != _SYMBOL_RESOURCE_TYPE
+                or classify_resource(edge.target_urn) != _SYMBOL_RESOURCE_TYPE):
+            unparseable.add(edge.source_urn)
+            unparseable.add(edge.target_urn)
+            continue
+        valid_edges.append(edge)
+    for case_urn, seeds in seed_symbols_by_case.items():
+        reached = propagate_calls(
+            sorted(seeds), valid_edges, max_hops=calls_max_hops
+        )
+        for target_urn, hop in sorted(reached.items()):
+            acc.add(
+                source_urn=case_urn,
+                kind="case_references_symbol",
+                target_urn=target_urn,
+                confidence=_CONF_PROPAGATION_BY_HOP.get(hop, _CONF_LOW),
+                evidence=[target_urn],
+                provenance="calls_propagation",
+            )
+
+    relations = acc.sorted()
     return CaseRelationBuildResult(
-        relations=acc.sorted(),
+        relations=relations,
         cases_seen=len(cases),
         cases_cancelled=cases_cancelled,
         ambiguous_fr_tags=sorted(ambiguous_fr_tags),
         unknown_fr_tags=sorted(unknown),
         unparseable_refs=sorted(unparseable),
+        retrieval_link_count=sum(
+            1 for r in relations if "retrieval_link" in r.provenance),
+        calls_propagated_count=sum(
+            1 for r in relations if "calls_propagation" in r.provenance),
     )
 
 
