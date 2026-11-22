@@ -95,6 +95,133 @@ def _container(store, repo, tmp_path):
         data_dir=tmp_path / "work")
 
 
+# ── 通用化（2026-11-22）：profile ios 三键驱动工程根/target，CLI 可覆盖 ────────
+
+_CUSTOM_SWIFT = """
+final class FeatureTests: XCTestCase {
+    // testpilot-case: TC-A1
+    func test_feature() { }
+}
+"""
+
+_CUSTOM_UI_SWIFT = """
+final class FlowUITests: XCTestCase {
+    // testpilot-case: TC-U1
+    func test_flow() { }
+}
+"""
+
+# 旧工程根段下的标记测试：自定义 engineering_root 后必须被 containment 挡住，
+# 且其 TC-A1 标记不能因文件被跳过而报「未知 TC」硬错误（压根不扫描该文件）。
+_LEGACY_ROOT_SWIFT = """
+final class LegacyTests: XCTestCase {
+    // testpilot-case: TC-A1
+    func test_legacy() { }
+}
+"""
+
+
+def _seed_custom_repo(tmp_path):
+    repo = tmp_path / "demo-app"
+    unit = repo / "MyApp" / "Tests" / "FeatureTests"
+    ui = repo / "MyApp" / "UITests" / "Flow"
+    unit.mkdir(parents=True)
+    ui.mkdir(parents=True)
+    (unit / "FeatureTests.swift").write_text(_CUSTOM_SWIFT, encoding="utf-8")
+    (ui / "FlowUITests.swift").write_text(_CUSTOM_UI_SWIFT, encoding="utf-8")
+    legacy = repo / "AlarmKitSpike" / "Tests" / "LegacyTests"
+    legacy.mkdir(parents=True)
+    (legacy / "LegacyTests.swift").write_text(_LEGACY_ROOT_SWIFT, encoding="utf-8")
+    return repo
+
+
+_CUSTOM_IOS = {
+    "engineering_root": "MyApp",
+    "unit_test_target": "MyAppTests",
+    "ui_test_target": "MyAppUITests",
+}
+
+
+def _read_map(tmp_path):
+    return json.loads(
+        (tmp_path / "work" / "automation-map.json").read_text(encoding="utf-8"))
+
+
+def test_scan_uses_profile_ios_config_for_root_and_targets(tmp_path):
+    """profile 层：ios 三键驱动 containment 与 OID target；旧工程根被挡住。"""
+    store = _seed_store(tmp_path)
+    repo = _seed_custom_repo(tmp_path)
+    container = make_fake_container(
+        store, repo, head_commit="d" * 40, data_dir=tmp_path / "work",
+        ios_config=_CUSTOM_IOS)
+    summary = asyncio.run(run_scan(container, now=_T0))
+
+    payload = _read_map(tmp_path)
+    assert {b["only_testing_id"] for b in payload["bindings"]} == {
+        "MyAppTests/FeatureTests/test_feature",
+        "MyAppUITests/FlowUITests/test_flow",
+    }
+    unlinked = {u["only_testing_id"] for u in payload["unlinked_swift_tests"]}
+    assert unlinked == set()  # 旧工程根文件未进扫描，不留幻影台账
+    assert summary["scanned_files"] == 2
+
+
+def test_run_scan_cli_kwargs_override_profile_ios_config(tmp_path):
+    """优先级第一层：显式参数（CLI 接缝）压过 profile ios 配置。"""
+    store = _seed_store(tmp_path)
+    repo = _seed_custom_repo(tmp_path)
+    container = make_fake_container(
+        store, repo, head_commit="d" * 40, data_dir=tmp_path / "work",
+        ios_config=_CUSTOM_IOS)
+    asyncio.run(run_scan(
+        container, now=_T0,
+        engineering_root="MyApp",
+        unit_target="CliTests", ui_target="CliUITests"))
+    payload = _read_map(tmp_path)
+    assert {b["only_testing_id"] for b in payload["bindings"]} == {
+        "CliTests/FeatureTests/test_feature",
+        "CliUITests/FlowUITests/test_flow",
+    }
+
+
+def test_scan_falls_back_to_core_constants_without_profile_ios(tmp_path):
+    """优先级第三层：裸 config（无 project.ios，测试假容器/老 profile 同构）
+    时回退 core legacy 常量，行为与通用化前逐字一致。"""
+    store = _seed_store(tmp_path)
+    repo = _seed_repo(tmp_path)
+    asyncio.run(run_scan(_container(store, repo, tmp_path), now=_T0))
+    payload = _read_map(tmp_path)
+    assert any(
+        b["only_testing_id"].startswith("AlarmKitSpikeTests/")
+        for b in payload["bindings"])
+    assert any(
+        b["only_testing_id"].startswith("AlarmKitSpikeUITests/")
+        for b in payload["bindings"])
+
+
+def test_cli_flags_threaded_into_run_scan(tmp_path, monkeypatch):
+    """argv 层：三个新 CLI flag 必须真正接到 run_scan（防只加参数不接线）。"""
+    store = _seed_store(tmp_path)
+    repo = _seed_custom_repo(tmp_path)
+    container = make_fake_container(
+        store, repo, head_commit="d" * 40, data_dir=tmp_path / "work",
+        ios_config=_CUSTOM_IOS)
+    monkeypatch.setattr(sa, "bootstrap", lambda name: container)
+    monkeypatch.setattr("sys.argv", [
+        "testpilot-scan-automation",
+        "--engineering-root", "MyApp",
+        "--unit-test-target", "CliTests",
+        "--ui-test-target", "CliUITests"])
+    with pytest.raises(SystemExit) as exc:
+        sa.main()
+    assert exc.value.code == 0  # 自定义库内无重复标记/探索性绑定
+    payload = _read_map(tmp_path)
+    assert {b["only_testing_id"] for b in payload["bindings"]} == {
+        "CliTests/FeatureTests/test_feature",
+        "CliUITests/FlowUITests/test_flow",
+    }
+
+
 def test_scan_writes_map_and_projects_raw_json(tmp_path):
     store = _seed_store(tmp_path)
     repo = _seed_repo(tmp_path)

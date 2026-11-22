@@ -25,6 +25,13 @@ project:
     workspace: AlarmKitSpike/AlarmKitSpike.xcworkspace
     scheme: AlarmKitSpike
     simulator_udid: 5411787C-8AFF-4EBF-9000-EB5EFD1457D5
+    # 自动化身份映射（scan-automation）与用例导出（export-cases）的项目身份键。
+    # 换工程只改这里即可跑通场景 A/B，无需动代码；不配置时 worker 回退 core
+    # 内置 legacy 常量。CLI flag（--engineering-root/--unit-test-target/
+    # --ui-test-target、--test-target/--ui-test-target）优先级高于本组配置。
+    engineering_root: AlarmKitSpike
+    unit_test_target: AlarmKitSpikeTests
+    ui_test_target: AlarmKitSpikeUITests
 
 paths:
   data_dir: store/ios-local-poc-xcode
