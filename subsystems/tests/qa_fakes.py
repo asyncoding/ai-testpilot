@@ -141,10 +141,16 @@ class FakeHybridSearch(_FakeSearchBase):
 
 
 class FakeFtsSearch(_FakeSearchBase):
-    """对齐 FtsSearchAdapter：只有 **kwargs（无 kinds 形参），返回裸 list。"""
+    """对齐 FtsSearchAdapter：显式 kinds 形参（2026-11-21 起下推 SQL 过滤），
+    返回裸 list[KnowledgeChunk]（区别于 Hybrid 形态的 HybridResult）。"""
 
-    async def search(self, query, **kwargs):
-        self.search_calls.append({"query": query, **kwargs})
+    async def search(self, query, *, project="", branch="main",
+                     acl_scope="default", kinds=(), limit=8, **kwargs):
+        self.search_calls.append({
+            "query": query, "project": project, "branch": branch,
+            "acl_scope": acl_scope, "kinds": kinds, "limit": limit,
+            **kwargs,
+        })
         return list(self.chunks)
 
 

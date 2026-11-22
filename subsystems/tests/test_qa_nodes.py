@@ -256,8 +256,31 @@ async def test_retrieval_code_intent_passes_kinds_on_capable_adapter():
     assert search.search_calls[0]["kinds"] == ("code_symbol", "text")
 
 
-async def test_retrieval_fts_adapter_flags_kinds_unsupported():
+async def test_retrieval_fts_adapter_passes_kinds_filter():
+    # 2026-11-21 关系构建切片：FtsSearchAdapter 补齐 kinds 形参并下推 SQL，
+    # 内置 FTS 适配器与 Hybrid 走同一 code 意图过滤契约，不再打 unsupported 标记
     search = FakeSearch([make_chunk(CHUNK1)], hybrid=False)
+    nodes = nodes_of(FakeModel({}), search)
+
+    out = await nodes[N_RETRIEVAL](base_state(intent="code"))
+
+    assert search.search_calls[0]["kinds"] == ("code_symbol", "text")
+    assert "kinds_filter_unsupported" not in out["degraded_flags"]
+
+
+class _LegacySearchWithoutKinds:
+    """外来/老版本适配器：签名无 kinds，能力探测必须仍能识别并降级标记。"""
+
+    def __init__(self):
+        self.search_calls: list[dict] = []
+
+    async def search(self, query, **kwargs):
+        self.search_calls.append({"query": query, **kwargs})
+        return [make_chunk(CHUNK1)]
+
+
+async def test_retrieval_legacy_adapter_without_kinds_still_flagged():
+    search = _LegacySearchWithoutKinds()
     nodes = nodes_of(FakeModel({}), search)
 
     out = await nodes[N_RETRIEVAL](base_state(intent="code"))

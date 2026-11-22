@@ -40,17 +40,20 @@ class FtsSearchAdapter:
         project: str,
         branch: str = "main",
         acl_scope: str = "default",
+        kinds: tuple[str, ...] = (),
         limit: int = 8,
     ) -> list[KnowledgeChunk]:
         # 必须先整形：原始问题里的 . : " * ( ) 是 FTS5 语法字符，直塞 MATCH
         # 会抛 OperationalError 让整条问答链炸在检索节点（S1.4 端到端测试复现）。
         # 与 HybridSearchAdapter 共用 core 的同一整形函数，两通道查询语义保持一致。
+        # kinds 透传 SQL 层类型过滤（关系构建路径⑤只用 code_symbol 召回）；
+        # 默认 () = 不过滤，老调用方行为不变。
         match_expr, like_terms = shape_trigram_query(query)
         if not match_expr and not like_terms:
             return []
         rows = self.store.search_fts_matches(
             match_expr, like_terms,
-            branch=branch, acl_scope=acl_scope, kinds=(), limit=limit,
+            branch=branch, acl_scope=acl_scope, kinds=kinds, limit=limit,
         )
         # 与 HybridSearchAdapter 走同一个水合方法：JOIN source_documents 把
         # doc_authority/doc_uri/doc_content_hash 折进 chunk.metadata。旧实现只取

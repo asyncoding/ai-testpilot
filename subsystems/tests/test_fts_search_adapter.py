@@ -73,6 +73,35 @@ async def test_raw_punctuation_question_is_shaped_without_raising(tmp_path):
         store.close()
 
 
+async def test_kinds_filter_is_pushed_down(tmp_path):
+    # 路径⑤检索挂链只用 code_symbol 召回：kinds 透传 SQL 层，text 切块不可混入
+    store = bootstrap_store(tmp_path / "data")
+    store.upsert_document(_doc())
+    sym_chunk_urn = "urn:testpilot:fs-docs:chunk:docs/a.swift#sym-1"
+    symbol_urn = "urn:testpilot:fs-docs:symbol:docs/a.swift#Scheduler.runReconcile"
+    # 水合走 raw_json，kind/symbol_urn 必须随模型写入（不能只改列）
+    store.upsert_chunk(KnowledgeChunk(
+        urn=sym_chunk_urn, doc_urn=DOC, index=0, kind="code_symbol",
+        text="runReconcile 唤醒伴随后台对账调度", symbol_urn=symbol_urn,
+        branch="main", content_hash="ch-sym"))
+    store.upsert_chunk(_chunk(
+        "runReconcile 机制的文字说明与事故复盘",
+        urn=f"{CHUNK}-text", index=1))
+    try:
+        adapter = _adapter(store)
+        all_hits = await adapter.search("runReconcile 唤醒伴随", project="demo")
+        assert {c.urn for c in all_hits} == {sym_chunk_urn, f"{CHUNK}-text"}
+
+        symbol_only = await adapter.search(
+            "runReconcile 唤醒伴随", project="demo",
+            kinds=("code_symbol",))
+        assert len(symbol_only) == 1
+        assert symbol_only[0].kind == "code_symbol"
+        assert symbol_only[0].symbol_urn == symbol_urn
+    finally:
+        store.close()
+
+
 async def test_branch_and_acl_filters_are_pushed_down(tmp_path):
     store = bootstrap_store(tmp_path / "data")
     store.upsert_document(_doc())
