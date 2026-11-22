@@ -32,8 +32,10 @@ from .requirement import RequirementParseResult
 
 CASE_EXPORT_SCHEMA_VERSION = "case-export-v1"
 
-# 外部 Agent 生成约定（docs/01 §9.3）：target 名是工程约定而非全域常量，
-# 允许 worker 按 profile 覆盖，默认值对齐 AlarmKitSpike 演示工程。
+# 外部 Agent 生成约定（docs/01 §9.3）：target 名是工程约定而非全域常量。
+# 覆盖优先级：CLI 显式参数 > profile project.ios.unit_test_target/ui_test_target
+# > 此处 legacy 兜底常量（值对齐 AlarmKitSpike 演示工程，永不静默改值，
+# 否则老 profile 的导出物 generation_convention 与 automation-map OID 会漂移）。
 DEFAULT_TEST_TARGET = "AlarmKitSpikeTests"
 DEFAULT_UI_TEST_TARGET = "AlarmKitSpikeUITests"
 DEFAULT_MARKER_COMMENT = "// testpilot-case: <TC-ID>"

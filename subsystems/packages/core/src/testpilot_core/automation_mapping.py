@@ -31,10 +31,12 @@ from .case_export import DEFAULT_TEST_TARGET, DEFAULT_UI_TEST_TARGET
 
 AUTOMATION_MAP_SCHEMA_VERSION = "automation-map-v1"
 
-# 唯一在 Xcode workspace 内的工程根（AlarmKitSpike.xcworkspace）。仓里根 Tests/
+# 演示工程在 Xcode workspace 内的工程根（AlarmKitSpike.xcworkspace）。仓里根 Tests/
 # 属于 2026-08 已作废的 CalendarStrongReminder SPM 包（根 project.yml 同为作废
 # 规格），其测试不被 workspace 编译，OID 传给 xcodebuild 会 suite-not-found。
 # E5 实测：旧口径把根 Tests/CalendarStrongReminderTests 的 12 个方法误纳进映射。
+# 这是 legacy 兜底默认：换工程时由 profile project.ios.engineering_root 覆盖，
+# 经 worker 显式传参进来，core 自身不读任何配置（保持零 IO）。
 PROJECT_ROOT_SEGMENT = "AlarmKitSpike"
 
 _CLASS_RE = re.compile(r"\bclass\s+(?P<name>[A-Za-z_]\w*)\b")
@@ -115,9 +117,14 @@ def scan_swift_tests(
     exploratory_ids: Sequence[str] = (),
     unit_target: str = DEFAULT_TEST_TARGET,
     ui_target: str = DEFAULT_UI_TEST_TARGET,
+    project_root: str = PROJECT_ROOT_SEGMENT,
     manual_bindings: Sequence[ManualBindingInput] = (),
 ) -> ScanResult:
-    """扫描 Swift 文件字典，构建 marker 绑定并校验人工绑定（纯函数）。"""
+    """扫描 Swift 文件字典，构建 marker 绑定并校验人工绑定（纯函数）。
+
+    ``project_root`` 必须显式透传给 :func:`target_for_path`：缺了它，worker
+    传入自定义 target 也挡不住工程根外的作废测试目录（2026-11-22 通用化修复）。
+    """
     active_set = set(active_case_ids)
     exploratory_set = set(exploratory_ids)
     errors: list[str] = []
@@ -129,7 +136,9 @@ def scan_swift_tests(
     marker_pairs: list[tuple[str, str, int, str]] = []  # (tc, oid, line, file)
 
     for path in sorted(files):
-        target = target_for_path(path, unit_target=unit_target, ui_target=ui_target)
+        target = target_for_path(
+            path, unit_target=unit_target, ui_target=ui_target,
+            project_root=project_root)
         if target is None:
             continue
         current_class = ""

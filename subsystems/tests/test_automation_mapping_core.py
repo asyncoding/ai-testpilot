@@ -234,6 +234,49 @@ def test_target_for_path_rejects_stale_root_package_outside_workspace():
         "Tests\\CalendarStrongReminderTests\\AnalyticsTests.swift") is None
 
 
+def test_scan_swift_tests_threads_custom_project_root_and_targets():
+    """通用化（2026-11-22）：scan_swift_tests 必须把 project_root 透传给
+    target_for_path——换工程时自定义工程根内的 Tests/UITests 被接受且 OID
+    target 可换名；工程根外（含旧默认工程根段、仓里根 Tests/ 作废包）整体
+    被 containment 挡住，方法不进台账。红证：透传断参时本用例 TypeError。"""
+    files = {
+        "MyApp/Tests/FeatureTests/FeatureTests.swift": """
+final class FeatureTests: XCTestCase {
+    // testpilot-case: TC-A1
+    func test_feature() { }
+}
+""",
+        "MyApp/UITests/FlowUITests/FlowUITests.swift": """
+final class FlowUITests: XCTestCase {
+    // testpilot-case: TC-B1
+    func test_flow() { }
+}
+""",
+        # 旧默认工程根段：自定义 project_root=MyApp 后落在 containment 外
+        "AlarmKitSpike/Tests/LegacyTests/LegacyTests.swift": """
+final class LegacyTests: XCTestCase {
+    func test_legacy() { }
+}
+""",
+        # 仓里根 Tests/ 的作废 SPM 包形态，同样被挡
+        "Tests/RootPackageTests/RootTests.swift": """
+final class RootTests: XCTestCase {
+    func test_root() { }
+}
+""",
+    }
+    result = scan_swift_tests(
+        files, ["TC-A1", "TC-B1"],
+        project_root="MyApp",
+        unit_target="MyAppTests", ui_target="MyAppUITests")
+    assert {b.only_testing_id for b in result.bindings} == {
+        "MyAppTests/FeatureTests/test_feature",
+        "MyAppUITests/FlowUITests/test_flow",
+    }
+    # 两个圈外文件的方法根本没进方法台账，unlinked 里也不留幻影
+    assert result.unlinked_swift_tests == []
+
+
 def test_map_payload_hash_idempotent_and_head_sensitive():
     result = _scan()
     map1 = build_automation_map(
