@@ -59,6 +59,12 @@ async def analyze_impact(
     if scm is None or repo is None:
         raise RuntimeError("容器未装配 scm/repo，无法做影响面分析")
 
+    # 入口先把任意 rev（短 sha/分支名/HEAD）归一成全 sha：下游 ChangeSet、
+    # ImpactAnalysis、impact-rerun 鲜度守卫与幂等身份只见 40 位 sha，
+    # 用户输入长短不产生两套结果（2026-11-22 短 sha 误判 map 过期缺陷修复）。
+    base_commit = await scm.resolve_commit(base_commit)
+    head_commit = await scm.resolve_commit(head_commit)
+
     with tracer.span(
         "impact.analyze",
         run_id=f"impact-{base_commit[:8]}-{head_commit[:8]}",
@@ -98,6 +104,9 @@ async def build_mr_summary(
     if scm is None or repo is None:
         raise RuntimeError("容器未装配 scm/repo，无法生成 MR 摘要")
 
+    # 与 analyze_impact 同口径归一，保证两个端点的 ChangeSet 身份逐字一致
+    base_commit = await scm.resolve_commit(base_commit)
+    head_commit = await scm.resolve_commit(head_commit)
     change_set = await scm.get_change_set(repo, base_commit, head_commit)
     renames = pair_symbol_renames(
         change_set.symbol_changes, change_set.file_renames

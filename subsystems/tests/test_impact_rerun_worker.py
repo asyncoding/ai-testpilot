@@ -18,6 +18,7 @@ from testpilot_adapters.store import SqliteQueue, bootstrap_store
 from testpilot_core.automation_mapping import AUTOMATION_MAP_SCHEMA_VERSION
 from testpilot_core.case_relations import RELATION_SCOPE_URN, CaseRelation, case_relation_urn
 from testpilot_core.enums import AuthorityLevel, ChangeType, RunStatus
+from testpilot_core.errors import AdapterUnavailableError
 from testpilot_core.impact_execution import ImpactSelectionError
 from testpilot_core.models import (
     ChangeSet,
@@ -49,18 +50,41 @@ CASE_UNMAPPED = "TC-N2"
 OID_RUN = "AlarmKitSpikeTests/AgentTests/test_TCRUN_ring"
 OID_RUN2 = "AlarmKitSpikeTests/AgentTests/test_TCRUN_more"
 REPO = RepoRef(project="demo", repo_path="/tmp/demo-repo", default_branch="main")
+# 用户从终端粘贴的短 sha（8 位）；归一化前不得进入鲜度守卫/选择集身份
+SHORT_BASE = BASE[:8]
+SHORT_HEAD = HEAD[:8]
 
 
 class _FakeScm:
     def __init__(self, change_set: ChangeSet):
         self._cs = change_set
+        self.resolve_calls: list[str] = []
 
     async def head_sha(self, repo=None):
         return HEAD
 
+    async def resolve_commit(self, rev: str) -> str:
+        # 身份归一：夹具里全 sha 直通（对齐真实适配器 40 位 hex 零进程快采）
+        self.resolve_calls.append(rev)
+        return rev
+
     async def get_change_set(self, repo, base, head):
         assert (base, head) == (BASE, HEAD)
         return self._cs
+
+
+class _ResolvingScm(_FakeScm):
+    """模拟真实 GitCodeRepository：短 sha 经 rev-parse 展开为 40 位全 sha。"""
+
+    async def resolve_commit(self, rev: str) -> str:
+        self.resolve_calls.append(rev)
+        mapping = {
+            SHORT_BASE: BASE, BASE: BASE,
+            SHORT_HEAD: HEAD, HEAD: HEAD,
+        }
+        if rev not in mapping:
+            raise AdapterUnavailableError(f"无法解析 git 版本 {rev!r}")
+        return mapping[rev]
 
 
 def _change_set() -> ChangeSet:
@@ -140,12 +164,12 @@ def _write_map(data_dir, *, head: str = HEAD, bindings=None) -> str:
     return str(path)
 
 
-def _container(tmp_path):
+def _container(tmp_path, scm=None):
     store = bootstrap_store(tmp_path / "data")
     _seed(store)
     queue = SqliteQueue(store.conn)
     container = make_fake_container(
-        store, _FakeScm(_change_set()), queue,
+        store, scm or _FakeScm(_change_set()), queue,
         repo=REPO, data_dir=tmp_path / "work")
     return container, store, queue
 
@@ -237,6 +261,57 @@ def test_stale_map_head_mismatch_rejected_before_submit(tmp_path):
     assert _queued_jobs(store) == 0
 
 
+def test_short_sha_inputs_normalized_before_freshness_guard(tmp_path):
+    """红证缺陷（2026-11-22 实测）：map.head_commit 存 40 位全 sha，用户贴短 sha
+    时鲜度守卫曾做字面比较误判「map 已过期」。归一化必须发生在守卫之前，且短 sha
+    与全 sha 两条输入产出逐字相同的选择集/请求（幂等身份不随输入长短漂移）。"""
+    scm = _ResolvingScm(_change_set())
+    container, _store, _queue = _container(tmp_path, scm=scm)
+    _write_map(tmp_path / "work")  # map.head_commit = HEAD（40 位）
+
+    short_payload = asyncio.run(run_impact_rerun(
+        container, base_commit=SHORT_BASE, head_commit=SHORT_HEAD, dry_run=True))
+
+    # 两个短 sha 确实先经过 rev 解析（worker 入口 + analyze_impact 内各一轮）
+    assert scm.resolve_calls[:2] == [SHORT_BASE, SHORT_HEAD]
+    # 载荷里只剩全 sha，短 sha 不泄漏到任何下游身份
+    assert short_payload["base_commit"] == BASE
+    assert short_payload["head_commit"] == HEAD
+    assert short_payload["request"]["commit_sha"] == HEAD
+    assert short_payload["selection"]["head_commit"] == HEAD
+
+    # 与全 sha 输入逐字等价：dry-run 不写账本，可同容器复跑对照
+    full_payload = asyncio.run(run_impact_rerun(
+        container, base_commit=BASE, head_commit=HEAD, dry_run=True))
+    assert short_payload["selection"] == full_payload["selection"]
+    assert short_payload["request"] == full_payload["request"]
+
+
+def test_unresolvable_rev_cli_exit_2_not_traceback(tmp_path, monkeypatch):
+    """坏 rev（拼写错误/已删除分支）在解析阶段响亮失败，CLI 收口 exit 2。"""
+
+    class _BrokenResolveScm:
+        async def head_sha(self, repo=None):
+            return HEAD
+
+        async def resolve_commit(self, rev):
+            raise AdapterUnavailableError(f"无法解析 git 版本 {rev!r}")
+
+        async def get_change_set(self, repo, base, head):
+            raise AssertionError("rev 解析失败时不应走到取 diff")
+
+    container, store, _queue = _container(tmp_path, scm=_BrokenResolveScm())
+    _write_map(tmp_path / "work")
+    monkeypatch.setattr(ir, "bootstrap", lambda name: container)
+    monkeypatch.setattr("sys.argv", [
+        "testpilot-impact-rerun", "--base", SHORT_BASE, "--head", SHORT_HEAD])
+
+    with pytest.raises(SystemExit) as exc:
+        ir.main()
+    assert exc.value.code == 2
+    assert _queued_jobs(store) == 0
+
+
 def test_missing_map_is_filenotfound(tmp_path):
     container, _store, _queue = _container(tmp_path)  # 不写 map
     with pytest.raises(FileNotFoundError, match="automation-map 不存在"):
@@ -261,11 +336,13 @@ def test_one_case_many_methods_all_oids_submitted(tmp_path):
 
 def test_cli_adapter_unavailable_maps_to_exit_2_not_traceback(tmp_path, monkeypatch):
     """git diff 不可达等外部依赖失败必须收口 exit 2（对齐 runner CLI 分型）。"""
-    from testpilot_core.errors import AdapterUnavailableError
 
     class _BrokenScm:
         async def head_sha(self, repo=None):
             return HEAD
+
+        async def resolve_commit(self, rev):
+            return rev  # 解析环节放行，让故障点留在取 diff
 
         async def get_change_set(self, repo, base, head):
             raise AdapterUnavailableError("git diff 失败: fatal: bad object")
