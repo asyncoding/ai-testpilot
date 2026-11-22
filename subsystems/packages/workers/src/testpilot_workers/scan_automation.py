@@ -28,6 +28,7 @@ from typing import Any
 from testpilot_core.automation_mapping import (
     AutomationMapError,
     ManualBindingInput,
+    PROJECT_ROOT_SEGMENT,
     ScanResult,
     automation_map_hash,
     build_automation_map,
@@ -42,11 +43,37 @@ _SKIP_DIRS = {".git", "build", "DerivedData", "Pods", ".build", "logs"}
 _MAP_FILENAME = "automation-map.json"
 
 
-def _iter_swift_files(repo_root: Path) -> dict[str, str]:
+def _resolve_scan_config(
+    container: Any, *,
+    engineering_root: str | None,
+    unit_target: str | None,
+    ui_target: str | None,
+) -> tuple[str, str, str]:
+    """解析工程根与两个 target 名，三层优先级：CLI 显式参数 > profile
+    project.ios 三键 > core legacy 常量。
+
+    测试假容器可能挂裸 SimpleNamespace（无 project/ios 属性），全程 getattr
+    兜底：缺一层就往下落，最终回退常量，行为与通用化前逐字一致。
+    """
+    ios = getattr(getattr(getattr(container, "config", None),
+                          "project", None), "ios", None) or {}
+    return (
+        engineering_root or ios.get("engineering_root") or PROJECT_ROOT_SEGMENT,
+        unit_target or ios.get("unit_test_target") or DEFAULT_TEST_TARGET,
+        ui_target or ios.get("ui_test_target") or DEFAULT_UI_TEST_TARGET,
+    )
+
+
+def _iter_swift_files(
+    repo_root: Path, *,
+    unit_target: str, ui_target: str, project_root: str,
+) -> dict[str, str]:
     """收集 workspace 工程内测试 target 的 swift 文件（相对路径 → 文本）。
 
     target 判定唯一走 core.target_for_path：既跳过构建/依赖目录，也挡住
-    仓里根 Tests/ 的作废 SPM 包（不在 AlarmKitSpike.xcworkspace 内）。
+    工程根 containment 之外的作废测试目录（如演示仓里根 Tests/ 的作废 SPM
+    包，不在 xcworkspace 内）。工程根与 target 名全部由调用方按
+    CLI > profile > core 常量解析后注入，本函数不读任何全局配置。
     """
     files: dict[str, str] = {}
     for path in sorted(repo_root.rglob("*.swift")):
@@ -56,7 +83,10 @@ def _iter_swift_files(repo_root: Path) -> dict[str, str]:
             rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             continue
-        if target_for_path(rel) is None:
+        if target_for_path(
+            rel, unit_target=unit_target, ui_target=ui_target,
+            project_root=project_root,
+        ) is None:
             continue
         files[rel] = path.read_text(encoding="utf-8")
     return files
@@ -139,9 +169,17 @@ async def run_scan(
     review_pairs: list[tuple[str, str]] | None = None,
     bind_specs: list[str] | None = None,
     now: datetime | None = None,
+    engineering_root: str | None = None,
+    unit_target: str | None = None,
+    ui_target: str | None = None,
 ) -> dict[str, Any]:
     review_pairs = review_pairs or []
     bind_specs = bind_specs or []
+    # 工程根/target 名统一在扫描动作之前解析一次，文件收集与 core 扫描两处
+    # 必须用同一组值，否则 containment 与 OID target 会各说各话。
+    project_root, resolved_unit, resolved_ui = _resolve_scan_config(
+        container, engineering_root=engineering_root,
+        unit_target=unit_target, ui_target=ui_target)
     store = container.get("store")
     if store is None:
         raise RuntimeError("容器未装配 store，无法扫描自动化映射")
@@ -164,12 +202,15 @@ async def run_scan(
     reviewed, manuals = _merge_review_inputs(
         existing, review_pairs, bind_specs, stamp)
 
-    files = _iter_swift_files(repo_root)
+    files = _iter_swift_files(
+        repo_root, unit_target=resolved_unit, ui_target=resolved_ui,
+        project_root=project_root)
     result: ScanResult = scan_swift_tests(
         files, active_ids,
         exploratory_ids=exploratory_ids,
-        unit_target=DEFAULT_TEST_TARGET,
-        ui_target=DEFAULT_UI_TEST_TARGET,
+        unit_target=resolved_unit,
+        ui_target=resolved_ui,
+        project_root=project_root,
         manual_bindings=manuals)
     _apply_reviews(result, reviewed, review_pairs, stamp)
 
@@ -228,6 +269,15 @@ def main() -> None:
     parser.add_argument("--bind", action="append", default=[],
                         metavar="TC-ID=Target/Class/method",
                         help="无标记存量测试的手工绑定，可重复；方法必须真实存在")
+    parser.add_argument("--engineering-root", default=None,
+                        help="覆盖 profile project.ios.engineering_root（workspace "
+                             "工程根目录段，containment 用）；缺省再回退内置常量")
+    parser.add_argument("--unit-test-target", default=None,
+                        help="覆盖 profile project.ios.unit_test_target（单元测试 "
+                             "target 名）；缺省再回退内置常量")
+    parser.add_argument("--ui-test-target", default=None,
+                        help="覆盖 profile project.ios.ui_test_target（UI 测试 "
+                             "target 名）；缺省再回退内置常量")
     args = parser.parse_args()
 
     if (args.review or args.bind) and not args.by:
@@ -242,6 +292,9 @@ def main() -> None:
             out=args.out,
             review_pairs=[(tc, args.by) for tc in args.review],
             bind_specs=args.bind,
+            engineering_root=args.engineering_root,
+            unit_target=args.unit_test_target,
+            ui_target=args.ui_test_target,
         ))
     except (AutomationMapError, ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"[scan-automation-worker] 扫描被拒: {exc}", file=sys.stderr)
@@ -255,8 +308,12 @@ def main() -> None:
 
 def make_fake_container(store, repo_root, *, head_commit="",
                         default_branch="demo/agent-generated-tests",
-                        data_dir=None):
-    """测试用最小容器：repo 坐标 + 可选假 scm + store。"""
+                        data_dir=None, ios_config=None):
+    """测试用最小容器：repo 坐标 + 可选假 scm + store。
+
+    ``ios_config`` 给定时挂 ``config.project.ios``（与真 ProfileConfig 同构）；
+    不给定则保持裸 SimpleNamespace，用于验证缺省回退 core 常量的第三层优先级。
+    """
     repo = SimpleNamespace(repo_path=str(repo_root),
                            default_branch=default_branch)
 
@@ -264,8 +321,13 @@ def make_fake_container(store, repo_root, *, head_commit="",
         async def head_sha(self, repo=None):
             return head_commit
 
+    if ios_config is None:
+        config: Any = SimpleNamespace()
+    else:
+        config = SimpleNamespace(
+            project=SimpleNamespace(ios=dict(ios_config)))
     container = SimpleNamespace(
-        config=SimpleNamespace(), data_dir=data_dir or repo_root / "work",
+        config=config, data_dir=data_dir or repo_root / "work",
         adapters={"store": store, "repo": repo, "scm": _FakeScm()})
     container.get = lambda name: container.adapters.get(name)  # type: ignore[attr-defined]
     return container
