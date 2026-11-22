@@ -244,6 +244,41 @@ async def test_sha_resolution_cached_but_head_refresh_each_time(ready_adapter):
     assert len(head_calls) == 2  # 分支/HEAD 每次重解析，防移动后脏缓存
 
 
+async def test_resolve_commit_short_sha_goes_through_rev_parse(ready_adapter):
+    """端口方法 resolve_commit：短 sha/分支名经 rev-parse 归一为全 sha。"""
+    adapter, runner = ready_adapter
+    assert await adapter.resolve_commit(HEAD_SHA[:8]) == BASE_SHA  # 夹具 rev_parse 定死返回
+    parse_calls = [c for c in runner.calls if c == ["rev-parse", "--verify",
+                                                    f"{HEAD_SHA[:8]}^{{commit}}"]]
+    assert len(parse_calls) == 1
+    # 40 位合法 hex 直通缓存，零新增进程
+    before = sum(1 for c in runner.calls if c[0] == "rev-parse")
+    assert await adapter.resolve_commit(HEAD_SHA) == HEAD_SHA
+    after = sum(1 for c in runner.calls if c[0] == "rev-parse")
+    assert before == after
+
+
+async def test_resolve_commit_empty_tree_passthrough_without_rev_parse(ready_adapter):
+    """空树魔法 sha 不是 commit 对象（^{commit} 必失败），按 get_change_set 同口径直通；
+    空串同样按空基线处理，保证根提交区间语义不被归一化破坏。"""
+    adapter, runner = ready_adapter
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    assert await adapter.resolve_commit(empty_tree) == empty_tree
+    assert await adapter.resolve_commit("") == empty_tree
+    assert all(c[0] != "rev-parse" for c in runner.calls)
+
+
+async def test_resolve_commit_bad_rev_is_adapter_unavailable(ready_adapter):
+    adapter, runner = ready_adapter
+
+    def bad_parse(args):
+        return fail(128, "fatal: ambiguous argument 'deadbeef': unknown revision")
+
+    runner.on("rev-parse", bad_parse)
+    with pytest.raises(AdapterUnavailableError, match="无法解析"):
+        await adapter.resolve_commit("deadbeef")
+
+
 async def test_path_traversal_rejected():
     runner = FakeGitRunner().on("rev-parse", lambda a: ok(b"/tmp/demo-repo\n"))
     adapter = make_adapter(runner)

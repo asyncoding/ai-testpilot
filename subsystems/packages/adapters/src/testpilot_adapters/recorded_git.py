@@ -82,6 +82,14 @@ class RecordedGitRepository:
     async def head_sha(self, repo: RepoRef | None = None) -> str:
         return self._load_meta()["head_sha"]
 
+    async def resolve_commit(self, rev: str) -> str:
+        """端口方法：角色名/全 sha 可解析，其余引用与真实适配器同错型响亮失败。
+
+        空树魔法 sha 是 40 位 hex，经 _resolve 的正则分支原样直通，与真实
+        适配器的空树口径天然一致。
+        """
+        return self._resolve(rev)
+
     async def read_file_at_commit(
         self, repo: RepoRef, path: str, commit: str
     ) -> str:
