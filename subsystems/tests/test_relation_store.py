@@ -133,6 +133,35 @@ def test_low_confidence_hidden_by_default_and_kind_filter(store):
     assert [r.kind for r in only_symbols] == ["case_references_symbol"]
 
 
+def test_list_calls_edges_dedup_sort_and_scope_exclusion(store):
+    # 路径⑥输入：calls 边来自摄入管线（真实文档 doc_urn），case-relations scope
+    # 的关系行即使同名 kind 也不存在；这里额外插一条非 calls 的 scope 行证明过滤
+    sym2 = "urn:testpilot:fs-docs:symbol:a.swift#AlarmStore.disarm"
+    store.conn.executemany(
+        """INSERT INTO relations
+           (urn, source_urn, target_urn, kind, confidence, evidence_json, doc_urn)
+           VALUES (?,?,?,?,?, '{"lines": [], "urns": []}', ?)""",
+        [
+            ("urn:testpilot:fs-docs:rel:doc#b->a", sym2, _SYM1, "calls", 0.9, _DOC1),
+            ("urn:testpilot:fs-docs:rel:doc#a->b", _SYM1, sym2, "calls", 0.9, _DOC1),
+            # 重复 (source,target) 不同 urn：DISTINCT 后只算一条
+            ("urn:testpilot:fs-docs:rel:doc#dup", _SYM1, sym2, "calls", 0.9, _DOC1),
+            ("urn:testpilot:fs-docs:rel:doc#renamed", _SYM1, sym2,
+             "renamed_to", 0.9, _DOC1),
+        ],
+    )
+    store.conn.commit()  # 先闭合手工事务，replace 才能开自己的 BEGIN
+    # case-relations scope 行：kind 不同，绝不混入 calls 边
+    store.replace_case_relations(RELATION_SCOPE_URN, [_rel(_FR1)])
+
+    edges = store.list_calls_edges()
+    # 只含 calls、DISTINCT 去重、全排序（source 再 target）
+    assert [(e.source_urn, e.target_urn) for e in edges] == [
+        (_SYM1, sym2),
+        (sym2, _SYM1),
+    ]
+
+
 def test_get_relation_scope_guard(store):
     store.replace_case_relations(RELATION_SCOPE_URN, [_rel(_FR1)])
     got = store.get_case_relation(case_relation_urn(
